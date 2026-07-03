@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jaxpe"
+description = "Normalizing-flow-enhanced gradient MCMC in JAX, with gravitational-wave parameter estimation as the flagship application"
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "Prayush Kumar", email = "prayush@icts.res.in" }]
+requires-python = ">=3.10"
+dynamic = ["version"]
+dependencies = [
+    "jax>=0.4.30",
+    "equinox>=0.11",
+    "flowjax>=17",
+    "optax>=0.2",
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "corner",
+]
+
+[project.optional-dependencies]
+gwdata = ["gwpy", "gwosc"]
+dev = ["pytest", "ruff"]
+
+[tool.setuptools.packages.find]
+include = ["jaxpe*"]
+
+[tool.setuptools_scm]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
