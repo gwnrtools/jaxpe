@@ -7,6 +7,6 @@ try:
 except PackageNotFoundError:
     __version__ = "0.0.0+unknown"
 
-from . import core, diagnostics, flows, kernels, sampler
+from . import core, diagnostics, flows, gw, kernels, sampler
 
-__all__ = ["core", "kernels", "flows", "sampler", "diagnostics", "__version__"]
+__all__ = ["core", "kernels", "flows", "sampler", "diagnostics", "gw", "__version__"]
