@@ -25,6 +25,7 @@ from ..flows import fit_flow, make_flow
 from ..kernels import (
     TARGET_ACCEPTANCE,
     adapted_step_size,
+    ensemble_cov,
     ensemble_scale,
     run_chains,
     with_updates,
@@ -168,12 +169,16 @@ class Sampler:
             buffer = new_samples if buffer is None else jnp.concatenate([buffer, new_samples])
             buffer = buffer[-cfg.buffer_size:]
 
-            if cfg.adapt_step_size:
+            # Unadjusted kernels (ULD) always report acceptance 1: skip step-size targeting.
+            if cfg.adapt_step_size and type(kernel).has_accept_prob:
                 kernel = with_updates(
                     kernel, step_size=adapted_step_size(kernel.step_size, acc, target)
                 )
             if cfg.adapt_scale:
-                kernel = with_updates(kernel, scale=ensemble_scale(buffer))
+                if hasattr(kernel, "scale"):
+                    kernel = with_updates(kernel, scale=ensemble_scale(buffer))
+                elif hasattr(kernel, "cov") and getattr(kernel, "metric_fn", None) is None:
+                    kernel = with_updates(kernel, cov=ensemble_cov(buffer))
 
             flow, losses = fit_flow(
                 k_fit, flow, buffer, n_epochs=cfg.n_epochs,

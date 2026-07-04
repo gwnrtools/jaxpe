@@ -13,6 +13,8 @@ import pytest
 from jaxpe.kernels import (
     HMC,
     MALA,
+    MMALA,
+    ULD,
     RandomWalk,
     adapted_step_size,
     ensemble_scale,
@@ -38,10 +40,18 @@ KERNELS = [
     RandomWalk(step_size=0.35),
     MALA(step_size=0.5),
     HMC(step_size=0.35, n_leapfrog=8),
+    # exact constant metric: near-ideal preconditioning, large steps possible
+    MMALA(step_size=1.2, metric_fn=lambda x: COV_INV),
+    # constant dense proposal covariance (dense-mass MALA path)
+    MMALA(step_size=1.2, cov=COV),
 ]
 
 
-@pytest.mark.parametrize("kernel", KERNELS, ids=lambda k: type(k).__name__)
+@pytest.mark.parametrize(
+    "kernel",
+    KERNELS,
+    ids=["RandomWalk", "MALA", "HMC", "MMALA-metric", "MMALA-cov"],
+)
 def test_kernel_recovers_gaussian_moments(kernel):
     key = jax.random.PRNGKey(0)
     key_init, key_run = jax.random.split(key)
@@ -88,6 +98,28 @@ def test_adaptation_reaches_target():
     assert 0.4 < float(acc) < 0.75, f"final acceptance {float(acc)}"
     scale = ensemble_scale(xs)
     np.testing.assert_allclose(scale, STD, rtol=0.4)
+
+
+def test_uld_recovers_gaussian_moments():
+    """Unadjusted kinetic Langevin: correct to O(eps^2); test with loose tolerances."""
+    key = jax.random.PRNGKey(5)
+    key_init, key_run = jax.random.split(key)
+    n_chains, n_steps, burn = 64, 4000, 1000
+
+    kernel = ULD(step_size=0.08, friction=1.5, scale=STD)
+    x0 = jax.random.normal(key_init, (n_chains, N_DIM)) + MEAN
+    _, xs, _, infos = run_chains(key_run, kernel, logp, x0, n_steps)
+    assert float(jnp.mean(infos.accepted)) == 1.0  # no MH step
+
+    samples = xs[burn:].reshape(-1, N_DIM)
+    std = np.asarray(STD)
+    mean_err = np.abs(np.asarray(samples.mean(0) - MEAN))
+    assert np.all(mean_err < 0.25 * std), f"mean error {mean_err}"
+    cov_est = np.cov(np.asarray(samples).T)
+    cov_tol = 0.3 * np.outer(std, std)
+    assert np.all(np.abs(cov_est - np.asarray(COV)) < cov_tol), (
+        f"cov error\n{cov_est - np.asarray(COV)}"
+    )
 
 
 def test_run_chains_thinning_shape():

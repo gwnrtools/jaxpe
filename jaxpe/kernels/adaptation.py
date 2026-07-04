@@ -30,6 +30,14 @@ def ensemble_scale(xs, floor: float = 1e-8):
     return jnp.maximum(std, floor)
 
 
+def ensemble_cov(xs, jitter: float = 1e-6):
+    """Dense sample covariance across an ensemble, regularized for Cholesky safety."""
+    flat = xs.reshape(-1, xs.shape[-1])
+    cov = jnp.cov(flat.T)
+    cov = jnp.atleast_2d(cov)
+    return cov + jitter * jnp.trace(cov) / cov.shape[0] * jnp.eye(cov.shape[0], dtype=cov.dtype)
+
+
 def with_updates(kernel, **updates):
     """Return a copy of ``kernel`` with the given array fields replaced."""
     names = list(updates.keys())

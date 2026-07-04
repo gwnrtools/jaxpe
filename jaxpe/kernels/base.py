@@ -11,7 +11,7 @@ once, which is what makes many-chain GPU sampling cheap.
 
 from collections.abc import Callable
 from functools import partial
-from typing import Any, NamedTuple
+from typing import Any, ClassVar, NamedTuple
 
 import equinox as eqx
 import jax
@@ -36,6 +36,7 @@ class Kernel(eqx.Module):
     """Base class; subclasses implement ``init`` and ``step`` as pure functions."""
 
     needs_gradient: eqx.AbstractClassVar[bool]
+    has_accept_prob: ClassVar[bool] = True  # False for unadjusted (no-MH) kernels
 
     def init(self, x, logp_fn: LogProbFn) -> KernelState:
         if self.needs_gradient:
