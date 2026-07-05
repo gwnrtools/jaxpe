@@ -35,6 +35,7 @@ from ..kernels import (
 @dataclass
 class GlobalLocalConfig:
     n_chains: int = 128
+    n_prelim_loops: int = 2  # local-only warmup loops; samples are NOT buffered
     n_training_loops: int = 12
     n_production_loops: int = 6
     n_local_steps: int = 100
@@ -72,6 +73,27 @@ class SamplerResults:
 
     def flat(self):
         return self.samples.reshape(-1, self.samples.shape[-1])
+
+
+def best_of_prior_init(key, problem, n_chains: int, n_draws: int = 20_000,
+                       batch_size: int = 256, top_frac: float = 0.05):
+    """Chain initialization for needle-in-haystack posteriors: best of many prior draws.
+
+    Evaluates the log-posterior on ``n_draws`` prior samples in vmapped batches (cheap
+    on GPU), keeps the top ``top_frac`` fraction, and picks ``n_chains`` of those at
+    random — the random subsample (rather than strict top-k) preserves diversity, so
+    degenerate/secondary modes with comparable likelihood all get seeded.
+    """
+    key_draw, key_pick = jax.random.split(key)
+    y = problem.sample_unconstrained(key_draw, n_draws)
+    eval_batch = jax.jit(jax.vmap(problem.log_posterior))
+    logps = jnp.concatenate(
+        [eval_batch(y[i : i + batch_size]) for i in range(0, n_draws, batch_size)]
+    )
+    n_top = max(n_chains, int(top_frac * n_draws))
+    top = jnp.argsort(logps)[-n_top:]
+    pick = jax.random.choice(key_pick, top, (n_chains,), replace=False)
+    return y[pick]
 
 
 @eqx.filter_jit
@@ -155,8 +177,9 @@ class Sampler:
         buffer = None
         local_acc, global_acc, flow_losses = [], [], []
 
-        # ---- training phase ----
-        for _ in range(cfg.n_training_loops):
+        # ---- training phase (first n_prelim_loops are local-only warmup) ----
+        for loop in range(cfg.n_prelim_loops + cfg.n_training_loops):
+            warmup = loop < cfg.n_prelim_loops
             key, k_loc, k_fit, k_glob = jax.random.split(key, 4)
             states, xs, logps, infos = run_chains(
                 k_loc, kernel, self.logp_fn, x0, cfg.n_local_steps, thin=cfg.local_thin
@@ -166,8 +189,9 @@ class Sampler:
             local_acc.append(acc)
 
             new_samples = xs.reshape(-1, self.n_dim)
-            buffer = new_samples if buffer is None else jnp.concatenate([buffer, new_samples])
-            buffer = buffer[-cfg.buffer_size:]
+            if not warmup:
+                buffer = new_samples if buffer is None else jnp.concatenate([buffer, new_samples])
+                buffer = buffer[-cfg.buffer_size:]
 
             # Unadjusted kernels (ULD) always report acceptance 1: skip step-size targeting.
             if cfg.adapt_step_size and type(kernel).has_accept_prob:
@@ -175,10 +199,14 @@ class Sampler:
                     kernel, step_size=adapted_step_size(kernel.step_size, acc, target)
                 )
             if cfg.adapt_scale:
+                scale_src = new_samples if buffer is None else buffer
                 if hasattr(kernel, "scale"):
-                    kernel = with_updates(kernel, scale=ensemble_scale(buffer))
+                    kernel = with_updates(kernel, scale=ensemble_scale(scale_src))
                 elif hasattr(kernel, "cov") and getattr(kernel, "metric_fn", None) is None:
-                    kernel = with_updates(kernel, cov=ensemble_cov(buffer))
+                    kernel = with_updates(kernel, cov=ensemble_cov(scale_src))
+
+            if warmup:
+                continue
 
             flow, losses = fit_flow(
                 k_fit, flow, buffer, n_epochs=cfg.n_epochs,

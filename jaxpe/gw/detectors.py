@@ -84,12 +84,18 @@ def _wave_frame(ra, dec, psi, gmst):
     return x, y
 
 
+def _quad(a, D, b):
+    """a^T D b via broadcast-and-sum: tiny 3x3 contractions must not hit cuBLAS
+    (float64 cublasLt autotuning has no valid configs on some small GPUs)."""
+    return jnp.sum(a[..., :, None] * D * b[..., None, :], axis=(-2, -1))
+
+
 def antenna_pattern(det: Detector, ra, dec, psi, gmst):
     """(F+, Fx) response of ``det`` for a source at (ra, dec) with polarization angle psi."""
     D = jnp.asarray(det.response)
     x, y = _wave_frame(ra, dec, psi, gmst)
-    f_plus = x @ D @ x - y @ D @ y
-    f_cross = x @ D @ y + y @ D @ x
+    f_plus = _quad(x, D, x) - _quad(y, D, y)
+    f_cross = _quad(x, D, y) + _quad(y, D, x)
     return f_plus, f_cross
 
 
@@ -103,7 +109,7 @@ def time_delay_from_geocenter(det: Detector, ra, dec, gmst):
             jnp.sin(dec),
         ]
     )
-    return -jnp.dot(jnp.asarray(det.location), e_src) / C_SI
+    return -jnp.sum(jnp.asarray(det.location) * e_src) / C_SI
 
 
 def gmst_from_gps(gps_time: float) -> float:

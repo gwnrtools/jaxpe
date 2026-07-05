@@ -19,7 +19,7 @@ import numpy as np
 from jaxpe.diagnostics import corner_plot, effective_sample_size, split_rhat
 from jaxpe.gw import ToyChirp, bbh_priors, make_injection
 from jaxpe.kernels import MALA
-from jaxpe.sampler import GlobalLocalConfig, Sampler
+from jaxpe.sampler import GlobalLocalConfig, Sampler, best_of_prior_init
 
 OUT = Path(__file__).parent / "output"
 
@@ -54,13 +54,19 @@ def main(noise_seed=42, n_chains=80):
     )
     problem = like.problem(prior)
 
+    # schedule notes for a concentrated 9-dim posterior: local-only warmup keeps
+    # burn-in junk out of the flow's training buffer, and the buffer window holds only
+    # the ~8 most recent loops so the flow tracks the chains as they concentrate
+    per_loop = n_chains * (100 // 5)
     cfg = GlobalLocalConfig(
         n_chains=n_chains,
-        n_training_loops=15,
+        n_prelim_loops=3,
+        n_training_loops=30,
         n_production_loops=8,
         n_local_steps=100,
         n_global_steps=50,
         local_thin=5,
+        buffer_size=8 * per_loop,
         flow_layers=8,
         nn_width=64,
         n_epochs=6,
@@ -69,7 +75,12 @@ def main(noise_seed=42, n_chains=80):
     sampler = Sampler(MALA(step_size=0.05), problem=problem, config=cfg)
 
     t0 = time.time()
-    res = sampler.run(jax.random.PRNGKey(1))
+    # needle-in-haystack initialization: best of many vmapped prior draws seeds every
+    # comparable-likelihood mode (e.g. the two-detector sky reflection)
+    key = jax.random.PRNGKey(1)
+    x0 = best_of_prior_init(key, problem, cfg.n_chains, n_draws=20_000)
+    print(f"init: best-of-prior in {time.time() - t0:.1f} s")
+    res = sampler.run(key, x0=x0)
     dt_run = time.time() - t0
 
     phys = sampler.to_physical(res.samples)
@@ -81,8 +92,9 @@ def main(noise_seed=42, n_chains=80):
     print(f"production samples: {flat.shape[0]}")
     print("R-hat:", dict(zip(names, np.round(split_rhat(phys), 3))))
     print("ESS:", dict(zip(names, np.round(effective_sample_size(phys)))))
-    print("local acc (last):", f"{res.local_acceptance[-1]:.2f}",
-          " global acc (last):", f"{res.global_acceptance[-1]:.2f}")
+    print("local acc:", " ".join(f"{a:.2f}" for a in res.local_acceptance))
+    print("global acc:", " ".join(f"{a:.2f}" for a in res.global_acceptance))
+    print("flow loss:", " ".join(f"{l:.1f}" for l in res.flow_losses))
     print("\nposterior (median [16%, 84%]) vs truth:")
     for i, n in enumerate(names):
         q16, q50, q84 = np.percentile(flat[:, i], [16, 50, 84])

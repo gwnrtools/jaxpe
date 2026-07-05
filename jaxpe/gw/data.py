@@ -81,7 +81,8 @@ def make_injection(
             d = d + simulate_noise_fd(rng, psds[name], duration)
         data_fd[name] = d
     like.data_fd.update(data_fd)
-    like._cache.clear()  # rebuild static arrays with the injected data
+    like._cache.clear()
+    like._static()  # eager rebuild with the injected data (never inside a trace)
     return like
 
 

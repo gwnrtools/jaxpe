@@ -69,6 +69,11 @@ class NetworkLikelihood:
     accumulate_f64: bool = True
     _cache: dict = field(default_factory=dict, repr=False)
 
+    def __post_init__(self):
+        # build the constant cache eagerly, OUTSIDE any jit trace: constants created
+        # during tracing are tracers, and caching those leaks them into later traces
+        self._static()
+
     def _static(self):
         """Precomputed jnp constants (built once, reused across traces)."""
         if not self._cache:
