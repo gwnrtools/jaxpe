@@ -5,7 +5,7 @@ remote_theme: just-the-docs/just-the-docs
 plugins:
   - jekyll-remote-theme
 
-url: https://jaxpe.github.io
+url: https://gwnrtools.github.io
 baseurl: /jaxpe
 
 search_enabled: true
@@ -13,12 +13,12 @@ heading_anchors: true
 
 aux_links:
   jaxpe on GitHub:
-    - https://github.com/jaxpe/jaxpe
+    - https://github.com/gwnrtools/jaxpe
 aux_links_new_tab: true
 
 footer_content: >-
   Copyright &copy; Prayush Kumar. Distributed under the
-  <a href="https://github.com/jaxpe/jaxpe/blob/main/LICENSE">MIT license</a>.
+  <a href="https://github.com/gwnrtools/jaxpe/blob/master/LICENSE">MIT license</a>.
 
 # Don't build the site out of package sources, build products or notebooks.
 exclude:
