@@ -1,4 +1,4 @@
-"""Hamiltonian Monte Carlo (HMC) with a fixed-length leapfrog trajectory.
+r"""Hamiltonian Monte Carlo (HMC) with a fixed-length leapfrog trajectory.
 
 Hamiltonian Monte Carlo (HMC) reformulates the statistical sampling problem as a 
 classical mechanics simulation. To efficiently explore the high-dimensional, highly 

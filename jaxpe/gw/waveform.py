@@ -1,4 +1,4 @@
-"""Waveform interface and a built-in PN-inspired time-domain toy chirp.
+r"""Waveform interface and a built-in PN-inspired time-domain toy chirp.
 
 The engine-facing contract is ``WaveformModel``: a callable
 

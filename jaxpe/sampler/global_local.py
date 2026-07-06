@@ -1,4 +1,4 @@
-"""Global-Local Sampler with Normalizing Flows.
+r"""Global-Local Sampler with Normalizing Flows.
 
 Standard local MCMC kernels (like HMC or MALA) are extraordinarily efficient at 
 exploring the local geometry of a single posterior mode. However, the true 

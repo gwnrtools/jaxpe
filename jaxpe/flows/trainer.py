@@ -1,4 +1,4 @@
-"""Maximum-Likelihood Training for Normalizing Flows.
+r"""Maximum-Likelihood Training for Normalizing Flows.
 
 During the training phase of the Global-Local sampler, we continually update the
 Normalizing Flow to match the empirical distribution of the MCMC samples.
