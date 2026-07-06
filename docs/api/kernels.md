@@ -28,7 +28,7 @@ We elevate the $$D$$-dimensional parameter space of our gravitational-wave probl
 The mechanical terms map to the statistical problem as follows:
 1. **Position ($$\theta^\mu$$)**: The actual astrophysical parameters we wish to infer (e.g., chirp mass, spin).
 2. **Momentum ($$p_\mu$$)**: Auxiliary variables artificially introduced to grant the system "inertia," allowing it to glide coherently through the parameter space.
-3. **Potential Energy ($$U(\theta)$$)**: Defined strictly as the negative log-posterior, $$U(\theta) = -\log \pi(\theta|d)$$. The high-probability peaks of the posterior become deep gravitational wells that attract the particle.
+3. **Potential Energy ($$U(\theta)$$)**: Defined strictly as the negative log-posterior, $$U(\theta) = -\log \pi(\theta \mid d)$$. The high-probability peaks of the posterior become deep gravitational wells that attract the particle.
 4. **Kinetic Energy ($$K(p)$$)**: A quadratic form defining the energy of the auxiliary momenta, parameterized by a positive-definite inverse mass matrix $$g^{\mu\nu}$$.
 
 We define the Hamiltonian scalar function $$H: T^*\mathcal{M} \to \mathbb{R}$$ as the sum of these energies:
@@ -95,7 +95,7 @@ $$
 \frac{\partial \rho}{\partial t} = \partial_\mu \left( \frac{1}{2} g^{\mu\nu} \partial_\nu \rho + \frac{1}{2} \rho g^{\mu\nu} \partial_\nu U \right)
 $$
 
-Imposing stationarity ($$\partial_t \rho = 0$$), we trivially recover that the equilibrium distribution is exactly the target posterior $$\rho \propto \exp(-U(\theta)) = \pi(\theta|d)$$.
+Imposing stationarity ($$\partial_t \rho = 0$$), we trivially recover that the equilibrium distribution is exactly the target posterior $$\rho \propto \exp(-U(\theta)) = \pi(\theta \mid d)$$.
 
 This overdamped continuous diffusion is provided natively by the [`MALA`](#mala) kernel:
 

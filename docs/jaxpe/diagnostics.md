@@ -77,7 +77,7 @@ ess_values = effective_sample_size(chains)
 
 ## High-Dimensional Visualization
 
-The `diagnostics` module leverages [corner.py](https://corner.readthedocs.io) to project the high-dimensional measure $$\pi(\theta^\mu|d)$$ onto 1D and 2D marginal distributions. These visual projections remain the most intuitive mechanism for exposing the complex Riemann curvature (e.g., severe mass-spin degeneracies) of the physical parameter manifold.
+The `diagnostics` module leverages [corner.py](https://corner.readthedocs.io) to project the high-dimensional measure $$\pi(\theta^\mu \mid d)$$ onto 1D and 2D marginal distributions. These visual projections remain the most intuitive mechanism for exposing the complex Riemann curvature (e.g., severe mass-spin degeneracies) of the physical parameter manifold.
 
 ## API Reference
 

@@ -64,7 +64,7 @@ x = bijection.inverse(theta)
 ## `InferenceProblem`
 
 The `InferenceProblem` class acts as the grand geometrical orchestrator. It encapsulates:
-1. The physical log-likelihood function $$\ln \mathcal{L}(d|\theta^\mu)$$.
+1. The physical log-likelihood function $$\ln \mathcal{L}(d \mid \theta^\mu)$$.
 2. The joint physical prior density $$\pi_{\text{prior}}(\theta^\mu)$$.
 3. The composite diffeomorphism $$x^\mu = f^\mu(\theta^\nu)$$.
 

@@ -29,7 +29,7 @@ $$
 q_\phi(x) = \left( f_{\phi*} p \right)(x) = p(f_\phi^{-1}(x)) \left| \det \left( \frac{\partial (f_\phi^{-1})^\mu}{\partial x^\nu} \right) \right|
 $$
 
-Because we must evaluate both the forward transformation $$f_\phi$$ and the Jacobian determinant $$|\det \partial_\nu (f_\phi^{-1})^\mu|$$ millions of times, flow models strictly constrain the neural network architecture to ensure the Jacobian matrix is lower-triangular. This reduces the determinant computation from $$O(D^3)$$ to $$O(D)$$.
+Because we must evaluate both the forward transformation $$f_\phi$$ and the Jacobian determinant $$\lvert \det \partial_\nu (f_\phi^{-1})^\mu \rvert$$ millions of times, flow models strictly constrain the neural network architecture to ensure the Jacobian matrix is lower-triangular. This reduces the determinant computation from $$O(D^3)$$ to $$O(D)$$.
 
 ### Rational-Quadratic Spline Coupling Layers
 
