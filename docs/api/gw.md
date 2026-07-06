@@ -87,7 +87,15 @@ $$
 u^\beta \nabla_\beta u^\alpha = f^\alpha
 $$
 
-Solving this tracking differential equation allows us to map Extreme Mass Ratio Inspirals (EMRIs) with astonishing precision.
+Solving this tracking differential equation allows us to map Extreme Mass Ratio Inspirals (EMRIs) with astonishing precision. In `jaxpe`, we provide the ESIGMA model for EMRIs, which can be instantiated as:
+
+```python
+from jaxpe.gw.esigma import ESIGMAInspiral
+
+waveform = ESIGMAInspiral()
+h_plus, h_cross = waveform(params, times)
+```
+
 
 ### Numerical Relativity (NR)
 
@@ -113,7 +121,7 @@ $$
 d(t) = F^+(\alpha_s, \delta_s, \psi_s) h_+(t; \boldsymbol{\theta}) + F^\times(\alpha_s, \delta_s, \psi_s) h_\times(t; \boldsymbol{\theta}) + n(t)
 $$
 
-where \\(F^{+,\times}\\) are the antenna pattern functions of the detector, dependent on the source right ascension \\(\alpha_s\\), declination \\(\delta_s\\), and polarization angle \\(\psi_s\\). Assuming the detector noise \\(n(t)\\) is stationary and Gaussian with a one-sided power spectral density \\(S_n(f)\\), the probability of observing data \\(d\\) given our source parameters \\(\theta^\mu\\) is governed by the Whittle likelihood [4]. 
+where \\(F^{+,\times}\\) are the antenna pattern functions of the detector, dependent on the source right ascension \\(\alpha_s\\), declination \\(\delta_s\\), and polarization angle \\(\psi_s\\). Assuming the detector noise \\(n(t)\\) is stationary and Gaussian with a one-sided power spectral density \\(S_n(f)\\), the probability of observing data \\(d\\) given our source parameters \\(\theta^\mu\\) is governed by the Whittle likelihood [4].
 
 $$
 \ln \mathcal{L}(d | \theta^\mu) \propto -\frac{1}{2} (d - h(\theta^\mu) | d - h(\theta^\mu))
@@ -125,9 +133,36 @@ $$
 (a | b) = 4 \Re \int_{0}^{\infty} \frac{\tilde{a}^*(f) \tilde{b}(f)}{S_n(f)} df
 $$
 
+In `jaxpe`, this entire likelihood framework is robustly encapsulated by the [`NetworkLikelihood`](#networklikelihood) class, which projects the waveforms onto a network of [`Detector`](#detector) instances:
+
+```python
+from jaxpe.gw.likelihood import NetworkLikelihood
+from jaxpe.gw.detectors import Detector
+
+H1 = Detector(name="H1", ...)
+likelihood = NetworkLikelihood(detectors=[H1], waveform=waveform, data=d_fd, psd=S_n)
+log_L = likelihood.log_likelihood(params)
+```
+
 ### `make_injection` & GW Priors
 
 The module provides tools to construct mock injections and evaluate standard Binary Black Hole (BBH) priors over the parameter manifold, strictly validated in robust `float64` precision to avoid catastrophic numerical cancellations during the evaluation of the highly oscillatory frequency-domain likelihoods.
+
+## API Reference
+
+### `ESIGMAInspiral`
+**`jaxpe.gw.esigma.ESIGMAInspiral`**
+Computes Extreme Mass Ratio Inspiral (EMRI) waveforms using the ESIGMA self-force model. Generates the strain components \\(h_+\\) and \\(h_\times\\) given a dictionary of binary parameters.
+
+### `Detector`
+**`jaxpe.gw.detectors.Detector(NamedTuple)`**
+Represents a gravitational-wave interferometer (e.g., LIGO Hanford `H1`). Contains properties like the geographic location, arm geometry, and computes antenna pattern functions.
+
+### `NetworkLikelihood`
+**`jaxpe.gw.likelihood.NetworkLikelihood`**
+Evaluates the multi-detector Whittle likelihood in the frequency domain. It handles waveform generation, detector projection (time delays and antenna patterns), and noise-weighted inner products.
+
+---
 
 ### REFERENCES
 

@@ -51,7 +51,15 @@ $$
 \frac{\partial \theta^i}{\partial x^i} = \frac{(\theta^i - a)(b - \theta^i)}{b - a}
 $$
 
-In the log-domain required by the MCMC energy potential \\(U(x) = -\log \pi_X(x)\\), this equates to adding the log-determinant \\(\sum_i \ln | \partial_i \theta^i |\\) to the physical log-posterior. The `jaxpe.core` module handles these adjustments automatically, ensuring that the gradient covector \\(\partial_\mu U(x)\\) perfectly aligns with the warped geometry of \\(\mathcal{X}\\).
+The `jaxpe.core` module handles these adjustments automatically, ensuring that the gradient covector \\(\partial_\mu U(x)\\) perfectly aligns with the warped geometry of \\(\mathcal{X}\\). In code, this geometry is encapsulated by subclasses of [`jaxpe.core.transforms.Bijection`](#bijection), such as `Interval` and `Identity`:
+
+```python
+from jaxpe.core.transforms import Interval
+
+# Transform bounded parameter [0, 1] to unconstrained real line
+bijection = Interval(low=0.0, high=1.0)
+x = bijection.inverse(theta)
+```
 
 ## `InferenceProblem`
 
@@ -61,6 +69,29 @@ The `InferenceProblem` class acts as the grand geometrical orchestrator. It enca
 3. The composite diffeomorphism \\(x^\mu = f^\mu(\theta^\nu)\\).
 
 By abstracting away the tedious domain transformations, it presents a pure, infinitely smooth, unconstrained log-density \\(U(x)\\) to the MCMC kernels, allowing the rest of the mathematical machinery to operate in pristine, frictionless elegance.
+
+```python
+from jaxpe.core.problem import InferenceProblem
+
+inference_problem = InferenceProblem(
+    prior=my_prior,
+    log_likelihood=my_likelihood_fn
+)
+unconstrained_samples = inference_problem.sample_unconstrained(key, n=100)
+unconstrained_logp = inference_problem.log_posterior(unconstrained_samples)
+```
+
+## API Reference
+
+### `InferenceProblem`
+**`jaxpe.core.problem.InferenceProblem(prior, log_likelihood)`**
+Encapsulates the physical prior distribution and the likelihood function, handling the automatic calculation of the target log-density in the unconstrained space (including Jacobian log-determinants).
+
+### `Bijection`
+**`jaxpe.core.transforms.Bijection`**
+The base class for geometric diffeomorphisms (like `Identity`, `Affine`, `Interval`) that seamlessly push parameters to the unconstrained real line while tracking the local volume Jacobian.
+
+---
 
 ### REFERENCES
 

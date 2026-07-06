@@ -59,11 +59,53 @@ This is the foundational theorem that justifies using the discrete samples of ou
 
 The `Sampler` class rigorously orchestrates these transition kernels in a mathematically synchronized loop. Under the hood, it leverages JAX's `lax.scan` primitive to compile the alternating application of \\(T_{\text{local}}\\) and \\(T_{\text{global}}\\) into a monolithic XLA graph, resulting in orders of magnitude speedups on TPU/GPU hardware.
 
+This orchestration logic is encapsulated entirely by the [`Sampler`](#sampler) class:
+
+```python
+from jaxpe.sampler.global_local import Sampler
+
+sampler = Sampler(
+    problem=inference_problem,
+    kernel=local_hmc_kernel,
+    flow=flow_proposal,
+    n_chains=100,
+    n_loop_training=50,
+    n_loop_production=50
+)
+results = sampler.run(key, initial_positions)
+```
+
 ### Initialization and Prior Support
 
 A Markov chain initialized in a vanishingly low probability region (or entirely confined to a single degenerate mode) requires a prohibitively long mixing time to achieve stationarity. 
 
 The `best_of_prior_init` subroutine explicitly remedies this by evaluating the log-likelihood over a massive Monte Carlo batch (e.g., \\(N=10^6\\)) drawn directly from the prior measure \\(p(\theta)\\). By seeding the initial chain states \\(x_{(0)}\\) with the highest-probability candidates, we ensure that the empirical measure of the ensemble immediately populates all valleys of significant support, effectively nullifying the burn-in phase bottleneck.
+
+In `jaxpe`, you can automate this optimal seeding using [`best_of_prior_init`](#best_of_prior_init):
+
+```python
+from jaxpe.sampler.global_local import best_of_prior_init
+
+initial_positions = best_of_prior_init(
+    key, 
+    n_chains=100, 
+    prior=inference_problem.prior, 
+    logp_fn=inference_problem.log_prob, 
+    n_samples=100_000
+)
+```
+
+## API Reference
+
+### `Sampler`
+**`jaxpe.sampler.global_local.Sampler(problem, kernel, flow, n_chains, ...)`**
+The grand orchestrator of the global-local MCMC. Manages the alternating JAX `lax.scan` loops between the local transition kernel and the global Normalizing Flow transitions.
+
+### `best_of_prior_init`
+**`jaxpe.sampler.global_local.best_of_prior_init(key, n_chains, prior, logp_fn, n_samples)`**
+Evaluates `n_samples` from the prior and returns the `n_chains` points with the highest log-posterior density, circumventing long burn-in phases.
+
+---
 
 ### REFERENCES
 

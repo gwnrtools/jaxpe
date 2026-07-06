@@ -46,14 +46,24 @@ Instead, we employ the Leapfrog (Verlet) integrator, which is explicitly symplec
 $$
 p_\mu(t + \Delta t/2) = p_\mu(t) - \frac{\Delta t}{2} \partial_\mu U(\theta(t))
 $$
+
 $$
 \theta^\mu(t + \Delta t) = \theta^\mu(t) + \Delta t \, g^{\mu\nu} p_\nu(t + \Delta t/2)
 $$
+
 $$
 p_\mu(t + \Delta t) = p_\mu(t + \Delta t/2) - \frac{\Delta t}{2} \partial_\mu U(\theta(t + \Delta t))
 $$
 
 Because this integrator preserves phase-space volume, the only source of error is the truncation error in the energy conservation \\(\mathcal{O}(\Delta t^2)\\). We correct for this small discretization error by wrapping the trajectory in a final Metropolis-Hastings acceptance step.
+
+The [`HMC`](#hmc) kernel in `jaxpe` encapsulates this deterministic trajectory integration:
+
+```python
+from jaxpe.kernels.hmc import HMC
+
+kernel = HMC(step_size=1e-2, n_leapfrog=10)
+```
 
 ## Langevin Diffusion and the Fokker-Planck Equation
 
@@ -73,6 +83,14 @@ $$
 
 Imposing stationarity (\\(\partial_t \rho = 0\\)), we trivially recover that the equilibrium distribution is exactly the target posterior \\(\rho \propto \exp(-U(\theta)) = \pi(\theta|d)\\).
 
+This overdamped continuous diffusion is provided natively by the [`MALA`](#mala) kernel:
+
+```python
+from jaxpe.kernels.mala import MALA
+
+kernel = MALA(step_size=1e-3)
+```
+
 ### Manifold MALA (`mMALA`)
 
 In highly curved posteriors, using a globally constant metric \\(g^{\mu\nu}\\) is severely sub-optimal. Manifold MALA (mMALA) promotes the mass matrix to a position-dependent Riemannian metric tensor \\(g_{\mu\nu}(\theta)\\) (often the Fisher Information Matrix). The generalized Langevin SDE must now include corrections from the Levi-Civita connection (the Christoffel symbols \\(\Gamma^\mu_{\alpha\beta}\\)) to remain covariant:
@@ -90,11 +108,36 @@ ULD restores the conjugate momenta to the diffusion process, adding a continuous
 $$
 d\theta^\mu_t = g^{\mu\nu} p_{\nu, t} dt
 $$
+
 $$
 dp_{\mu, t} = -\partial_\mu U(\theta_t) dt - \Gamma^\alpha_\mu p_{\alpha, t} dt + \sqrt{2 \Gamma_{\mu\alpha}} dW^\alpha_t
 $$
 
 This continuous momentum refreshment robustly navigates strongly correlated spaces without the strict requirement of tuning HMC trajectory lengths.
+
+In `jaxpe`, this momentum-restoring process is available via the [`ULD`](#uld) transition kernel:
+
+```python
+from jaxpe.kernels.uld import ULD
+
+kernel = ULD(step_size=1e-2, friction=1.0)
+```
+
+## API Reference
+
+### `HMC`
+**`jaxpe.kernels.hmc.HMC(step_size: float, n_leapfrog: int, scale=None)`**
+Hamiltonian Monte Carlo transition kernel. Simulates deterministic Hamilton's equations over `n_leapfrog` steps using the symplectic Leapfrog integrator.
+
+### `MALA`
+**`jaxpe.kernels.mala.MALA(step_size: float, scale=None)`**
+Metropolis-Adjusted Langevin Algorithm. Simulates overdamped Langevin diffusion in the posterior energy landscape.
+
+### `ULD`
+**`jaxpe.kernels.uld.ULD(step_size: float, friction: float, scale=None)`**
+Underdamped Langevin Dynamics. Simulates Langevin diffusion while preserving conjugate momenta, governed by a continuous friction coefficient.
+
+---
 
 ### REFERENCES
 

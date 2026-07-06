@@ -38,6 +38,7 @@ The workhorse of `jaxpe` is an autoregressive architecture parameterized by Rati
 $$
 y^A = x^A
 $$
+
 $$
 y^I = g_\theta(x^I ; x^A)
 $$
@@ -49,6 +50,14 @@ y = \frac{\alpha_2 x^2 + \alpha_1 x + \alpha_0}{\beta_2 x^2 + \beta_1 x + \beta_
 $$
 
 The neural network outputs the knot coordinates and boundary derivatives, fixing the coefficients \\(\alpha_i, \beta_i\\) to ensure exact \\(C^1\\) continuity. The Jacobian of this coupling layer is block-lower-triangular, \\(\partial y^\mu / \partial x^\nu = \begin{pmatrix} \delta^A_B & 0 \\ \partial_B g^I & \partial_J g^I \end{pmatrix}\\), rendering its determinant trivially equal to \\(\prod_I \partial_I g^I\\).
+
+In `jaxpe`, this exact architecture is constructed via the [`make_flow`](#make_flow) function, which returns a parameterized [`FlowProposal`](#flowproposal):
+
+```python
+from jaxpe.flows.interface import make_flow
+
+flow = make_flow(n_features=15, n_layers=8, hidden_size=64)
+```
 
 ### Continuous Normalizing Flows (CNFs)
 
@@ -83,6 +92,30 @@ $$
 $$
 
 The `flows` module wraps this rigorous variational machinery using [flowjax](https://github.com/danielward27/flowjax), executing JAX-native training loops that rapidly adapt the diffeomorphic weights \\(\phi\\) on GPU accelerators using stochastic gradient descent optimizers like Adam.
+
+This training loop is robustly executed by the [`fit_flow`](#fit_flow) function:
+
+```python
+from jaxpe.flows.trainer import fit_flow
+
+trained_flow, losses = fit_flow(key, flow, samples, learning_rate=1e-3, max_epochs=100)
+```
+
+## API Reference
+
+### `make_flow`
+**`jaxpe.flows.interface.make_flow(n_features, n_layers, ...)`**
+Constructs a Normalizing Flow architecture using Rational-Quadratic Splines. Returns a parameterized `FlowProposal` ready for training.
+
+### `FlowProposal`
+**`jaxpe.flows.interface.FlowProposal`**
+An `equinox.Module` encapsulating the forward diffeomorphism, inverse mapping, and probability evaluation for the Normalizing Flow.
+
+### `fit_flow`
+**`jaxpe.flows.trainer.fit_flow(key, flow, samples, ...)`**
+Executes the variational training loop over the buffered MCMC samples using Optax, minimizing the Kullback-Leibler divergence.
+
+---
 
 ### REFERENCES
 
