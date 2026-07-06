@@ -31,9 +31,9 @@ $$
 d(t) = h(t; \boldsymbol{\theta}) + n(t)
 $$
 
-Here, \(n(t)\) represents the stochastic background noise, and \(\boldsymbol{\theta}\) denotes the multi-dimensional parameter vector characterizing the source—its chirp mass, its luminosity distance, and so forth.
+Here, \\(n(t)\\) represents the stochastic background noise, and \\(\boldsymbol{\theta}\\) denotes the multi-dimensional parameter vector characterizing the source—its chirp mass, its luminosity distance, and so forth.
 
-The extraction of \(\boldsymbol{\theta}\) is a rigorous exercise in Bayesian inference. Assuming the detector noise \(n(t)\) is stationary and Gaussian with a one-sided power spectral density (PSD) \(S_n(f)\), we evaluate the Whittle likelihood in the frequency domain [6]. We define the noise-weighted inner product:
+The extraction of \\(\boldsymbol{\theta}\\) is a rigorous exercise in Bayesian inference. Assuming the detector noise \\(n(t)\\) is stationary and Gaussian with a one-sided power spectral density (PSD) \\(S_n(f)\\), we evaluate the Whittle likelihood in the frequency domain [6]. We define the noise-weighted inner product:
 
 $$
 (a | b) = 4 \Re \int_{0}^{\infty} \frac{\tilde{a}^*(f) \tilde{b}(f)}{S_n(f)} df \, ,
@@ -45,13 +45,13 @@ $$
 \mathcal{L}(d | \boldsymbol{\theta}) \propto \exp\left[ -\frac{1}{2} (d - h(\boldsymbol{\theta}) | d - h(\boldsymbol{\theta})) \right]
 $$
 
-Combining this with our prior knowledge \(p(\boldsymbol{\theta})\) via Bayes' theorem yields the posterior distribution we seek:
+Combining this with our prior knowledge \\(p(\boldsymbol{\theta})\\) via Bayes' theorem yields the posterior distribution we seek:
 
 $$
 p(\boldsymbol{\theta} | d) = \frac{\mathcal{L}(d | \boldsymbol{\theta}) p(\boldsymbol{\theta})}{Z}
 $$
 
-where \(Z\) is the Bayesian evidence. But here is the rub: this posterior surface is a 15-dimensional landscape fraught with deep valleys, winding ridges, and isolated peaks. Standard stochastic samplers act like blindfolded hikers, randomly guessing where to step next. In such high dimensions, they simply take too long to find the peaks.
+where \\(Z\\) is the Bayesian evidence. But here is the rub: this posterior surface is a 15-dimensional landscape fraught with deep valleys, winding ridges, and isolated peaks. Standard stochastic samplers act like blindfolded hikers, randomly guessing where to step next. In such high dimensions, they simply take too long to find the peaks.
 
 ### II. GRADIENT-DIRECTED MARKOV CHAIN MONTE CARLO
 
@@ -67,7 +67,7 @@ $$
 U(\boldsymbol{\theta}) = -\log p(\boldsymbol{\theta}|d)
 $$
 
-We then place a frictionless puck (our parameter state) on this landscape and give it a random kick of conjugate momentum \(\mathbf{p}\) with kinetic energy:
+We then place a frictionless puck (our parameter state) on this landscape and give it a random kick of conjugate momentum \\(\mathbf{p}\\) with kinetic energy:
 
 $$
 K(\mathbf{p}) = \frac{1}{2}\mathbf{p}^T \mathbf{M}^{-1} \mathbf{p}
@@ -89,11 +89,11 @@ Because this continuous flow preserves phase-space volume and conserves energy p
 
 ### III. GLOBAL-LOCAL SAMPLING WITH NORMALIZING FLOWS
 
-But what if our landscape has two deep, entirely disconnected valleys separated by an impassable mountain range? A frictionless puck—driven only by local gradients—cannot spontaneously teleport to the other valley. It remains trapped. This is the challenge of multimodal posteriors (like the exact \(\pi\)-phase flip degeneracy in GWs). 
+But what if our landscape has two deep, entirely disconnected valleys separated by an impassable mountain range? A frictionless puck—driven only by local gradients—cannot spontaneously teleport to the other valley. It remains trapped. This is the challenge of multimodal posteriors (like the exact \\(\pi\\)-phase flip degeneracy in GWs). 
 
 To bridge these isolated modes, `jaxpe` orchestrates a "global-local" sampling architecture [9]. While our local HMC explorers map out the individual valleys, a satellite overhead is watching them. This satellite is a Normalizing Flow [10]. 
 
-Think of a Normalizing Flow as molding a simple, structureless block of clay (a standard Gaussian distribution, \(p(\mathbf{z})\)) into an intricate, multi-modal sculpture (the posterior). It achieves this by applying a sequence of invertible, differentiable transformations (diffeomorphisms) \(f_\phi\), parameterized by a neural network. By the fundamental change of variables theorem from multivariate calculus, the exact probability density of any point \(\mathbf{x} = f_\phi(\mathbf{z})\) is rigorously given by:
+Think of a Normalizing Flow as molding a simple, structureless block of clay (a standard Gaussian distribution, \\(p(\mathbf{z})\\)) into an intricate, multi-modal sculpture (the posterior). It achieves this by applying a sequence of invertible, differentiable transformations (diffeomorphisms) \\(f_\phi\\), parameterized by a neural network. By the fundamental change of variables theorem from multivariate calculus, the exact probability density of any point \\(\mathbf{x} = f_\phi(\mathbf{z})\\) is rigorously given by:
 
 $$
 q_\phi(\mathbf{x}) = p(f_\phi^{-1}(\mathbf{x})) \left| \det \mathbf{J}_{f_\phi^{-1}}(\mathbf{x}) \right|
@@ -101,13 +101,13 @@ $$
 
 We train this flow to emulate the target posterior by minimizing the Kullback-Leibler (KL) divergence from the empirical distribution of the MCMC samples to the flow distribution.
 
-Once trained, this flow becomes our teleportation machine. We can instantaneously propose global jumps to new parameters \(\mathbf{y} \sim q_\phi(\mathbf{y})\), completely ignoring where the chain currently is (\(\mathbf{x}\)). To strictly satisfy the principle of detailed balance—ensuring our teleportation doesn't artificially skew the true physics—these jumps are subjected to the Metropolis-Hastings criterion. The acceptance probability \(\alpha\) is:
+Once trained, this flow becomes our teleportation machine. We can instantaneously propose global jumps to new parameters \\(\mathbf{y} \sim q_\phi(\mathbf{y})\\), completely ignoring where the chain currently is (\\(\mathbf{x}\\)). To strictly satisfy the principle of detailed balance—ensuring our teleportation doesn't artificially skew the true physics—these jumps are subjected to the Metropolis-Hastings criterion. The acceptance probability \\(\alpha\\) is:
 
 $$
 \alpha(\mathbf{x} \to \mathbf{y}) = \min\left(1, \frac{\pi(\mathbf{y}|d) q_\phi(\mathbf{x})}{\pi(\mathbf{x}|d) q_\phi(\mathbf{y})}\right)
 $$
 
-Because our flow density \(q_\phi\) is a highly accurate map of the true posterior \(\pi\), the ratio approaches unity. Our explorers can now instantly teleport between isolated degenerate modes with exceptionally high success rates.
+Because our flow density \\(q_\phi\\) is a highly accurate map of the true posterior \\(\pi\\), the ratio approaches unity. Our explorers can now instantly teleport between isolated degenerate modes with exceptionally high success rates.
 
 ### IV. STRUCTURE OF THIS REPOSITORY
 
