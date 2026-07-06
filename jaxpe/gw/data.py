@@ -1,9 +1,23 @@
 """Data handling: simulated noise, injections, and (optional) GWOSC strain.
 
-Everything here is host-side preparation (numpy / gwpy); the output is a
-``NetworkLikelihood`` whose jitted path consumes only static arrays. Injections reuse
-the likelihood's own projection, so a zero-noise injection has lnL(true params) = 0
-identically — the strongest cheap self-consistency check the pipeline has.
+Gravitational Wave Data Analysis fundamentally relies on comparing theoretical waveforms
+to observed strain data, which contains both a potential signal and instrumental noise.
+
+Motivation & Math
+-----------------
+The noise in a GW detector is generally modeled as stationary, Gaussian colored noise.
+This means the noise $n(t)$ in the time domain is entirely characterized by its
+Power Spectral Density (PSD) $S_n(f)$ in the frequency domain.
+
+For a finite duration $T$, the Fourier transform of the noise $\tilde{n}(f)$ satisfies:
+$$ \langle \tilde{n}(f) \tilde{n}^*(f') \rangle = \frac{1}{2} S_n(f) \delta(f - f') $$
+In discrete frequency bins of width $\Delta f = 1/T$, the variance of the complex noise
+is $\sigma^2 = S_n(f) / (4 \Delta f)$.
+
+This module provides tools to:
+1. Simulate this noise in the frequency domain.
+2. Inject a known signal ("injection") into simulated noise to test PE pipelines.
+3. Fetch real open data from GWOSC and construct likelihoods.
 """
 
 import numpy as np
@@ -16,7 +30,31 @@ from .waveform import WaveformModel
 
 
 def simulate_noise_fd(rng: np.random.Generator, psd, duration: float):
-    """Draw one-sided FD Gaussian noise with <|n(f)|^2> = S(f) T / 2 (inf-PSD bins -> 0)."""
+    """
+    Simulate stationary Gaussian colored noise in the frequency domain.
+
+    Motivation & Math
+    -----------------
+    Since the noise is stationary and Gaussian, its Fourier coefficients are independent
+    Gaussian random variables. For a one-sided PSD $S(f)$, the real and imaginary parts
+    of the noise at frequency $f$ are drawn from:
+    $$ \tilde{n}(f) = \sigma (\mathcal{N}(0, 1) + i \mathcal{N}(0, 1)) $$
+    where the standard deviation $\sigma = \sqrt{\frac{S(f) \times \text{duration}}{4}}$.
+
+    Parameters
+    ----------
+    rng : np.random.Generator
+        A numpy random number generator instance.
+    psd : np.ndarray
+        The one-sided Power Spectral Density evaluated at the frequency bins.
+    duration : float
+        The duration $T$ of the segment in seconds.
+
+    Returns
+    -------
+    np.ndarray
+        The complex frequency-domain noise.
+    """
     psd = np.asarray(psd, float)
     sigma = np.sqrt(psd * duration) / 2.0
     sigma = np.where(np.isfinite(sigma), sigma, 0.0)
@@ -36,9 +74,45 @@ def make_injection(
     post_trigger: float = 2.0,
     tukey_alpha: float = 0.1,
 ) -> NetworkLikelihood:
-    """Inject ``waveform(injection_params)`` into simulated noise; return the likelihood.
+    """
+    Inject a simulated gravitational wave signal into simulated noise.
 
-    ``noise_seed=None`` gives a zero-noise injection (lnL peaks at exactly 0).
+    "Injections" are software-simulated signals used to test and calibrate Parameter
+    Estimation pipelines. We generate a clean waveform using `injection_params`,
+    project it onto the requested detectors, and add simulated Gaussian noise.
+
+    If `noise_seed=None`, no noise is added (a "zero-noise" injection). In a zero-noise
+    injection, the likelihood perfectly peaks at exactly 0.0 at the true parameters.
+
+    Parameters
+    ----------
+    waveform : WaveformModel
+        The waveform model to generate the signal.
+    injection_params : dict
+        A dictionary containing the true parameters of the injected signal.
+    detector_names : tuple, default=("H1", "L1")
+        The network of detectors (e.g., LIGO Hanford, LIGO Livingston).
+    duration : float, default=8.0
+        Duration of the data segment in seconds.
+    sampling_rate : float, default=2048.0
+        Sampling rate in Hz.
+    f_min : float, default=20.0
+        Lower frequency cutoff for the likelihood integration.
+    f_max : float | None, default=None
+        Upper frequency cutoff. If None, defaults to the Nyquist frequency (0.9 * sampling_rate / 2).
+    psd_fn : Callable, default=aligo_zdhp_psd
+        A function mapping frequencies to PSD values.
+    noise_seed : int | None, default=None
+        Seed for the noise realization. If None, zero noise is added.
+    post_trigger : float, default=2.0
+        How many seconds of data to keep after the trigger time.
+    tukey_alpha : float, default=0.1
+        The shape parameter for the Tukey window used to taper the time-domain signal.
+
+    Returns
+    -------
+    NetworkLikelihood
+        A constructed likelihood object holding the injection data.
     """
     import jax
     import jax.numpy as jnp

@@ -1,12 +1,29 @@
-"""Metropolis-adjusted Langevin algorithm (MALA).
+r"""Metropolis-Adjusted Langevin Algorithm (MALA).
 
-One gradient evaluation per step and trivially vmappable, which makes it the default
-local kernel for many-chain GPU sampling. An optional per-dimension ``scale`` d acts as
-a diagonal preconditioner: the proposal is
+MALA is one of the most efficient local MCMC kernels for many-chain GPU sampling
+because it requires exactly one gradient evaluation per step and is trivially vmappable
+(no inner loops like HMC's leapfrog).
 
-    x' = x + (eps d)^2/2 * grad log p(x) + eps d * xi,   xi ~ N(0, I),
+Motivation & Math
+-----------------
+Imagine a particle floating in a fluid, subject to Brownian motion (random kicks)
+and a drift force pulling it toward regions of high probability. This physical process
+is described by the Overdamped Langevin Stochastic Differential Equation (SDE):
+$$ d\theta_t = \nabla \log \pi(\theta_t) dt + \sqrt{2} dW_t $$
+where $W_t$ is a standard Wiener process (Brownian motion).
 
-with the exact MH correction for the asymmetric proposal density.
+If we simulate this continuously, the particle's stationary distribution is exactly
+the target density $\pi(\theta)$. In discrete time, we use the Euler-Maruyama approximation:
+$$ \theta_{t+1} = \theta_t + \frac{\epsilon^2}{2} \nabla \log \pi(\theta_t) + \epsilon \xi $$
+where $\xi \sim \mathcal{N}(0, I)$ and $\epsilon$ is the step size.
+
+Because time discretization introduces integration error, the resulting distribution
+would be slightly biased. MALA corrects this by adding a Metropolis-Hastings (MH)
+accept/reject step.
+
+The proposal density $q(\theta' | \theta)$ is a Gaussian centered at $\theta + \frac{\epsilon^2}{2} \nabla \log \pi(\theta)$,
+which makes the proposal asymmetric (i.e., $q(\theta' | \theta) \neq q(\theta | \theta')$).
+The exact MH ratio accounts for this asymmetry.
 """
 
 from typing import ClassVar
@@ -18,6 +35,18 @@ from .base import Kernel, KernelState, LogProbFn, mh_accept
 
 
 class MALA(Kernel):
+    """
+    Metropolis-Adjusted Langevin Algorithm Kernel.
+    Parameters
+    ----------
+    step_size : float
+        The base step size $\epsilon$ for the Langevin diffusion.
+    scale : jax.Array | None, default=None
+        An optional per-dimension diagonal preconditioner $d$. If provided, the
+        proposal becomes:
+        $x' = x + \\frac{(\epsilon d)^2}{2} \\nabla \\log p(x) + \epsilon d \\xi$.
+    """
+
     needs_gradient: ClassVar[bool] = True
     step_size: jax.Array
     scale: jax.Array | None = None  # (n_dim,) diagonal preconditioner

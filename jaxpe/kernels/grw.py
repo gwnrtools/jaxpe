@@ -1,4 +1,21 @@
-"""Gaussian random-walk Metropolis: gradient-free baseline and fallback."""
+"""Gaussian Random-Walk Metropolis (GRW).
+
+This is the simplest form of Markov Chain Monte Carlo. It proposes jumps purely
+by adding Gaussian noise to the current state, without using any gradient information
+to guide the walk.
+
+Motivation & Math
+-----------------
+The proposal mechanism is symmetric:
+$$ q(x' | x) = \mathcal{N}(x, \sigma^2 I) $$
+Because the proposal density is symmetric ($q(x'|x) = q(x|x')$), these terms cancel
+out in the Metropolis-Hastings acceptance ratio $\alpha$:
+$$ \alpha = \min\left(1, \frac{\pi(x')}{\pi(x)}\right) $$
+
+While simple, it scales poorly to high dimensions because the random steps often propose
+moves into low-probability regions, leading to low acceptance rates unless the step size
+is made tiny (which in turn leads to slow exploration).
+"""
 
 from typing import ClassVar
 
@@ -9,7 +26,18 @@ from .base import Kernel, KernelState, LogProbFn, mh_accept
 
 
 class RandomWalk(Kernel):
-    """x' = x + step_size * scale * N(0, I)."""
+    """
+    Gaussian Random Walk Kernel.
+
+    Proposes new states via $x' = x + \\text{step\_size} \times \\text{scale} \times \mathcal{N}(0, I)$.
+
+    Parameters
+    ----------
+    step_size : float
+        The global step size scaling factor.
+    scale : jax.Array | None, default=None
+        An optional per-dimension proposal scale.
+    """
 
     needs_gradient: ClassVar[bool] = False
     step_size: jax.Array

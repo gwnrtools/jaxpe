@@ -67,9 +67,13 @@ def js_bits(a, b, bins=60):
 
 def main(nlive=400):
     like = make_injection(
-        ToyChirp(f_start=20.0), inj_mod.INJECTION,
-        detector_names=("H1", "L1"), duration=8.0, sampling_rate=2048.0,
-        f_min=20.0, noise_seed=NOISE_SEED,
+        ToyChirp(f_start=20.0),
+        inj_mod.INJECTION,
+        detector_names=("H1", "L1"),
+        duration=8.0,
+        sampling_rate=2048.0,
+        f_min=20.0,
+        noise_seed=NOISE_SEED,
     )
     names = list(bilby_priors(inj_mod.T_C).keys())
 
@@ -108,12 +112,23 @@ def main(nlive=400):
     matplotlib.use("Agg")
     truths = [inj_mod.INJECTION[n] for n in names]
     fig = corner_module.corner(
-        dyn, labels=names, truths=truths, color="C1", bins=40,
+        dyn,
+        labels=names,
+        truths=truths,
+        color="C1",
+        bins=40,
         hist_kwargs=dict(density=True),
     )
     corner_module.corner(
-        jaxpe_samples[np.random.default_rng(0).choice(len(jaxpe_samples), min(len(dyn) * 4, len(jaxpe_samples)), replace=False)],
-        fig=fig, color="C0", bins=40, hist_kwargs=dict(density=True),
+        jaxpe_samples[
+            np.random.default_rng(0).choice(
+                len(jaxpe_samples), min(len(dyn) * 4, len(jaxpe_samples)), replace=False
+            )
+        ],
+        fig=fig,
+        color="C0",
+        bins=40,
+        hist_kwargs=dict(density=True),
     )
     fig.savefig(OUT / "validate_overlay_corner.png", dpi=120)
     print(f"overlay corner (blue=jaxpe, orange=dynesty) -> {OUT / 'validate_overlay_corner.png'}")

@@ -63,9 +63,15 @@ def main():
     problem = like.problem(prior)
 
     cfg = GlobalLocalConfig(
-        n_chains=80, n_training_loops=15, n_production_loops=8,
-        n_local_steps=100, n_global_steps=50, local_thin=5,
-        flow_layers=8, nn_width=64, n_epochs=6,
+        n_chains=80,
+        n_training_loops=15,
+        n_production_loops=8,
+        n_local_steps=100,
+        n_global_steps=50,
+        local_thin=5,
+        flow_layers=8,
+        nn_width=64,
+        n_epochs=6,
     )
     sampler = Sampler(MALA(step_size=0.05), problem=problem, config=cfg)
 

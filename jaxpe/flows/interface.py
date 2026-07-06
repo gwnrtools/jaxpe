@@ -1,10 +1,27 @@
-"""Normalizing-flow proposal distribution, wrapping flowjax.
+"""Normalizing Flow Proposal Distribution (wraps flowjax).
 
-The flow is a rational-quadratic-spline coupling flow whose spline acts on a bounded
-interval, so chain samples are standardized (affine whitening) before they reach the
-flow and un-standardized on the way out. ``FlowProposal`` bundles the flow with its
-whitening constants and exposes only ``log_prob`` / ``sample`` — everything the global
-MH kernel and the trainer need.
+A Normalizing Flow constructs a complex probability distribution by transforming a
+simple base distribution (like a standard Normal) through a sequence of invertible,
+differentiable mappings (bijections).
+
+Motivation & Math
+-----------------
+Let $z \sim \mathcal{N}(0, I)$ be a sample from the base distribution. We apply a
+bijective function $f_\phi: Z \to X$. The probability density of the transformed
+variable $x = f_\phi(z)$ is given by the change of variables formula:
+$$ p(x) = p(z) \left| \det \left( \\frac{\partial f_\phi^{-1}(x)}{\partial x} \right) \right| $$
+
+Here we use a Rational-Quadratic Spline (RQS) coupling flow. The spline maps
+intervals to intervals monotonically. Because splines act on bounded intervals (e.g., [-5, 5]),
+we first standardize the MCMC chain samples (affine whitening) so they fit nicely within
+the flow's domain, and then un-standardize on the way out.
+
+Implementation Details
+----------------------
+``FlowProposal`` bundles the underlying flow with its whitening constants (mean and std).
+It exposes only two key methods needed by the MH kernel and the trainer:
+1. ``log_prob(y)``: Computes the log-density of a sample $y$.
+2. ``sample(key, shape)``: Draws samples from the flow.
 """
 
 import equinox as eqx

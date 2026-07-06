@@ -1,19 +1,26 @@
-"""Simplified Riemannian-manifold MALA.
+"""Simplified Riemannian-Manifold MALA (mMALA).
 
-The Langevin proposal is preconditioned by a position-dependent metric G(x)
-(e.g. a Fisher information matrix supplied by the problem):
+Standard MALA and HMC use a constant mass matrix (or preconditioner) across the entire
+parameter space. If the posterior has varying curvature (e.g., narrow in one region,
+wide in another), a constant preconditioner will fail to step optimally everywhere.
+Manifold MALA solves this by using a position-dependent metric tensor $G(x)$.
 
-    x' = x + eps^2/2 * G(x)^{-1} grad log p(x) + eps * G(x)^{-1/2} xi.
+Motivation & Math
+-----------------
+In Riemann-manifold Langevin dynamics, the Brownian motion occurs on a curved manifold
+described by $G(x)$. The proposal is:
+$$ x' = x + \\frac{\epsilon^2}{2} G(x)^{-1} \\nabla \\log p(x) + \epsilon G(x)^{-1/2} \\xi $$
 
-This is the "simplified" mMALA of Girolami & Calderhead (2011): the metric enters the
-drift and the proposal covariance, but the Christoffel/curvature drift terms are
-dropped. The MH correction below uses the *exact* proposal densities (with G evaluated
-at x for the forward move and at x' for the reverse), so detailed balance is exact and
-the invariant density is unaffected by the simplification.
+This is the "simplified" mMALA of Girolami & Calderhead (2011). The metric enters the
+drift (pulling along the natural gradient) and scales the proposal covariance. We drop
+the complex Christoffel symbol terms (which involve derivatives of $G(x)$).
 
-With ``metric_fn=None`` a constant dense metric ``cov`` (the proposal covariance,
-typically the ensemble posterior covariance) is used instead — i.e. dense-mass MALA;
-the log-det and quadratic terms then cancel symmetrically.
+To correct for the bias introduced by dropping these terms, we use the exact Metropolis-Hastings
+correction for the asymmetric proposal density. Detailed balance is fully maintained,
+so the stationary distribution is exact.
+
+With ``metric_fn=None``, a constant dense metric is used instead (making it equivalent
+to dense-mass MALA).
 """
 
 from collections.abc import Callable
@@ -28,6 +35,20 @@ from .base import Kernel, KernelState, LogProbFn, mh_accept
 
 
 class MMALA(Kernel):
+    """
+    Manifold Metropolis-Adjusted Langevin Algorithm Kernel.
+
+    Parameters
+    ----------
+    step_size : float
+        The base step size $\epsilon$.
+    metric_fn : Callable, default=None
+        A function mapping position $x$ to a Positive Semi-Definite (PSD) metric
+        tensor $G(x)$ of shape (n_dim, n_dim). E.g., the Fisher Information Matrix.
+    cov : jax.Array | None, default=None
+        Constant proposal covariance matrix to use if metric_fn is None.
+    """
+
     needs_gradient: ClassVar[bool] = True
     step_size: jax.Array
     metric_fn: Callable | None = eqx.field(static=True, default=None)  # x -> (n, n) PSD G(x)

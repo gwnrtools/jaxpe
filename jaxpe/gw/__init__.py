@@ -7,10 +7,16 @@ from .detectors import (
     gmst_from_gps,
     time_delay_from_geocenter,
 )
+from .harmonics import spin_weighted_ylm
 from .likelihood import NetworkLikelihood, project_to_detector
-from .priors import bbh_priors
+from .priors import bbh_priors, ebbh_priors
 from .psd import aligo_zdhp_psd, psd_from_file, welch_psd
 from .waveform import ToyChirp, WaveformModel, mismatch_f32_f64
+
+try:  # requires the optional esigmapy dependency
+    from .esigma import ESIGMAInspiral
+except ImportError:  # pragma: no cover
+    ESIGMAInspiral = None
 
 __all__ = [
     "ToyChirp",
@@ -35,4 +41,7 @@ __all__ = [
     "likelihood_from_strain",
     "fetch_open_strain",
     "bbh_priors",
+    "ebbh_priors",
+    "spin_weighted_ylm",
+    "ESIGMAInspiral",
 ]

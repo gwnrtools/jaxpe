@@ -1,9 +1,33 @@
-"""Hamiltonian Monte Carlo with a fixed-length leapfrog trajectory.
+"""Hamiltonian Monte Carlo (HMC) with a fixed-length leapfrog trajectory.
 
+Hamiltonian Monte Carlo solves the "random walk" problem of standard MCMC by
+using gradient information to simulate Hamiltonian dynamics. By treating the negative
+log-posterior as a potential energy well, we can assign a random momentum to our chain
+and let it "roll" along the contours of the probability distribution.
+
+Motivation & Math
+-----------------
+Let $x$ be the position (our parameters $\theta$) and $p$ be an auxiliary momentum variable.
+We define a Hamiltonian $H(x, p)$:
+$$ H(x, p) = U(x) + K(p) $$
+where $U(x) = -\log \pi(x)$ is the potential energy (negative log-posterior) and
+$K(p) = \frac{1}{2} p^T M^{-1} p$ is the kinetic energy, with $M$ being the mass matrix.
+
+Hamilton's equations describe the time evolution of this system:
+$$ \frac{dx}{dt} = \frac{\partial H}{\partial p} = M^{-1} p $$
+$$ \frac{dp}{dt} = -\frac{\partial H}{\partial x} = -\nabla U(x) = \nabla \log \pi(x) $$
+
+Since $H(x,p)$ is conserved along these trajectories, a perfect simulation would always
+be accepted in the Metropolis-Hastings step. In practice, we discretize time using the
+leapfrog integrator.
+
+Implementation Details
+----------------------
 Fixed trajectory length keeps every chain's step identical in shape, so the kernel
-vmaps cleanly (NUTS-style dynamic trees do not). A per-dimension ``scale`` d plays the
-role of sqrt(inverse mass): momenta are drawn as p ~ N(0, diag(1/d^2)) and the kinetic
-energy is K(p) = ||d * p||^2 / 2.
+vmaps cleanly in JAX (unlike NUTS-style dynamic trees). A per-dimension ``scale`` $d$
+plays the role of $\sqrt{M^{-1}}$ (square root of the inverse mass diagonal):
+momenta are drawn as $p \sim \mathcal{N}(0, \text{diag}(1/d^2))$ and the kinetic
+energy is $K(p) = \frac{1}{2} ||d * p||^2$.
 """
 
 from typing import ClassVar
@@ -15,6 +39,24 @@ from .base import Kernel, KernelState, LogProbFn, mh_accept
 
 
 class HMC(Kernel):
+    """
+    Hamiltonian Monte Carlo Kernel.
+
+    Proposes new states by numerically integrating Hamilton's equations using the
+    leapfrog method.
+
+    Parameters
+    ----------
+    step_size : float
+        The step size ($\epsilon$) for the leapfrog integrator.
+    n_leapfrog : int, default=10
+        The number of leapfrog steps per proposal. The total integration time is
+        $\epsilon \times \text{n\_leapfrog}$.
+    scale : jax.Array | None, default=None
+        The diagonal of the inverse mass matrix $\sqrt{M^{-1}}$. If None, defaults to
+        the identity matrix ($d=1$).
+    """
+
     needs_gradient: ClassVar[bool] = True
     step_size: jax.Array
     n_leapfrog: int = 10

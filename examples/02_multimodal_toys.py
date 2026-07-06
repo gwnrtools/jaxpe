@@ -11,7 +11,6 @@ import jax
 jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp
-import numpy as np
 
 from jaxpe.diagnostics import corner_plot, split_rhat
 from jaxpe.kernels import MALA
@@ -40,8 +39,13 @@ def dual_moon_logp(x):
 
 def run(name, logp, n_dim=2):
     cfg = GlobalLocalConfig(
-        n_chains=128, n_training_loops=10, n_production_loops=5,
-        n_local_steps=100, n_global_steps=50, flow_layers=6, nn_width=48,
+        n_chains=128,
+        n_training_loops=10,
+        n_production_loops=5,
+        n_local_steps=100,
+        n_global_steps=50,
+        flow_layers=6,
+        nn_width=48,
     )
     sampler = Sampler(MALA(step_size=0.2), logp_fn=logp, n_dim=n_dim, config=cfg)
     key = jax.random.PRNGKey(3)
@@ -49,8 +53,10 @@ def run(name, logp, n_dim=2):
     res = sampler.run(key, x0=x0)
 
     print(f"[{name}] R-hat: {split_rhat(res.samples)}")
-    print(f"[{name}] local acc (last): {res.local_acceptance[-1]:.2f}, "
-          f"global acc (last): {res.global_acceptance[-1]:.2f}")
+    print(
+        f"[{name}] local acc (last): {res.local_acceptance[-1]:.2f}, "
+        f"global acc (last): {res.global_acceptance[-1]:.2f}"
+    )
     OUT.mkdir(exist_ok=True)
     fig = corner_plot(res.flat(), names=[f"x{i}" for i in range(n_dim)])
     fig.savefig(OUT / f"{name}.png", dpi=120)

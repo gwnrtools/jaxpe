@@ -26,7 +26,7 @@ class InferenceProblem:
     def ndim(self) -> int:
         """Dimensionality of the unconstrained parameter space."""
         pass
-        
+
     def log_prob(self, theta: jax.Array) -> jax.Array:
         """
         Evaluate the log-posterior density for a given unconstrained parameter vector.

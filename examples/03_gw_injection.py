@@ -39,9 +39,13 @@ INJECTION = dict(
 
 def main(noise_seed=42, n_chains=80):
     like = make_injection(
-        ToyChirp(f_start=20.0), INJECTION,
-        detector_names=("H1", "L1"), duration=8.0, sampling_rate=2048.0,
-        f_min=20.0, noise_seed=noise_seed,
+        ToyChirp(f_start=20.0),
+        INJECTION,
+        detector_names=("H1", "L1"),
+        duration=8.0,
+        sampling_rate=2048.0,
+        f_min=20.0,
+        noise_seed=noise_seed,
     )
     print("optimal SNRs:", like.optimal_snr({k: jnp.asarray(v) for k, v in INJECTION.items()}))
 
@@ -113,8 +117,12 @@ if __name__ == "__main__":
     import argparse
 
     ap = argparse.ArgumentParser()
-    ap.add_argument("--n-chains", type=int, default=80,
-                    help="scale to GPU memory: ~48 for a shared 4 GB card, 512+ on an A40")
+    ap.add_argument(
+        "--n-chains",
+        type=int,
+        default=80,
+        help="scale to GPU memory: ~48 for a shared 4 GB card, 512+ on an A40",
+    )
     ap.add_argument("--zero-noise", action="store_true")
     args = ap.parse_args()
     main(noise_seed=None if args.zero_noise else 42, n_chains=args.n_chains)

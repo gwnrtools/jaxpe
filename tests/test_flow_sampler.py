@@ -99,12 +99,20 @@ def test_sampler_with_problem_physical_output():
     prior = JointPrior({"a": Uniform(low=0.0, high=10.0), "b": Gaussian(mu=0.0, sigma=2.0)})
     problem = InferenceProblem(
         prior=prior,
-        log_likelihood=lambda p: -0.5 * ((p["a"] - 3.0) / 0.2) ** 2
-        - 0.5 * ((p["b"] - 1.0) / 0.3) ** 2,
+        log_likelihood=lambda p: (
+            -0.5 * ((p["a"] - 3.0) / 0.2) ** 2 - 0.5 * ((p["b"] - 1.0) / 0.3) ** 2
+        ),
     )
     cfg = GlobalLocalConfig(
-        n_chains=32, n_training_loops=5, n_production_loops=3, n_local_steps=80,
-        n_global_steps=20, flow_layers=4, nn_width=24, n_epochs=5, batch_size=512,
+        n_chains=32,
+        n_training_loops=5,
+        n_production_loops=3,
+        n_local_steps=80,
+        n_global_steps=20,
+        flow_layers=4,
+        nn_width=24,
+        n_epochs=5,
+        batch_size=512,
     )
     sampler = Sampler(MALA(step_size=0.2), problem=problem, config=cfg)
     res = sampler.run(jax.random.PRNGKey(2))

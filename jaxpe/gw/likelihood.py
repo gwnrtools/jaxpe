@@ -1,20 +1,29 @@
-"""Frequency-domain network likelihood over a time-domain waveform model.
+"""Frequency-Domain Network Likelihood.
 
-The jitted/differentiated path is:
+This module computes the likelihood of observing the gravitational-wave strain data
+given a set of proposed waveform parameters.
 
-    params -> waveform(params, times) -> taper -> rfft -> project onto detectors
-           -> Whittle log-likelihood  lnL = -2 df sum_k |d_k - h_k|^2 / S_k
+Motivation & Math
+-----------------
+Assuming stationary Gaussian noise, the probability of observing noise $\tilde{n}(f)$ is:
+$$ p(n) \propto \exp\left( -2 \int_{f_{\min}}^{f_{\max}} \frac{|\tilde{n}(f)|^2}{S_n(f)} df \right) $$
 
-(up to the parameter-independent <d|d> constant, which cancels in MCMC).
+In a GW detection, the data $d$ is the sum of the true signal $h$ and noise $n$: $d = h + n$.
+Therefore, $n = d - h$. The log-likelihood of observing data $d$ given parameters $\theta$ is:
+$$ \ln \mathcal{L}(d | \theta) = -\frac{1}{2} (d - h(\theta) | d - h(\theta)) $$
+where the inner product is defined as:
+$$ (A | B) = 4 \Re \int_{f_{\min}}^{f_{\max}} \frac{\tilde{A}(f) \tilde{B}^*(f)}{S_n(f)} df $$
 
-Precision policy: the waveform/FFT run in the ambient dtype (float32 fast path or
-float64), while the final inner-product accumulation is promoted to float64 when
-``accumulate_f64`` — the sum over ~10^5 frequency bins is where float32 actually
-loses digits.
+Expanding the inner product gives:
+$$ \ln \mathcal{L} = (d | h(\theta)) - \frac{1}{2}(h(\theta) | h(\theta)) - \frac{1}{2}(d | d) $$
+The term $-\frac{1}{2}(d | d)$ is independent of $\theta$ and cancels out in MCMC acceptance ratios.
+JAXPE computes the full $(d-h | d-h)$ form up to the constant term.
 
-Projection (antenna response + geocentric delay) is shared by the likelihood and the
-injection machinery in ``data.py``, so a zero-noise injection evaluates to lnL = 0 at
-the true parameters by construction.
+Implementation Details
+----------------------
+The jitted path evaluates the waveform, applies a time-domain Tukey window, takes the FFT,
+projects it onto the detectors (antenna patterns and time delays), and computes the
+Whittle log-likelihood sum over frequency bins.
 """
 
 from dataclasses import dataclass, field
@@ -108,8 +117,14 @@ class NetworkLikelihood:
         gmst = self._gmst(params)
         return {
             det.name: project_to_detector(
-                det, hp_fd, hc_fd, st["freqs"], params["ra"], params["dec"],
-                params["psi"], gmst,
+                det,
+                hp_fd,
+                hc_fd,
+                st["freqs"],
+                params["ra"],
+                params["dec"],
+                params["psi"],
+                gmst,
             )
             for det in self.detectors
         }
@@ -140,9 +155,7 @@ class NetworkLikelihood:
         out = {}
         for det in self.detectors:
             h = strains[det.name]
-            hh = 4.0 * st["df"] * jnp.sum(
-                (h.real**2 + h.imag**2) * st["inv_psd_banded"][det.name]
-            )
+            hh = 4.0 * st["df"] * jnp.sum((h.real**2 + h.imag**2) * st["inv_psd_banded"][det.name])
             out[det.name] = float(jnp.sqrt(hh))
         return out
 

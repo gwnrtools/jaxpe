@@ -33,9 +33,9 @@ sampler = Sampler(MALA(0.05), problem=problem, config=cfg)
 key = jax.random.PRNGKey(0)
 
 # Initialization matters!
-# GW posteriors occupy a tiny fraction of the prior volume. 
+# GW posteriors occupy a tiny fraction of the prior volume.
 # best_of_prior_init seeds every comparable-likelihood mode.
-x0 = best_of_prior_init(key, problem, cfg.n_chains)   
+x0 = best_of_prior_init(key, problem, cfg.n_chains)
 
 # Run the sampler
 result = sampler.run(key, x0=x0)

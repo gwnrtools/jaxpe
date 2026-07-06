@@ -1,13 +1,25 @@
-"""Underdamped (kinetic) Langevin dynamics with the BAOAB splitting.
+"""Underdamped (Kinetic) Langevin Dynamics (ULD).
 
-Unadjusted: there is no Metropolis correction, so the invariant density carries an
-O(step_size^2) discretization bias — use small steps, and prefer MALA/HMC when exact
-stationarity matters (e.g. final production runs). The payoff is non-reversible,
-momentum-carrying exploration that mixes quickly through elongated posteriors.
+Unlike Overdamped Langevin (which only has position), Underdamped Langevin Dynamics
+simulates a particle with both position and momentum (velocity). This creates smoother,
+longer-ranging trajectories.
 
-The velocity lives in ``KernelState.aux`` and persists across steps; the O-step
-applies the exact Ornstein-Uhlenbeck damping with friction ``gamma``. A per-dimension
-``scale`` d preconditions the dynamics (equivalent to simulating in x/d coordinates).
+Motivation & Math
+-----------------
+The continuous-time system is:
+$$ dx_t = v_t dt $$
+$$ dv_t = -\\nabla U(x_t) dt - \gamma v_t dt + \sqrt{2\gamma} dW_t $$
+where $U(x) = -\log \pi(x)$, $\gamma$ is the friction coefficient, and $W_t$ is Brownian noise.
+
+We simulate this using the BAOAB splitting method.
+- **B**: Velocity update by half-step using gradients.
+- **A**: Position update by half-step using velocity.
+- **O**: Exact Ornstein-Uhlenbeck damping (friction and noise) for a full step.
+
+ULD in this implementation is "unadjusted" (no Metropolis-Hastings correction).
+Therefore, it explores extremely fast (momentum carries it through elongated posteriors)
+but suffers from an $\mathcal{O}(\epsilon^2)$ discretization bias in the invariant density.
+It is excellent for burn-in, but MALA or HMC should be used for exact sampling.
 """
 
 from typing import ClassVar
@@ -19,8 +31,23 @@ from .base import Kernel, KernelState, LogProbFn, StepInfo
 
 
 class ULD(Kernel):
+    """
+    Underdamped Langevin Dynamics Kernel.
+
+    Parameters
+    ----------
+    step_size : float
+        The time step size $\epsilon$ for the BAOAB integrator.
+    friction : float, default=1.0
+        The friction coefficient $\gamma$ damping the velocity.
+    scale : jax.Array | None, default=None
+        Per-dimension preconditioner. Equivalent to simulating in $x/d$ coordinates.
+    """
+
     needs_gradient: ClassVar[bool] = True
-    has_accept_prob: ClassVar[bool] = False  # no MH step: acceptance-based adaptation is meaningless
+    has_accept_prob: ClassVar[bool] = (
+        False  # no MH step: acceptance-based adaptation is meaningless
+    )
     step_size: jax.Array
     friction: jax.Array
     scale: jax.Array | None = None

@@ -71,9 +71,7 @@ def test_prior_sample_moments(prior):
     else:
         lo, hi = prior.low, prior.high
         assert samples.min() >= lo and samples.max() <= hi
-    mean_quad, _ = quad(
-        lambda x: x * float(jnp.exp(prior.log_prob(jnp.asarray(x)))), lo, hi
-    )
+    mean_quad, _ = quad(lambda x: x * float(jnp.exp(prior.log_prob(jnp.asarray(x)))), lo, hi)
     std = float(samples.std())
     assert abs(float(samples.mean()) - mean_quad) < 5 * std / np.sqrt(len(samples))
 

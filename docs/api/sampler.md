@@ -23,13 +23,13 @@ class Sampler:
         Initialize the Sampler.
         """
         pass
-        
+
     def run(self, key, x0):
         """
         Execute the sampling loop.
         """
         pass
-        
+
     def to_physical(self, samples):
         """
         Transform the raw unconstrained samples back into the physical space.

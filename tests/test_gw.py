@@ -121,7 +121,9 @@ def test_snr_scales_inversely_with_distance(zero_noise_like):
 def test_posterior_gradient_finite(zero_noise_like):
     prior = bbh_priors(geocent_time=T_C)
     problem = zero_noise_like.problem(prior)
-    y_true = problem.prior.to_unconstrained(problem.prior.from_dict({k: jnp.asarray(v) for k, v in INJ.items()}))
+    y_true = problem.prior.to_unconstrained(
+        problem.prior.from_dict({k: jnp.asarray(v) for k, v in INJ.items()})
+    )
     val, grad = jax.value_and_grad(problem.log_posterior)(y_true)
     assert jnp.isfinite(val)
     assert jnp.all(jnp.isfinite(grad))

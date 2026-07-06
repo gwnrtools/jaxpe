@@ -1,6 +1,20 @@
-"""Maximum-likelihood training of the flow proposal on buffered chain samples."""
+"""Maximum-Likelihood Training for Normalizing Flows.
 
-from functools import partial
+During the training phase of the Global-Local sampler, we continually update the
+Normalizing Flow to match the empirical distribution of the MCMC samples.
+
+Motivation & Math
+-----------------
+We train the flow by maximizing the log-likelihood of the buffered MCMC samples.
+This is mathematically equivalent to minimizing the Kullback-Leibler (KL) divergence
+from the empirical sample distribution to the flow distribution:
+$$ \mathcal{L}(\phi) = -\frac{1}{N} \sum_{i=1}^N \log q_\phi(x_i) $$
+where $x_i$ are the MCMC samples and $q_\phi$ is the density parameterized by the flow.
+
+By minimizing this loss using stochastic gradient descent (specifically Adam), the flow
+learns to place high probability mass exactly where the MCMC chains have explored,
+making it an excellent global proposal distribution.
+"""
 
 import equinox as eqx
 import jax
@@ -35,10 +49,32 @@ def fit_flow(
     batch_size: int = 1024,
     learning_rate: float = 1e-3,
 ):
-    """Fit ``proposal`` to ``samples`` of shape (n_samples, n_dim) by maximum likelihood.
+    """
+    Fit ``proposal`` to ``samples`` of shape (n_samples, n_dim) by maximum likelihood.
 
-    The whitening constants are recomputed from ``samples``; the spline flow itself is
-    then trained on whitened data with Adam. Returns ``(proposal, mean_losses)``.
+    The MCMC samples are used to recompute the affine whitening constants (mean and standard
+    deviation). The data is then whitened, batched, and the spline flow's parameters are
+    updated using the Adam optimizer to minimize the negative log-likelihood.
+
+    Parameters
+    ----------
+    key : jax.random.PRNGKey
+        PRNG key for random batch permutation.
+    proposal : FlowProposal
+        The initial un-trained (or partially trained) flow.
+    samples : jax.Array
+        A buffer of MCMC samples of shape (n_samples, n_dim).
+    n_epochs : int, default=8
+        Number of full passes over the sample buffer.
+    batch_size : int, default=1024
+        Batch size for gradient descent.
+    learning_rate : float, default=1e-3
+        Learning rate for the Adam optimizer.
+
+    Returns
+    -------
+    tuple[FlowProposal, list]
+        The trained flow proposal and a list of the mean loss per epoch.
     """
     mean = jnp.mean(samples, axis=0)
     std = jnp.maximum(jnp.std(samples, axis=0), 1e-8)
