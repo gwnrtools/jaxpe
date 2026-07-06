@@ -54,3 +54,5 @@ This document meticulously records the experiments, observations, and key learni
   ```bash
   time XLA_FLAGS="--xla_cpu_parallel_codegen_split_count=1" MALLOC_ARENA_MAX=1 JAX_PLATFORMS=cpu conda run -n lalsuite-dev python examples/05_esigma_injection.py --n-chains 20 --n-epochs 10 --n-production 100
   ```
+- **Result**: The compiler churned for **45 minutes** and then crashed with the exact same `LLVM ERROR: Unable to allocate section memory!`
+- **Learning**: Even with `RecursiveCheckpointAdjoint(checkpoints=16)`, the unrolled reverse-AD tape for 2048 steps of the highly complex 4PN waveform over 20 parallel chains is simply too massive for 31 GB of RAM. The adjoint checkpointing mitigated some pressure, but not enough to cross the finish line.
