@@ -1,6 +1,6 @@
 ---
 title: kernels
-parent: API Reference
+parent: jaxpe
 layout: default
 nav_order: 3
 ---
@@ -154,7 +154,8 @@ Underdamped Langevin Dynamics. Simulates Langevin diffusion while preserving con
 ---
 
 ### REFERENCES
+**[1]** S. Duane, A. D. Kennedy, B. J. Pendleton, and D. Roweth, "Hybrid Monte Carlo," Phys. Lett. B **195**, 216 (1987).
 
-[1] S. Duane, A. D. Kennedy, B. J. Pendleton, and D. Roweth, "Hybrid Monte Carlo," Phys. Lett. B **195**, 216 (1987).  
-[2] R. M. Neal, "MCMC using Hamiltonian dynamics," Handbook of Markov Chain Monte Carlo **2**, 113 (2011).  
-[3] G. O. Roberts and R. L. Tweedie, "Exponential convergence of Langevin distributions and their discrete approximations," Bernoulli **2**, 341 (1996).
+**[2]** R. M. Neal, "MCMC using Hamiltonian dynamics," Handbook of Markov Chain Monte Carlo **2**, 113 (2011).
+
+**[3]** G. O. Roberts and R. L. Tweedie, "Exponential convergence of Langevin distributions and their discrete approximations," Bernoulli **2**, 341 (1996).

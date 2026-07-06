@@ -1,6 +1,6 @@
 ---
 title: sampler
-parent: API Reference
+parent: jaxpe
 layout: default
 nav_order: 5
 ---
@@ -108,6 +108,6 @@ Evaluates `n_samples` from the prior and returns the `n_chains` points with the 
 ---
 
 ### REFERENCES
+**[1]** K. W. Wong et al., "flowMC: Normalizing flow enhanced sampler in jax," arXiv:2211.06397 (2022).
 
-[1] K. W. Wong et al., "flowMC: Normalizing flow enhanced sampler in jax," arXiv:2211.06397 (2022).  
-[2] L. Tierney, "Markov Chains for Exploring Posterior Distributions," Ann. Stat. **22**, 1701-1728 (1994).
+**[2]** L. Tierney, "Markov Chains for Exploring Posterior Distributions," Ann. Stat. **22**, 1701-1728 (1994).

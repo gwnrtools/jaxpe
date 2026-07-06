@@ -1,6 +1,6 @@
 ---
 title: gw
-parent: API Reference
+parent: jaxpe
 layout: default
 nav_order: 2
 ---
@@ -163,8 +163,10 @@ Evaluates the multi-detector Whittle likelihood in the frequency domain. It hand
 ---
 
 ### REFERENCES
+**[1]** L. Blanchet, "Gravitational Radiation from Post-Newtonian Sources and Inspiralling Compact Binaries," Living Rev. Relativ. **17**, 2 (2014).
 
-[1] L. Blanchet, "Gravitational Radiation from Post-Newtonian Sources and Inspiralling Compact Binaries," Living Rev. Relativ. **17**, 2 (2014).  
-[2] L. Barack and A. Pound, "Self-force and radiation reaction in general relativity," Rep. Prog. Phys. **82**, 016904 (2018).  
-[3] F. Pretorius, "Evolution of Binary Black-Hole Spacetimes," Phys. Rev. Lett. **95**, 121101 (2005).  
-[4] P. Whittle, "The analysis of multiple stationary time series," J. R. Stat. Soc. Series B Stat. Methodol. **15**, 125 (1953).
+**[2]** L. Barack and A. Pound, "Self-force and radiation reaction in general relativity," Rep. Prog. Phys. **82**, 016904 (2018).
+
+**[3]** F. Pretorius, "Evolution of Binary Black-Hole Spacetimes," Phys. Rev. Lett. **95**, 121101 (2005).
+
+**[4]** P. Whittle, "The analysis of multiple stationary time series," J. R. Stat. Soc. Series B Stat. Methodol. **15**, 125 (1953).

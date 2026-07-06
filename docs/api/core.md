@@ -1,6 +1,6 @@
 ---
 title: core
-parent: API Reference
+parent: jaxpe
 layout: default
 nav_order: 6
 ---
@@ -94,5 +94,4 @@ The base class for geometric diffeomorphisms (like `Identity`, `Affine`, `Interv
 ---
 
 ### REFERENCES
-
-[1] Stan Development Team, "Stan Modeling Language Users Guide and Reference Manual," v2.32 (2023).
+**[1]** Stan Development Team, "Stan Modeling Language Users Guide and Reference Manual," v2.32 (2023).

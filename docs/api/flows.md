@@ -1,6 +1,6 @@
 ---
 title: flows
-parent: API Reference
+parent: jaxpe
 layout: default
 nav_order: 4
 ---
@@ -118,6 +118,6 @@ Executes the variational training loop over the buffered MCMC samples using Opta
 ---
 
 ### REFERENCES
+**[1]** C. Durkan, A. Bekasov, I. Murray, and G. Papamakarios, "Neural Spline Flows," Adv. Neural Inf. Process. Syst. **32** (2019).
 
-[1] C. Durkan, A. Bekasov, I. Murray, and G. Papamakarios, "Neural Spline Flows," Adv. Neural Inf. Process. Syst. **32** (2019).  
-[2] L. Dinh, J. Sohl-Dickstein, and S. Bengio, "Density estimation using Real NVP," ICLR (2017).
+**[2]** L. Dinh, J. Sohl-Dickstein, and S. Bengio, "Density estimation using Real NVP," ICLR (2017).

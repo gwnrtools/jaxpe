@@ -1,6 +1,6 @@
 ---
 title: diagnostics
-parent: API Reference
+parent: jaxpe
 layout: default
 nav_order: 7
 ---
@@ -92,6 +92,6 @@ Computes the Effective Sample Size (ESS) for an array of MCMC chains by summing 
 ---
 
 ### REFERENCES
+**[1]** A. Gelman and D. B. Rubin, "Inference from Iterative Simulation Using Multiple Sequences," Stat. Sci. **7**, 457 (1992).
 
-[1] A. Gelman and D. B. Rubin, "Inference from Iterative Simulation Using Multiple Sequences," Stat. Sci. **7**, 457 (1992).  
-[2] A. Vehtari, A. Gelman, D. Simpson, B. Carpenter, and P. C. Bürkner, "Rank-Normalization, Folding, and Localization: An Improved $\widehat{R}$ for Assessing Convergence of MCMC," Bayesian Anal. **16**, 667 (2021).
+**[2]** A. Vehtari, A. Gelman, D. Simpson, B. Carpenter, and P. C. Bürkner, "Rank-Normalization, Folding, and Localization: An Improved $\widehat{R}$ for Assessing Convergence of MCMC," Bayesian Anal. **16**, 667 (2021).
