@@ -66,3 +66,14 @@ This document meticulously records the experiments, observations, and key learni
   ```bash
   time XLA_FLAGS="--xla_cpu_parallel_codegen_split_count=1" MALLOC_ARENA_MAX=1 JAX_PLATFORMS=cpu conda run -n lalsuite-dev python examples/05_esigma_injection.py --n-chains 20 --n-epochs 10 --n-production 100
   ```
+
+## 8. Current Run: Automated PN Order Sweep
+- **Configuration**:
+  - `max_ode_steps=256`, `n_ode_grid=256`, `ode_eps=1e-4`
+  - Added `--pn-order` to the `05_esigma_injection.py` script.
+  - Wrote a bash script to systematically iterate from PN order 8 (4PN) down to 0, running the compilation at each step and breaking out upon the first success.
+- **Hypothesis**: The sheer symbolic complexity of 4PN expressions might still overwhelm the AD graph lowering despite keeping the integration steps small. By programmatically stepping down the PN orders, we will empirically locate the maximum precision boundary that 31GB of RAM can compile.
+- **Command Line**:
+  ```bash
+  bash run_experiments.sh
+  ```

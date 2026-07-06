@@ -35,18 +35,18 @@ from jaxpe.sampler import GlobalLocalConfig, Sampler, best_of_prior_init
 OUT = Path(__file__).parent / "output"
 
 
-def main(n_chains: int = 100, n_epochs: int = 100, n_production: int = 2000):
+def main(n_chains: int = 100, n_epochs: int = 100, n_production: int = 2000, pn_order: int = 8):
     f_lower = 30.0
     duration = 4.0
     t_c = 1126259462.4
 
     print("Initializing ESIGMA waveform model...")
-    print("  Using 4PN with relaxed ode_eps=1e-4 and max_ode_steps=256 to shrink the AD tape.")
+    print(f"  Using PN order {pn_order} with relaxed ode_eps=1e-4 and max_ode_steps=256 to shrink the AD tape.")
     waveform = ESIGMAInspiral(
         f_lower=f_lower,
         modes=((2, 2), (3, 3)),
-        rad_pn_order=8,
-        mode_pn_order=8,
+        rad_pn_order=pn_order,
+        mode_pn_order=pn_order,
         ode_eps=1e-4,
         n_ode_grid=256,
         max_ode_steps=256,
@@ -146,5 +146,6 @@ if __name__ == "__main__":
     ap.add_argument("--n-chains", type=int, default=20)
     ap.add_argument("--n-epochs", type=int, default=6)
     ap.add_argument("--n-production", type=int, default=10)
+    ap.add_argument("--pn-order", type=int, default=8)
     args = ap.parse_args()
-    main(n_chains=args.n_chains, n_epochs=args.n_epochs, n_production=args.n_production)
+    main(n_chains=args.n_chains, n_epochs=args.n_epochs, n_production=args.n_production, pn_order=args.pn_order)
