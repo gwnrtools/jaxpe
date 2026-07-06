@@ -1,6 +1,6 @@
 ---
 title: flows
-parent: jaxpe
+parent: API Reference
 layout: default
 nav_order: 4
 ---

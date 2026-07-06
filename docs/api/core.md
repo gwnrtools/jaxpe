@@ -1,6 +1,6 @@
 ---
 title: core
-parent: jaxpe
+parent: API Reference
 layout: default
 nav_order: 6
 ---
