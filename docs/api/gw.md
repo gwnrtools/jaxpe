@@ -2,95 +2,132 @@
 title: gw
 parent: jaxpe
 layout: default
+nav_order: 2
 ---
 
-# Sec. II: Gravitational-Wave Physics (`jaxpe.gw`)
+# Sec. II: Gravitational-Wave Generation and Detection (`jaxpe.gw`)
 {: .no_toc }
 
 1. TOC
 {:toc}
 
-Let us peer under the hood of the gravitational-wave generator. In this section, we detail the physics module (`jaxpe.gw`), which handles the waveform construction, detector responses, and the evaluation of the frequency-domain likelihood.
+Let us peer under the hood of the gravitational-wave generator. In this section, we rigorously detail the physics module (`jaxpe.gw`), which handles the waveform construction, detector responses, and the evaluation of the frequency-domain likelihood. We begin from the foundational geometry of spacetime.
 
-## Waveform Construction and Approximants
+## The Einstein Field Equations and Linearized Gravity
 
-When two black holes dance around one another, their motion ripples the very fabric of spacetime. This generation of gravitational waves relies mathematically on evolving the Newman-Penrose scalar $$\Psi_4$$. As these waves propagate from the distant cosmos to the transverse-traceless (TT) gauge of our interferometers, they manifest as the metric strain components $$h_+(t)$$ and $$h_\times(t)$$. But how do we actually calculate these strains? It turns out we need a triad of sophisticated mathematical approximations.
+The generation of gravitational waves fundamentally stems from the non-linear dynamics of General Relativity, governed by the Einstein field equations:
 
-### Post-Newtonian (PN) Theory
+$$
+R_{\mu\nu} - \frac{1}{2}g_{\mu\nu}R = \frac{8\pi G}{c^4} T_{\mu\nu}
+$$
 
-Imagine trying to describe a complex curve using only a simple straight line; it works locally, but eventually, you need a parabola, then a cubic, and so on. This is exactly the spirit of a Taylor series. During the early inspiral, where orbital velocities are small ($$v \ll c$$), we expand the two-body dynamics in a perturbative series in powers of the dimensionless velocity $$v/c$$. This is the Post-Newtonian (PN) expansion [1]. 
+where \(R_{\mu\nu}\) is the Ricci curvature tensor, \(R\) is the Ricci scalar, \(g_{\mu\nu}\) is the metric tensor, and \(T_{\mu\nu}\) is the stress-energy tensor describing the matter source. To understand the Ricci tensor, we must trace back to the Riemann curvature tensor \(R^\rho{}_{\sigma\mu\nu}\), which measures the failure of a vector to return to its original orientation when parallel-transported around a closed loop. The Riemann tensor is defined entirely in terms of the Levi-Civita connection (the Christoffel symbols \(\Gamma^\rho_{\mu\nu}\)):
 
-The gravitational-wave phase $$\Phi(f)$$ in the frequency domain is typically written as:
+$$
+R^\rho{}_{\sigma\mu\nu} = \partial_\mu \Gamma^\rho_{\nu\sigma} - \partial_\nu \Gamma^\rho_{\mu\sigma} + \Gamma^\rho_{\mu\lambda}\Gamma^\lambda_{\nu\sigma} - \Gamma^\rho_{\nu\lambda}\Gamma^\lambda_{\mu\sigma}
+$$
+
+The Ricci tensor is simply the contraction \(R_{\mu\nu} = R^\rho{}_{\mu\rho\nu}\). Far from the coalescing binary, in the weak-field regime, we can decompose the full spacetime metric into a flat Minkowski background \(\eta_{\mu\nu}\) and a small perturbation \(h_{\mu\nu}\):
+
+$$
+g_{\mu\nu} \approx \eta_{\mu\nu} + h_{\mu\nu} \quad \text{where} \quad |h_{\mu\nu}| \ll 1
+$$
+
+By defining the trace-reversed perturbation \(\bar{h}_{\mu\nu} = h_{\mu\nu} - \frac{1}{2}\eta_{\mu\nu}h^\alpha{}_\alpha\), and imposing the Lorenz gauge condition \(\partial^\mu \bar{h}_{\mu\nu} = 0\), the linearized Einstein equations beautifully decouple into a classical inhomogeneous wave equation:
+
+$$
+\square \bar{h}_{\mu\nu} = -\frac{16\pi G}{c^4} T_{\mu\nu}
+$$
+
+where \(\square = \eta^{\alpha\beta} \partial_\alpha \partial_\beta\) is the d'Alembertian operator.
+
+### The Transverse-Traceless (TT) Gauge
+
+In vacuum (\(T_{\mu\nu} = 0\)), the gravitational waves freely propagate. We can further exhaust our gauge freedom to adopt the Transverse-Traceless (TT) gauge. In this coordinate system, the perturbation is purely spatial (\(h_{0\mu}^{TT} = 0\)), transverse to the direction of propagation (\(\partial^j h_{ij}^{TT} = 0\)), and traceless (\(\delta^{ij} h_{ij}^{TT} = 0\)). 
+
+The two independent degrees of freedom of the metric tensor survive as the physical polarization states of the gravitational wave, which manifest in our interferometers as the metric strain components \(h_+(t)\) and \(h_\times(t)\).
+
+## Waveform Approximants: From Multipoles to Numerical Relativity
+
+To solve the wave equation for an actual binary system, we rely on a triad of sophisticated mathematical approximations.
+
+### The Quadrupole Moment and Post-Newtonian (PN) Theory
+
+Imagine trying to describe a complex curve using only a simple straight line; it works locally, but eventually, you need a parabola, then a cubic, and so on. This is exactly the spirit of a Taylor series. 
+
+In the lowest-order (Newtonian) limit, the solution to the wave equation is dominated by the second time derivative of the reduced mass quadrupole moment tensor \(I_{ij}\):
+
+$$
+h_{ij}^{TT}(t, \mathbf{x}) = \frac{2G}{c^4 r} \Lambda_{ij}{}^{kl}(\mathbf{n}) \frac{d^2}{dt^2} I_{kl}(t_r)
+$$
+
+where the quadrupole moment is defined by the volume integral over the source density \(\rho\):
+
+$$
+I_{ij} = \int \rho(t, \mathbf{x}) \left( x_i x_j - \frac{1}{3} \delta_{ij} r^2 \right) d^3x
+$$
+
+and \(\Lambda_{ij}{}^{kl}(\mathbf{n})\) is the TT projection operator along the line of sight \(\mathbf{n}\).
+
+During the early inspiral, where orbital velocities are small (\(v \ll c\)), we expand the two-body dynamics in a perturbative series in powers of the dimensionless velocity \(v/c\). This is the Post-Newtonian (PN) expansion [1]. The gravitational-wave phase \(\Phi(f)\) in the frequency domain is expanded as:
 
 $$
 \Phi(f) = 2 \pi f t_c - \phi_c + \frac{3}{128 \eta v^5} \sum_{k=0}^N \left( \alpha_k + \beta_k \ln v \right) v^k
 $$
 
-where $$\eta = m_1 m_2 / (m_1+m_2)^2$$ is the symmetric mass ratio, and $$v = (\pi M f)^{1/3}$$ is the characteristic orbital velocity. This expansion is absolutely essential; without it, we could never accurately track the millions of phase cycles accumulated over years of observation.
+where \(\eta = m_1 m_2 / (m_1+m_2)^2\) is the symmetric mass ratio. The coefficients \(\alpha_k\) and \(\beta_k\) are derived from increasingly complex loop integrals in the effective field theory of General Relativity.
 
 ### Self-Force (SF) Formalism
 
-Now, what if one black hole is the size of a star, and the other is the mass of a galaxy? The Post-Newtonian expansion converges frustratingly slowly here ($$q \ll 1$$). Instead, we change our perspective. We treat the smaller body as a mere speck—a perturbation—on the exact background spacetime of the supermassive primary. 
+Now, what if one black hole is the size of a star, and the other is the mass of a galaxy? The Post-Newtonian expansion converges frustratingly slowly here (\(q \ll 1\)). We treat the smaller body as a mere perturbation on the exact background spacetime of the supermassive primary (such as the Kerr metric). 
 
-The small body travels on a geodesic that is gently nudged by a local gravitational self-force $$f^\alpha$$ generated by its own back-scattered field [2]. The geodesic equation becomes:
+The small body travels on a geodesic that is gently nudged by a local gravitational self-force \(f^\alpha\) generated by its own back-scattered field [2]. The forced geodesic equation becomes:
 
 $$
 u^\beta \nabla_\beta u^\alpha = f^\alpha
 $$
 
-Solving this allows us to track Extreme Mass Ratio Inspirals (EMRIs) with astonishing precision.
+Solving this tracking differential equation allows us to map Extreme Mass Ratio Inspirals (EMRIs) with astonishing precision.
 
 ### Numerical Relativity (NR)
 
-Finally, in the chaotic final moments of coalescence, the binary enters the highly non-linear, strong-field regime. Our Taylor series fails; our perturbation theory shatters. Here, we must roll up our sleeves and solve the full, unadulterated Einstein field equations on massive supercomputers. 
-
-This is typically achieved using the 3+1 ADM decomposition [3]. We slice four-dimensional spacetime into three-dimensional spatial hypersurfaces evolving in time:
+Finally, in the chaotic final moments of coalescence, the binary enters the highly non-linear, strong-field regime where all perturbative expansions shatter. Here, we must solve the full, unadulterated Einstein field equations. This is typically achieved using the 3+1 ADM decomposition [3]. We slice four-dimensional spacetime into three-dimensional spatial hypersurfaces \(\Sigma_t\) evolving in time. The line element is cast as:
 
 $$
 ds^2 = -\alpha^2 dt^2 + \gamma_{ij} (dx^i + \beta^i dt)(dx^j + \beta^j dt)
 $$
 
-By evolving the spatial metric $$\gamma_{ij}$$ and extrinsic curvature $$K_{ij}$$ forward, Numerical Relativity provides the exact, final truth of the merger.
+where \(\alpha\) is the lapse function dictating the rate of proper time flow, \(\beta^i\) is the shift vector governing coordinate drift, and \(\gamma_{ij}\) is the induced spatial metric. The evolution of the spacetime is then dictated by the time derivative of the spatial metric and its conjugate momentum, the extrinsic curvature \(K_{ij}\):
 
-### `ToyChirp`
+$$
+\partial_t \gamma_{ij} = -2\alpha K_{ij} + \nabla_i \beta_j + \nabla_j \beta_i
+$$
 
-To get our hands dirty, the `gw` module provides a `ToyChirp` time-domain waveform model. It serves as a pedagogical sandbox, demonstrating the fundamental quadrupole radiation physics using the lowest-order Newtonian amplitude and phase evolution.
+By integrating these highly coupled, non-linear PDEs forward using massively parallel supercomputers, Numerical Relativity provides the exact, final truth of the merger spacetime geometry.
 
 ## The Frequency-Domain Likelihood
 
-The `gw` module takes these theoretical waveforms and builds a frequency-domain likelihood. Assuming the detector noise $$n(t)$$ is stationary and Gaussian with a one-sided power spectral density (PSD) $$S_n(f)$$, the probability of observing data $$d$$ given our parameters $$\boldsymbol{\theta}$$ is governed by the Whittle likelihood [4]. 
+The `gw` module takes these theoretical waveforms and builds a frequency-domain likelihood. The output of an interferometric detector is a single time series:
 
 $$
-\mathcal{L}(d | \boldsymbol{\theta}) \propto \exp\left[ -\frac{1}{2} (d - h(\boldsymbol{\theta}) | d - h(\boldsymbol{\theta})) \right]
+d(t) = F^+(\alpha_s, \delta_s, \psi_s) h_+(t; \boldsymbol{\theta}) + F^\times(\alpha_s, \delta_s, \psi_s) h_\times(t; \boldsymbol{\theta}) + n(t)
 $$
 
-### `make_injection`
+where \(F^{+,\times}\) are the antenna pattern functions of the detector, dependent on the source right ascension \(\alpha_s\), declination \(\delta_s\), and polarization angle \(\psi_s\). Assuming the detector noise \(n(t)\) is stationary and Gaussian with a one-sided power spectral density \(S_n(f)\), the probability of observing data \(d\) given our source parameters \(\theta^\mu\) is governed by the Whittle likelihood [4]. 
 
-Creates a mock gravitational-wave likelihood from a model, a set of injection parameters, and a noise seed.
+$$
+\ln \mathcal{L}(d | \theta^\mu) \propto -\frac{1}{2} (d - h(\theta^\mu) | d - h(\theta^\mu))
+$$
 
-```python
-def make_injection(model, params, noise_seed=42):
-    """
-    Creates an injection likelihood for testing.
-    """
-    pass
-```
+where the noise-weighted inner product is given by the integral:
 
-### GW Priors
+$$
+(a | b) = 4 \Re \int_{0}^{\infty} \frac{\tilde{a}^*(f) \tilde{b}(f)}{S_n(f)} df
+$$
 
-The module provides standard BBH priors that are compatible with `jaxpe.core`.
+### `make_injection` & GW Priors
 
-```python
-def bbh_priors(geocent_time):
-    """
-    Returns standard binary black hole (BBH) priors.
-    """
-    pass
-```
-
-## Precision and Floating Point
-
-Before we conclude, a brief note on computational hygiene: GW likelihoods are strictly validated in float64 (`jax.config.update("jax_enable_x64", True)`). Any float32 fast path must carefully use segment-relative times, as absolute GPS epochs are completely unrepresentable at float32 resolution.
+The module provides tools to construct mock injections and evaluate standard Binary Black Hole (BBH) priors over the parameter manifold, strictly validated in robust `float64` precision to avoid catastrophic numerical cancellations during the evaluation of the highly oscillatory frequency-domain likelihoods.
 
 ### REFERENCES
 

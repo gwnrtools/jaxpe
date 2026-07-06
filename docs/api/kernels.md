@@ -2,88 +2,99 @@
 title: kernels
 parent: jaxpe
 layout: default
+nav_order: 3
 ---
 
-# Sec. III: MCMC Kernels (`jaxpe.kernels`)
+# Sec. III: Symplectic Geometry and Langevin Diffusion (`jaxpe.kernels`)
 {: .no_toc }
 
 1. TOC
 {:toc}
 
-How do we actually explore a 15-dimensional posterior landscape? If we simply guess randomly, we will spend the age of the universe wandering through the deserts of low probability. Instead, in this section, we introduce the MCMC kernels of `jaxpe` that leverage classical mechanics and fluid dynamics to glide through the parameter space.
+How do we actually explore a 15-dimensional posterior landscape? Standard random-walk Metropolis-Hastings proposals explore space via diffusive Brownian motion, resulting in an exploration radius that scales as \(R \propto \sqrt{N}\) after \(N\) steps. This is disastrously inefficient in high dimensions. In this section, we formulate the MCMC kernels of `jaxpe` that leverage the differential geometry of symplectic manifolds to glide seamlessly through the parameter space.
 
-## Hamilton's Equations and MCMC
+## Hamiltonian Monte Carlo on Symplectic Manifolds
 
-Consider Hamiltonian Monte Carlo (HMC) [1, 2]. We stop treating inference as a statistical guessing game and start treating it as a physics simulation. Imagine the negative log-posterior as the physical landscape of a rolling hillside:
+We elevate the statistical problem of drawing samples from a posterior \(\pi(\theta^\mu|d)\) into a deterministic simulation of classical mechanics [1, 2]. Let our parameter space be a Riemannian manifold \(\mathcal{M}\) with coordinates \(\theta^\mu\). We consider the cotangent bundle \(T^*\mathcal{M}\), which is naturally a symplectic manifold equipped with a closed, non-degenerate 2-form \(\omega = d\theta^\mu \wedge dp_\mu\), where \(p_\mu\) are the conjugate momenta.
 
-$$
-U(\boldsymbol{\theta}) = -\log p(\boldsymbol{\theta}|d)
-$$
-
-We place a frictionless puck (our parameter vector) on this hill, and give it a random kick. It gains a conjugate momentum $$\mathbf{p}$$ and a kinetic energy:
+We define the Hamiltonian scalar function \(H: T^*\mathcal{M} \to \mathbb{R}\) as the sum of the potential energy (the negative log-posterior) and the kinetic energy:
 
 $$
-K(\mathbf{p}) = \frac{1}{2}\mathbf{p}^T \mathbf{M}^{-1} \mathbf{p}
+H(\theta^\mu, p_\mu) = U(\theta^\mu) + K(p_\mu) = -\log \pi(\theta^\mu|d) + \frac{1}{2} g^{\mu\nu} p_\mu p_\nu
 $$
 
-The puck now traces a deterministic path along the contours of the total energy (the Hamiltonian):
+where \(g^{\mu\nu}\) is the inverse of the mass matrix (which can be interpreted as a flat Riemannian metric on \(\mathcal{M}\)). The evolution of any observable \(F\) on phase space is governed by the Poisson bracket:
 
 $$
-H(\boldsymbol{\theta}, \mathbf{p}) = U(\boldsymbol{\theta}) + K(\mathbf{p})
+\frac{dF}{dt} = \{F, H\} = \frac{\partial F}{\partial \theta^\mu} \frac{\partial H}{\partial p_\mu} - \frac{\partial F}{\partial p_\mu} \frac{\partial H}{\partial \theta^\mu}
 $$
 
-governed beautifully by Hamilton's equations:
+Setting \(F = \theta^\mu\) and \(F = p_\mu\) recovers Hamilton's equations of motion:
 
 $$
-\frac{d\boldsymbol{\theta}}{dt} = \mathbf{M}^{-1} \mathbf{p} \, , \quad \frac{d\mathbf{p}}{dt} = -\nabla_{\boldsymbol{\theta}} U(\boldsymbol{\theta})
+\frac{d\theta^\mu}{dt} = g^{\mu\nu} p_\nu \, , \quad \frac{dp_\mu}{dt} = -\partial_\mu U(\theta)
 $$
 
-Because this continuous flow is time-reversible and preserves phase-space volume (thanks to Liouville's theorem), we can numerically integrate this trajectory for a long time—generating distant, independent proposals that are accepted with near certainty.
+Because Hamiltonian flow is a symplectomorphism, it preserves the phase space volume form \(\Omega = \frac{(-1)^{n(n-1)/2}}{n!} \omega^n\) exactly (Liouville's Theorem).
 
-## Langevin Diffusion and MALA
+### Numerical Integration: The Leapfrog Symplectic Integrator
 
-Now, suppose we don't want a frictionless puck. Suppose we want to describe a particle diffusing through a thick, viscous fluid, constantly buffeted by thermal noise, but gently pulled downhill by gravity. This is the Metropolis-Adjusted Langevin Algorithm (MALA) [3].
+In practice, we cannot integrate these continuous Hamiltonian differential equations exactly. We must discretize time into discrete steps \(\Delta t\). However, standard integration schemes like Runge-Kutta do not preserve the symplectic volume form \(\omega\), causing the simulated energy to systematically drift and destroying the detailed balance condition of the Markov chain.
 
-MALA models the overdamped limit of Langevin diffusion. It employs the gradient to drift toward regions of high probability while taking random steps. The continuous-time stochastic differential equation (SDE) governing our parameter vector $$\boldsymbol{\theta}_t$$ is:
-
-$$
-d\boldsymbol{\theta}_t = \frac{1}{2} \nabla_{\boldsymbol{\theta}} \log p(\boldsymbol{\theta}_t|d) dt + dW_t
-$$
-
-where $$dW_t$$ is a standard Wiener process (a continuous random walk). But how do we know this process actually finds the posterior? We look at the Fokker-Planck equation, which describes how the entire probability density $$\rho(\boldsymbol{\theta}, t)$$ evolves over time:
+Instead, we employ the Leapfrog (Verlet) integrator, which is explicitly symplectic and time-reversible. A single Leapfrog step consists of a half-step update for the momenta, a full-step update for the positions, and a final half-step update for the momenta:
 
 $$
-\frac{\partial \rho}{\partial t} = \nabla_{\boldsymbol{\theta}} \cdot \left[ \frac{1}{2} \nabla_{\boldsymbol{\theta}} \rho - \frac{1}{2} \rho \nabla_{\boldsymbol{\theta}} \log p(\boldsymbol{\theta}|d) \right]
+p_\mu(t + \Delta t/2) = p_\mu(t) - \frac{\Delta t}{2} \partial_\mu U(\theta(t))
+$$
+$$
+\theta^\mu(t + \Delta t) = \theta^\mu(t) + \Delta t \, g^{\mu\nu} p_\nu(t + \Delta t/2)
+$$
+$$
+p_\mu(t + \Delta t) = p_\mu(t + \Delta t/2) - \frac{\Delta t}{2} \partial_\mu U(\theta(t + \Delta t))
 $$
 
-If you set $$\partial \rho / \partial t = 0$$, you will find that the stationary distribution is exactly our target posterior $$p(\boldsymbol{\theta}|d)$$. Discretizing the SDE via the Euler-Maruyama method gives us our proposal density:
+Because this integrator preserves phase-space volume, the only source of error is the truncation error in the energy conservation \(\mathcal{O}(\Delta t^2)\). We correct for this small discretization error by wrapping the trajectory in a final Metropolis-Hastings acceptance step.
+
+## Langevin Diffusion and the Fokker-Planck Equation
+
+Suppose we abandon the frictionless determinism of HMC and instead immerse a particle in a heat bath subject to a potential gradient. This is the Metropolis-Adjusted Langevin Algorithm (MALA) [3], representing the overdamped limit of Langevin diffusion.
+
+The continuous-time stochastic differential equation (SDE) governing the parameter vector \(\theta^\mu_t\) on a flat manifold is:
 
 $$
-\boldsymbol{\theta}' \sim \mathcal{N}\left( \boldsymbol{\theta} + \frac{\epsilon^2}{2} \nabla_{\boldsymbol{\theta}} \log p(\boldsymbol{\theta}|d), \epsilon^2 \mathbf{I} \right)
+d\theta^\mu_t = -\frac{1}{2} g^{\mu\nu} \partial_\nu U(\theta_t) dt + \sqrt{g^{\mu\nu}} dW_{\nu, t}
 $$
 
-## Advanced Differential Geometry Kernels
+where \(dW_{\nu, t}\) is a multi-dimensional Wiener process. The macroscopic evolution of the probability density \(\rho(\theta^\mu, t)\) is governed by the Fokker-Planck equation:
+
+$$
+\frac{\partial \rho}{\partial t} = \partial_\mu \left( \frac{1}{2} g^{\mu\nu} \partial_\nu \rho + \frac{1}{2} \rho g^{\mu\nu} \partial_\nu U \right)
+$$
+
+Imposing stationarity (\(\partial_t \rho = 0\)), we trivially recover that the equilibrium distribution is exactly the target posterior \(\rho \propto \exp(-U(\theta)) = \pi(\theta|d)\).
 
 ### Manifold MALA (`mMALA`)
 
-In highly curved posteriors, taking isotropic random steps ($$\epsilon^2 \mathbf{I}$$) is like trying to walk in a straight line on a steep, twisted mountain ridge. Manifold MALA introduces a position-dependent preconditioning matrix $$\mathbf{G}(\boldsymbol{\theta})$$ (such as the Fisher Information Matrix) to scale the drift and diffusion locally, adapting perfectly to the geometry of the target.
+In highly curved posteriors, using a globally constant metric \(g^{\mu\nu}\) is severely sub-optimal. Manifold MALA (mMALA) promotes the mass matrix to a position-dependent Riemannian metric tensor \(g_{\mu\nu}(\theta)\) (often the Fisher Information Matrix). The generalized Langevin SDE must now include corrections from the Levi-Civita connection (the Christoffel symbols \(\Gamma^\mu_{\alpha\beta}\)) to remain covariant:
+
+$$
+d\theta^\mu_t = \frac{1}{2} g^{\mu\nu}(\theta_t) \partial_\nu \log \pi(\theta_t) dt + \frac{1}{2} \Gamma^\mu_{\alpha\beta} g^{\alpha\beta} dt + e^\mu_\alpha dW^\alpha_t
+$$
+
+where \(e^\mu_\alpha\) is the vielbein (tetrad) defined by \(g^{\mu\nu} = e^\mu_\alpha e^\nu_\beta \delta^{\alpha\beta}\). This allows the diffusion to adapt perfectly to the local curvature of the target density.
 
 ### Underdamped Langevin Dynamics (`ULD`)
 
-ULD is the beautiful synthesis of HMC and MALA. We restore the momentum of our frictionless puck, but we add a friction term $$\gamma$$ and continuous thermal kicks. The momenta undergo an Ornstein-Uhlenbeck process, constantly refreshing, while the positions drift:
+ULD restores the conjugate momenta to the diffusion process, adding a continuous friction tensor \(\Gamma^\mu_\nu\) to Hamilton's equations. The momenta undergo an Ornstein-Uhlenbeck process while the positions drift:
 
 $$
-d\boldsymbol{\theta}_t = \mathbf{M}^{-1} \mathbf{p}_t dt
+d\theta^\mu_t = g^{\mu\nu} p_{\nu, t} dt
 $$
 $$
-d\mathbf{p}_t = -\nabla_{\boldsymbol{\theta}} U(\boldsymbol{\theta}_t) dt - \gamma \mathbf{M}^{-1} \mathbf{p}_t dt + \sqrt{2\gamma} \mathbf{M}^{1/2} dW_t
+dp_{\mu, t} = -\partial_\mu U(\theta_t) dt - \Gamma^\alpha_\mu p_{\alpha, t} dt + \sqrt{2 \Gamma_{\mu\alpha}} dW^\alpha_t
 $$
 
-This allows the chains to traverse highly correlated spaces robustly, without needing to perfectly tune the exact integration time of an HMC trajectory.
-
-## Step-size and Mass Adaptation
-
-Finally, we cannot expect to guess the optimal step size $$\epsilon$$ blindly. The local kernels support dual-averaging step-size adaptation to target an optimal acceptance rate (e.g., 65% for HMC, 57.4% for MALA), ensuring that our hikers are neither taking steps that are too timid nor steps so large they stumble.
+This continuous momentum refreshment robustly navigates strongly correlated spaces without the strict requirement of tuning HMC trajectory lengths.
 
 ### REFERENCES
 

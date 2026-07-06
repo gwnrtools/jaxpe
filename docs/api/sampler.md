@@ -2,55 +2,68 @@
 title: sampler
 parent: jaxpe
 layout: default
+nav_order: 5
 ---
 
-# Sec. IV: Global-Local Sampler (`jaxpe.sampler`)
+# Sec. V: Global-Local Orchestration and Detailed Balance (`jaxpe.sampler`)
 {: .no_toc }
 
 1. TOC
 {:toc}
 
-Imagine a fleet of intrepid explorers mapping a vast, rugged terrain. If they only follow the local slopes (using HMC or MALA), they will thoroughly map the valley they started in, but they will never realize there is a deeper, richer valley ten miles to the east. This is the multi-modal trap. 
+With a formally trained pushforward measure \(q_\phi\) accurately mapping the target posterior \(\pi\), we now confront the problem of orchestration. How do we rigorously couple the local covariant diffusions (HMC/MALA) with the global topological leaps provided by the Normalizing Flow, without violating the fundamental stationarity of the Markov chain?
 
-To circumvent this topological obstruction, the `sampler` orchestrates a "global-local" loop [1]. We deploy an omniscient satellite—the Normalizing Flow—that observes the explorers and learns a global map of the entire landscape: $$q_\phi(\mathbf{x}) \approx \pi(\mathbf{x}|d)$$.
+## Markov Chain Stationarity and Detailed Balance
 
-## Global-Local Orchestration
-
-The sampler operates in two beautifully synchronized phases:
-1. **Local Phase**: The parallel ensemble of explorers takes $N$ steps using a local gradient kernel, deeply investigating the micro-structure of their current valleys.
-2. **Global Phase**: The satellite beams down coordinates, proposing independent global jumps for every chain directly from the learned global map: $$\mathbf{y} \sim q_\phi(\mathbf{y})$$. 
-
-But we cannot just teleport our explorers blindly; that would violate the underlying physics (the true probability distribution) of the landscape. To strictly satisfy detailed balance (reversibility) and guarantee convergence to the exact target posterior, these global jumps are governed by the Metropolis-Hastings criterion. 
-
-Recall the exact detailed balance condition, which demands that the flux of probability from state $$\mathbf{x}$$ to state $$\mathbf{y}$$ exactly equals the reverse flux:
+The sampler operates as a discrete-time stochastic process parameterized by an alternating sequence of transition kernels \(T_{\text{local}}\) and \(T_{\text{global}}\) [1]. For the chain to converge to the exact target measure \(\pi(x)\), each transition kernel \(T(x \to y)\) must independently leave the target density invariant:
 
 $$
-\pi(\mathbf{x}|d) T(\mathbf{x} \to \mathbf{y}) = \pi(\mathbf{y}|d) T(\mathbf{y} \to \mathbf{x})
+\int_{\mathcal{M}} \pi(x) T(x \to y) d^Dx = \pi(y)
 $$
 
-For an independence sampler where the proposal $$\mathbf{y}$$ does not depend at all on the current state $$\mathbf{x}$$, the transition kernel is simply $$T(\mathbf{x} \to \mathbf{y}) = q_\phi(\mathbf{y})$$. To enforce balance, we introduce an acceptance probability $$\alpha$$, yielding the famous Metropolis-Hastings ratio:
+The strongest and most mathematically elegant sufficient condition to satisfy this integral equation is detailed balance (reversibility), which demands that the probability flux from \(x\) to \(y\) exactly balances the reverse flux from \(y\) to \(x\):
 
 $$
-\alpha(\mathbf{x} \to \mathbf{y}) = \min\left(1, \frac{\pi(\mathbf{y}|d) q_\phi(\mathbf{x})}{\pi(\mathbf{x}|d) q_\phi(\mathbf{y})}\right)
+\pi(x) T(x \to y) = \pi(y) T(y \to x)
 $$
 
-Because our satellite map $$q_\phi$$ is a highly accurate reflection of the true global mode structure, the ratio $$\pi/q_\phi$$ is very close to 1 across the entire parameter space. This ensures that the acceptance probability remains extraordinarily high even when an explorer is teleported completely across the parameter space to a disjoint mode.
+## The Independence Metropolis-Hastings Transition
 
-## `Sampler`
+During the global phase, the Normalizing Flow satellite beams down coordinates, proposing independent global leaps \(y \sim q_\phi(y)\) entirely regardless of the current state \(x\). The raw proposal probability is therefore an independence kernel: \(K(x \to y) = q_\phi(y)\).
 
-The main class orchestrating the local kernels and the global normalizing flow proposals. Under the hood, it leverages JAX's `lax.scan` for a highly efficient, statically compiled orchestration loop.
+To rigorously enforce detailed balance over this independence proposal, we subject it to the Metropolis-Hastings filter. The corrected transition kernel is:
 
-## `GlobalLocalConfig`
+$$
+T_{\text{global}}(x \to y) = q_\phi(y) \alpha(x, y) + \delta(x - y) \left[ 1 - \int_{\mathcal{M}} q_\phi(y') \alpha(x, y') d^Dy' \right]
+$$
 
-The master configuration object controlling the number of chains, neural network architecture, adaptation length, and phase scheduling.
+where \(\delta(x-y)\) is the Dirac delta distribution handling rejections, and the acceptance probability \(\alpha(x, y)\) is uniquely constrained to:
 
-## Initialization
+$$
+\alpha(x, y) = \min\left(1, \frac{\pi(y) K(y \to x)}{\pi(x) K(x \to y)}\right) = \min\left(1, \frac{\pi(y) q_\phi(x)}{\pi(x) q_\phi(y)}\right)
+$$
 
-You might ask, "Where do we drop our explorers in the first place?" Initialization is absolutely critical. If we drop them all in the same valley, the satellite will only ever learn about that one valley. 
+Because our trained flow measure \(q_\phi\) closely approximates the target posterior \(\pi\), the ratio \(\pi/q_\phi\) is order unity. This guarantees that \(\alpha(x, y) \approx 1\), allowing the chain to teleport across the parameter manifold with vanishingly small rejection rates.
 
-### `best_of_prior_init`
+## Ergodicity and the Law of Large Numbers
 
-To prevent initial mode collapse, we evaluate the log-likelihood over a massive batch (e.g., $$10^6$$) of prior draws. We then select the $$N_{\text{chains}}$$ highest-probability candidates to seed the initial chains. This explicitly ensures that all valleys with significant prior support are populated with explorers from step zero.
+When detailed balance is satisfied, the Markov chain is guaranteed to be stationary. If the chain is also irreducible and aperiodic (which it trivially is, given the global independence proposals covering the entire support), it is rigorously ergodic. This permits the application of the Birkhoff Ergodic Theorem, which states that time-averages of any observable \(f(x)\) strictly converge to the spatial averages over the invariant measure:
+
+$$
+\lim_{N \to \infty} \frac{1}{N} \sum_{i=1}^N f(x_{(i)}) = \int_{\mathcal{M}} f(x) \pi(x) d^Dx
+$$
+
+This is the foundational theorem that justifies using the discrete samples of our chains to evaluate complex astrophysical quantities like the mean chirp mass or the variance of the luminosity distance.
+
+## Orchestration Implementation (`Sampler`)
+
+The `Sampler` class rigorously orchestrates these transition kernels in a mathematically synchronized loop. Under the hood, it leverages JAX's `lax.scan` primitive to compile the alternating application of \(T_{\text{local}}\) and \(T_{\text{global}}\) into a monolithic XLA graph, resulting in orders of magnitude speedups on TPU/GPU hardware.
+
+### Initialization and Prior Support
+
+A Markov chain initialized in a vanishingly low probability region (or entirely confined to a single degenerate mode) requires a prohibitively long mixing time to achieve stationarity. 
+
+The `best_of_prior_init` subroutine explicitly remedies this by evaluating the log-likelihood over a massive Monte Carlo batch (e.g., \(N=10^6\)) drawn directly from the prior measure \(p(\theta)\). By seeding the initial chain states \(x_{(0)}\) with the highest-probability candidates, we ensure that the empirical measure of the ensemble immediately populates all valleys of significant support, effectively nullifying the burn-in phase bottleneck.
 
 ### REFERENCES
 

@@ -2,66 +2,65 @@
 title: core
 parent: jaxpe
 layout: default
+nav_order: 6
 ---
 
-# Sec. VI: Core Data Structures and Transforms (`jaxpe.core`)
+# Sec. VI: Diffeomorphic Bijections and Target Space Geometry (`jaxpe.core`)
 {: .no_toc }
 
 1. TOC
 {:toc}
 
-In this final section, we strip away the physics and the samplers to look at the bedrock: the mathematical data structures and transformations that allow `jaxpe` to function.
+In this section, we strip away the stochastic dynamics to examine the foundational geometrical substrate of `jaxpe`. Hamiltonian mechanics fundamentally assumes the parameter space is a smooth manifold topologically equivalent to \(\mathbb{R}^D\). Boundaries, sharp truncations, and finite intervals break the continuous integration of Hamilton's equations, causing the simulated momentum to reflect pathologically.
 
-## Unconstraining Bijections
+## Boundary Removal via Diffeomorphisms
 
-Gradient-based MCMC kernels, like Hamiltonian Monte Carlo, simulate continuous physical dynamics. They send our parameter "pucks" sliding endlessly across the landscape. Consequently, these kernels demand that the parameter space be topologically equivalent to an infinite, boundless plane, $$\mathbb{R}^D$$. 
+The physical universe dictates strict boundaries: a black hole mass \(m > 0\), a dimensionless spin \(a \in [0, 1]\), an inclination \(\iota \in [0, \pi]\). The physical parameter manifold \(\mathcal{M}_\theta\) is therefore a manifold with boundaries. 
 
-But the physical universe is not boundless. The mass of a black hole must be strictly positive ($m > 0$). The dimensionless spin cannot exceed the extremal Kerr limit ($a \in [0, 1]$). The inclination angle of the binary orbital plane is confined to a half-circle ($\iota \in [0, \pi]$). If our HMC puck hits a hard boundary, the simulation breaks. 
+To satisfy the geometrical requirements of the MCMC kernels, we must construct a smooth, bijective, and differentiable mapping—a diffeomorphism \(f: \mathcal{M}_\theta \to \mathcal{X}\)—that maps the bounded physical space onto an unconstrained latent manifold \(\mathcal{X} \cong \mathbb{R}^D\) [1].
 
-To solve this, we employ bijective transformations [1]. Think of these bijections as mathematical funhouse mirrors—stretching a finite, enclosed room into an infinite corridor so our MCMC puck never hits a wall, while strictly preserving the mathematical volume (probability) of the space. We map the bounded physical parameters $$\boldsymbol{\theta}$$ into an unconstrained latent space $$\mathbf{x} \in \mathbb{R}^D$$.
+### The Logarithmic Diffeomorphism
 
-### The Log Transformation
-
-For parameters with a strict lower bound $$a$$ (such as luminosity distance $$d_L > 0$$), we stretch the boundary at $$a$$ out to $$-\infty$$ using the natural logarithm:
+For parameters bounded strictly below by a threshold \(a\) (e.g., \(d_L \in (0, \infty)\)), we apply the natural logarithm to push the boundary to asymptotic infinity:
 
 $$
 x = \ln(\theta - a) \quad \iff \quad \theta = \exp(x) + a
 $$
 
-### The Logit Transformation
+### The Scaled Logit Diffeomorphism
 
-For parameters trapped in a finite interval $$[a, b]$$ (such as cosine inclination $$\cos \iota \in [-1, 1]$$), we push both boundaries out to infinity using the scaled logit mapping:
+For parameters strictly bounded in a finite interval \(\theta \in (a, b)\) (e.g., cosine inclination \(\cos \iota \in (-1, 1)\)), we utilize the scaled logit function, stretching both boundaries to \(\pm \infty\):
 
 $$
 x = \ln\left( \frac{\theta - a}{b - \theta} \right) \quad \iff \quad \theta = a + \frac{b - a}{1 + \exp(-x)}
 $$
 
-### Target Density Adjustment
+## Jacobians and Target Density Adjustments
 
-However, there is no free lunch in calculus. When we warp the physical space $$\boldsymbol{\theta}$$ into the unconstrained space $$\mathbf{x}$$, we stretch and squeeze the probability density. If we sample naively in $$\mathbf{x}$$, we will get the wrong physics.
+When we transport the MCMC process to the unconstrained manifold \(\mathcal{X}\), the probability density is geometrically distorted. The pushforward of the posterior measure \(\pi_\Theta\) under \(f\) induces a necessary volume correction governed by the Jacobian matrix \(J^\mu_\nu = \partial \theta^\mu / \partial x^\nu\).
 
-We must adjust the target probability density by the absolute value of the determinant of the Jacobian of the inverse transformation. By the change of variables formula:
-
-$$
-p_X(\mathbf{x}|d) = p_\Theta(f^{-1}(\mathbf{x})|d) \left| \det \mathbf{J}_{f^{-1}}(\mathbf{x}) \right|
-$$
-
-For example, when using the logit transformation, the explicit derivative (Jacobian) of the inverse mapping is:
+By the change of variables theorem, the exact unconstrained target density is:
 
 $$
-\frac{d\theta}{dx} = \frac{(b-a)\exp(-x)}{(1 + \exp(-x))^2} = \frac{(\theta - a)(b - \theta)}{b - a}
+\pi_X(x) = \pi_\Theta(f^{-1}(x)) \left| \det \left( \frac{\partial \theta^\mu}{\partial x^\nu} \right) \right|
 $$
 
-In the log-domain, this requires adding the log-determinant of this Jacobian to our physical log-posterior. The `jaxpe.core` module handles these adjustments automatically and differentiably under the hood. It ensures that the exact gradient $$\nabla_{\mathbf{x}} \log p_X(\mathbf{x}|d)$$ accurately reflects the warped geometry, feeding perfectly correct physics to the HMC integrators.
+Because our bijections are applied element-wise, the Jacobian matrix is strictly diagonal, reducing the determinant to a simple product of scalar derivatives. For the logit transformation, the explicit derivative element is:
+
+$$
+\frac{\partial \theta^i}{\partial x^i} = \frac{(\theta^i - a)(b - \theta^i)}{b - a}
+$$
+
+In the log-domain required by the MCMC energy potential \(U(x) = -\log \pi_X(x)\), this equates to adding the log-determinant \(\sum_i \ln | \partial_i \theta^i |\) to the physical log-posterior. The `jaxpe.core` module handles these adjustments automatically, ensuring that the gradient covector \(\partial_\mu U(x)\) perfectly aligns with the warped geometry of \(\mathcal{X}\).
 
 ## `InferenceProblem`
 
-The `InferenceProblem` class acts as the grand orchestrator connecting the physical world (`jaxpe.gw`) to the sampling engines (`jaxpe.sampler`). It encapsulates:
-- The log-likelihood function $$\ln \mathcal{L}(d|\boldsymbol{\theta})$$.
-- The joint prior density $$p(\boldsymbol{\theta})$$.
-- The composite bijection $$\mathbf{x} \leftrightarrow \boldsymbol{\theta}$$.
+The `InferenceProblem` class acts as the grand geometrical orchestrator. It encapsulates:
+1. The physical log-likelihood function \(\ln \mathcal{L}(d|\theta^\mu)\).
+2. The joint physical prior density \(\pi_{\text{prior}}(\theta^\mu)\).
+3. The composite diffeomorphism \(x^\mu = f^\mu(\theta^\nu)\).
 
-By abstracting away the tedious domain transformations, it presents a pure, infinitely smooth, unconstrained log-density $$U(\mathbf{x}) = -\log p_X(\mathbf{x}|d)$$ to the MCMC kernels, allowing the rest of the package to operate in frictionless mathematical elegance.
+By abstracting away the tedious domain transformations, it presents a pure, infinitely smooth, unconstrained log-density \(U(x)\) to the MCMC kernels, allowing the rest of the mathematical machinery to operate in pristine, frictionless elegance.
 
 ### REFERENCES
 
