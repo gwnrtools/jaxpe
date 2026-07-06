@@ -29,7 +29,7 @@ $$
 
 ## The Independence Metropolis-Hastings Transition
 
-During the global phase, the Normalizing Flow satellite beams down coordinates, proposing independent global leaps \\(y \sim q_\phi(y)\\) entirely regardless of the current state \\(x\\). The raw proposal probability is therefore an independence kernel: \\(K(x \to y) = q_\phi(y)\\).
+During the global phase, the Normalizing Flow proposes independent coordinates \\(y \sim q_\phi(y)\\) drawn entirely independently of the current state \\(x\\). The corresponding transition probability is defined strictly by the independence proposal kernel: \\(K(x \to y) = q_\phi(y)\\).
 
 To rigorously enforce detailed balance over this independence proposal, we subject it to the Metropolis-Hastings filter. The corrected transition kernel is:
 
@@ -43,7 +43,7 @@ $$
 \alpha(x, y) = \min\left(1, \frac{\pi(y) K(y \to x)}{\pi(x) K(x \to y)}\right) = \min\left(1, \frac{\pi(y) q_\phi(x)}{\pi(x) q_\phi(y)}\right)
 $$
 
-Because our trained flow measure \\(q_\phi\\) closely approximates the target posterior \\(\pi\\), the ratio \\(\pi/q_\phi\\) is order unity. This guarantees that \\(\alpha(x, y) \approx 1\\), allowing the chain to teleport across the parameter manifold with vanishingly small rejection rates.
+Because the trained flow measure \\(q_\phi\\) closely approximates the exact posterior \\(\pi\\), the ratio \\(\pi/q_\phi\\) approaches unity. This guarantees that \\(\alpha(x, y) \approx 1\\), allowing the Markov chain to traverse large distances across the parameter manifold with vanishingly small rejection rates.
 
 ## Ergodicity and the Law of Large Numbers
 

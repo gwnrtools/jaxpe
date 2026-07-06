@@ -11,7 +11,7 @@ nav_order: 6
 1. TOC
 {:toc}
 
-In this section, we strip away the stochastic dynamics to examine the foundational geometrical substrate of `jaxpe`. Hamiltonian mechanics fundamentally assumes the parameter space is a smooth manifold topologically equivalent to \\(\mathbb{R}^D\\). Boundaries, sharp truncations, and finite intervals break the continuous integration of Hamilton's equations, causing the simulated momentum to reflect pathologically.
+This section formalizes the geometrical substrate of `jaxpe`. Continuous Hamiltonian integration fundamentally assumes that the parameter space is a smooth differentiable manifold topologically equivalent to \\(\mathbb{R}^D\\). Boundaries, sharp truncations, and finite intervals break the continuity of Hamilton's equations, inducing pathological reflection of the conjugate momenta.
 
 ## Boundary Removal via Diffeomorphisms
 
@@ -37,7 +37,7 @@ $$
 
 ## Jacobians and Target Density Adjustments
 
-When we transport the MCMC process to the unconstrained manifold \\(\mathcal{X}\\), the probability density is geometrically distorted. The pushforward of the posterior measure \\(\pi_\Theta\\) under \\(f\\) induces a necessary volume correction governed by the Jacobian matrix \\(J^\mu_\nu = \partial \theta^\mu / \partial x^\nu\\).
+Upon mapping the posterior measure to the unconstrained manifold \\(\mathcal{X}\\), the probability density undergoes geometric distortion. The pushforward of the posterior measure \\(\pi_\Theta\\) under the diffeomorphism \\(f\\) induces a strict volume correction governed by the Jacobian matrix \\(J^\mu_\nu = \partial \theta^\mu / \partial x^\nu\\).
 
 By the change of variables theorem, the exact unconstrained target density is:
 
@@ -68,7 +68,7 @@ The `InferenceProblem` class acts as the grand geometrical orchestrator. It enca
 2. The joint physical prior density \\(\pi_{\text{prior}}(\theta^\mu)\\).
 3. The composite diffeomorphism \\(x^\mu = f^\mu(\theta^\nu)\\).
 
-By abstracting away the tedious domain transformations, it presents a pure, infinitely smooth, unconstrained log-density \\(U(x)\\) to the MCMC kernels, allowing the rest of the mathematical machinery to operate in pristine, frictionless elegance.
+By encapsulating the domain transformations, the `InferenceProblem` yields a globally smooth, unconstrained scalar potential \\(U(x)\\) that rigorously satisfies the continuity requirements for symplectic integration.
 
 ```python
 from jaxpe.core.problem import InferenceProblem

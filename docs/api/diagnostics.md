@@ -11,7 +11,7 @@ nav_order: 7
 1. TOC
 {:toc}
 
-We conclude this review by addressing the rigorous validation of the generated stochastic ensembles. A Markov chain is merely a sequence of correlated samples; distinguishing a transient, non-stationary burn-in phase from true ergodic mixing across the invariant measure \\(\pi(x)\\) requires strict statistical criteria.
+This section details the statistical validation of the generated Markov chain ensembles. A Markov chain is defined as a sequence of correlated samples; distinguishing transient, non-stationary adaptation phases from ergodic mixing across the invariant measure \\(\pi(x)\\) requires robust convergence diagnostics.
 
 ## Split R-hat Convergence Criterion
 

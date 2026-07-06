@@ -11,13 +11,27 @@ nav_order: 3
 1. TOC
 {:toc}
 
-How do we actually explore a 15-dimensional posterior landscape? Standard random-walk Metropolis-Hastings proposals explore space via diffusive Brownian motion, resulting in an exploration radius that scales as \\(R \propto \sqrt{N}\\) after \\(N\\) steps. This is disastrously inefficient in high dimensions. In this section, we formulate the MCMC kernels of `jaxpe` that leverage the differential geometry of symplectic manifolds to glide seamlessly through the parameter space.
+In high-dimensional parameter spaces typical of gravitational-wave inference (\\(D \approx 15\\)), standard random-walk Metropolis-Hastings proposals driven by isotropic Brownian motion suffer from severe diffusive inefficiency, yielding an exploration radius that scales as \\(R \propto \sqrt{N}\\). To circumvent this, the transition kernels in `jaxpe` leverage the differential geometry of symplectic manifolds to generate coherent, directed trajectories across the posterior measure.
 
 ## Hamiltonian Monte Carlo on Symplectic Manifolds
 
-We elevate the statistical problem of drawing samples from a posterior \\(\pi(\theta^\mu|d)\\) into a deterministic simulation of classical mechanics [1, 2]. Let our parameter space be a Riemannian manifold \\(\mathcal{M}\\) with coordinates \\(\theta^\mu\\). We consider the cotangent bundle \\(T^*\mathcal{M}\\), which is naturally a symplectic manifold equipped with a closed, non-degenerate 2-form \\(\omega = d\theta^\mu \wedge dp_\mu\\), where \\(p_\mu\\) are the conjugate momenta.
+### The Classical Hamiltonian Formalism
+In classical mechanics, a Hamiltonian \\(H\\) is a scalar function that represents the total energy of a physical system. The fundamental objective of Hamiltonian mechanics is to describe the deterministic time evolution of this system. Rather than working solely with spatial coordinates, the Hamiltonian framework operates on the phase space of the system, defined by generalized coordinates (positions) \\(\theta^\mu\\) and their conjugate momenta \\(p_\mu\\). 
 
-We define the Hamiltonian scalar function \\(H: T^*\mathcal{M} \to \mathbb{R}\\) as the sum of the potential energy (the negative log-posterior) and the kinetic energy:
+By evaluating the partial derivatives of the Hamiltonian scalar \\(H(\theta, p)\\), Hamilton's equations of motion generate a vector field that perfectly dictates the trajectory of the particle over time, conserving total energy and preserving the volume of the phase space.
+
+### Mapping Statistics to Mechanics
+Hamiltonian Monte Carlo (HMC) [1, 2] achieves extraordinary sampling efficiency by establishing a strict isomorphism between the purely statistical problem of sampling a probability distribution and the mechanical problem of simulating a physical particle's trajectory. 
+
+We elevate the \\(D\\)-dimensional parameter space of our gravitational-wave problem to act as the positional manifold \\(\mathcal{M}\\). To construct the required phase space, we introduce a set of auxiliary variables \\(p_\mu\\) that serve as the conjugate momenta. Geometrically, this combined space is the cotangent bundle \\(T^*\mathcal{M}\\), which is naturally a symplectic manifold equipped with a closed, non-degenerate 2-form \\(\omega = d\theta^\mu \wedge dp_\mu\\).
+
+The mechanical terms map to the statistical problem as follows:
+1. **Position (\\(\theta^\mu\\))**: The actual astrophysical parameters we wish to infer (e.g., chirp mass, spin).
+2. **Momentum (\\(p_\mu\\))**: Auxiliary variables artificially introduced to grant the system "inertia," allowing it to glide coherently through the parameter space.
+3. **Potential Energy (\\(U(\theta)\\))**: Defined strictly as the negative log-posterior, \\(U(\theta) = -\log \pi(\theta|d)\\). The high-probability peaks of the posterior become deep gravitational wells that attract the particle.
+4. **Kinetic Energy (\\(K(p)\\))**: A quadratic form defining the energy of the auxiliary momenta, parameterized by a positive-definite inverse mass matrix \\(g^{\mu\nu}\\).
+
+We define the Hamiltonian scalar function \\(H: T^*\mathcal{M} \to \mathbb{R}\\) as the sum of these energies:
 
 $$
 H(\theta^\mu, p_\mu) = U(\theta^\mu) + K(p_\mu) = -\log \pi(\theta^\mu|d) + \frac{1}{2} g^{\mu\nu} p_\mu p_\nu
@@ -67,7 +81,7 @@ kernel = HMC(step_size=1e-2, n_leapfrog=10)
 
 ## Langevin Diffusion and the Fokker-Planck Equation
 
-Suppose we abandon the frictionless determinism of HMC and instead immerse a particle in a heat bath subject to a potential gradient. This is the Metropolis-Adjusted Langevin Algorithm (MALA) [3], representing the overdamped limit of Langevin diffusion.
+As an alternative to the deterministic integration of Hamilton's equations, the Metropolis-Adjusted Langevin Algorithm (MALA) [3] constructs proposals by simulating the overdamped limit of Langevin diffusion.
 
 The continuous-time stochastic differential equation (SDE) governing the parameter vector \\(\theta^\mu_t\\) on a flat manifold is:
 

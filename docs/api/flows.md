@@ -11,7 +11,7 @@ nav_order: 4
 1. TOC
 {:toc}
 
-Let us pause to consider the central topological bottleneck of our problem: disconnected posterior support. A local MCMC explorer driven by covariant gradients will eternally map a connected domain, completely blind to degenerate modes separated by regions of vanishing probability measure. To bridge these topological gaps, `jaxpe` employs Normalizing Flows to construct a global, continuous proxy measure of the target posterior.
+A primary topological challenge in gravitational-wave inference is the existence of disconnected posterior support. A local MCMC transition kernel driven exclusively by covariant gradients will systematically map a single connected domain, exhibiting non-ergodicity when degenerate modes are separated by regions of vanishing probability measure. To bridge these topological barriers, `jaxpe` employs Normalizing Flows to construct a global, continuous proxy measure of the exact target posterior.
 
 ## Pushforward Measures and Diffeomorphisms
 
@@ -77,7 +77,7 @@ While mathematically beautiful, CNFs require the numerical integration of an ODE
 
 ## Variational Training via the Kullback-Leibler Divergence
 
-To teach the neural network to mold the base measure into the exact topology of the target posterior, we minimize the Kullback-Leibler (KL) divergence from the true posterior measure \\(P\\) to the flow measure \\(Q_\phi\\). 
+To optimize the diffeomorphic mapping such that the pushforward measure \\(Q_\phi\\) converges to the exact topology of the true posterior measure \\(P\\), we minimize the Kullback-Leibler (KL) divergence from \\(P\\) to \\(Q_\phi\\). 
 
 The KL divergence is the expectation of the logarithmic Radon-Nikodym derivative between the two measures:
 
