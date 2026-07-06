@@ -50,3 +50,7 @@ This document meticulously records the experiments, observations, and key learni
   - Restored full grid: `max_ode_steps=2048`, `n_ode_grid=512`
   - **The Fix**: Added `adjoint=dfx.RecursiveCheckpointAdjoint(checkpoints=16)` to the `diffeqsolve` call.
 - **Hypothesis**: By explicitly instructing JAX/Diffrax to trade compute for memory via a binomial checkpointing scheme, the ODE solver state is checkpointed instead of saving the entire AD tape. This should keep the compilation memory footprint small enough to allow the full 4PN model to compile and run successfully.
+- **Command Line**:
+  ```bash
+  time XLA_FLAGS="--xla_cpu_parallel_codegen_split_count=1" MALLOC_ARENA_MAX=1 JAX_PLATFORMS=cpu conda run -n lalsuite-dev python examples/05_esigma_injection.py --n-chains 20 --n-epochs 10 --n-production 100
+  ```

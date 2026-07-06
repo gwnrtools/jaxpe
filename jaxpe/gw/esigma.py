@@ -1,34 +1,32 @@
-"""ESIGMA inspiral waveform adapter: esigmapy's JAX backend as a jaxpe WaveformModel.
+r"""ESIGMA inspiral waveform adapter: esigmapy's JAX backend as a jaxpe WaveformModel.
 
-esigmapy's high-level API (``get_inspiral_esigma_waveform_jax``) returns numpy arrays
-and is not traceable end-to-end (dynamic-shape ISCO truncation, host-side spherical
-harmonics). This adapter rebuilds the same pipeline from esigmapy's *differentiable
-primitives* so the whole map ``params -> (h+, hx)`` jits, vmaps over chains, and
-differentiates for gradient-based kernels:
+Motivation & Math
+-----------------
+To extract the underlying astrophysics of coalescing compact binaries, we construct highly 
+accurate waveform templates. In the framework of black hole perturbation theory, the 
+gravitational radiation is encoded in the Newman-Penrose scalar $\Psi_4$, which obeys the 
+Teukolsky equation. Asymptotic evaluation of $\Psi_4$ yields the two polarization states 
+$h_+$ and $h_\times$. For eccentric binaries, the dynamics are solved via a coupled set of 
+Post-Newtonian (PN) ordinary differential equations (ODEs).
 
-  1. diffrax Tsit5 integration of the eccentric x-model ODEs on a fixed-*length*
-     time grid spanning [0, T_max(params)] (static shape, parameter-dependent span);
-  2. sub-grid ISCO-crossing time by linear interpolation in x, so the coalescence
-     epoch is smooth in the parameters;
-  3. the detector time grid is mapped to dynamics time with the ISCO pinned at
-     ``geocent_time``, and (x, e, l, phi) are interpolated onto it;
-  4. Kepler solve / separation / phi-dot from esigmapy's vmappable kernels, r-dot by
-     finite differences (mirroring esigmapy's own np.gradient post-processing);
-  5. (l, m) modes via ``hlmGOresult_jax`` for m > 0, negative m from the
-     nonprecessing symmetry h_{l,-m} = (-1)^l conj(h_{lm});
-  6. polarizations with jaxpe's JAX spin-weighted harmonics (LAL-validated).
+The ESIGMA model implemented here evolves the binary through an eccentric inspiral. The 
+orbital dynamics—characterized by the semi-latus rectum $p$ (or inverse radius $x$), 
+eccentricity $e$, and mean anomaly $l$—are integrated utilizing the Tsit5 solver. The 
+radiation field is then constructed by decomposing the strain into spin-weighted spherical 
+harmonics ${}_{-2}Y_{lm}(\iota, \phi)$:
+$$ h_+ - i h_\times = \sum_{l=2}^{\infty} \sum_{m=-l}^{l} h_{lm}(t) {}_{-2}Y_{lm}(\iota, \phi) $$
 
-The 4PN self-force horizon-flux coefficient uses mpmath's complex polygamma in
-esigmapy (host-side only); since it equals eta * g(spin1z), g is tabulated on a dense
-spin grid at construction and linearly interpolated inside the trace.
+esigmapy's high-level API returns non-traceable numpy arrays. This adapter meticulously 
+rebuilds the pipeline from JAX-differentiable primitives so the map 
+$\boldsymbol{\theta} \to (h_+, h_\times)$ is fully compatible with our gradient-based 
+MCMC samplers.
 
-Parameter names (bilby-style, matching jaxpe.gw.priors):
-  chirp_mass [Msun], mass_ratio (<=1), eccentricity, mean_anomaly, spin1z, spin2z,
-  luminosity_distance [Mpc], inclination, phase, geocent_time [GPS s].
-Optional parameters default to 0 when not sampled.
-
-Note: inspiral-only — the waveform is smoothly tapered off just before the ISCO
-(``taper_off_seconds``); there is no merger-ringdown attachment.
+Implementation details:
+  1. diffrax Tsit5 integration of the eccentric ODEs on a fixed-length time grid.
+  2. Sub-grid ISCO-crossing localization via linear interpolation.
+  3. Kepler's equation solved over the mapped detector time grid.
+  4. Spherical harmonic modes $h_{lm}$ built from esigmapy's kernels, applying the 
+     non-precessing symmetry $h_{l,-m} = (-1)^l h_{lm}^*$.
 """
 
 import jax
@@ -159,6 +157,7 @@ class ESIGMAInspiral:
             saveat=dfx.SaveAt(ts=s_grid),
             stepsize_controller=dfx.PIDController(rtol=self.ode_eps, atol=self.ode_eps),
             max_steps=self.max_ode_steps,
+            adjoint=dfx.RecursiveCheckpointAdjoint(checkpoints=16),
         )
         return s_grid * t_max, sol.ys
 
@@ -176,84 +175,88 @@ class ESIGMAInspiral:
     # ------------------------------------------------------------------ waveform
 
     def __call__(self, params: dict, times: jax.Array):
-        mc = params["chirp_mass"]
-        q = params["mass_ratio"]
-        eta = q / (1.0 + q) ** 2
-        m_total = mc / eta**0.6
-        m1 = m_total / (1.0 + q)
-        m2 = m_total * q / (1.0 + q)
-        s1z = params.get("spin1z", jnp.zeros(()))
-        s2z = params.get("spin2z", jnp.zeros(()))
-        e0 = params.get("eccentricity", jnp.zeros(()))
-        l0 = params.get("mean_anomaly", jnp.zeros(()))
-        iota = params["inclination"]
-        beta = params["phase"]
-        t_c = params["geocent_time"]
-        r_si = params["luminosity_distance"] * self._mpc_m
+        @jax.remat
+        def _compute(params, times):
+            mc = params["chirp_mass"]
+            q = params["mass_ratio"]
+            eta = q / (1.0 + q) ** 2
+            m_total = mc / eta**0.6
+            m1 = m_total / (1.0 + q)
+            m2 = m_total * q / (1.0 + q)
+            s1z = params.get("spin1z", jnp.zeros(()))
+            s2z = params.get("spin2z", jnp.zeros(()))
+            e0 = params.get("eccentricity", jnp.zeros(()))
+            l0 = params.get("mean_anomaly", jnp.zeros(()))
+            iota = params["inclination"]
+            beta = params["phase"]
+            t_c = params["geocent_time"]
+            r_si = params["luminosity_distance"] * self._mpc_m
 
-        m_sec = m_total * MTSUN_SI
-        x_init = (m_sec * jnp.pi * self.f_lower) ** (2.0 / 3.0)
+            m_sec = m_total * MTSUN_SI
+            x_init = (m_sec * jnp.pi * self.f_lower) ** (2.0 / 3.0)
 
-        ts, ys = self._integrate(x_init, e0, l0, eta, m1, m2, s1z, s2z)
-        x_a, e_a, l_a, phi_a = ys[:, 0], ys[:, 1], ys[:, 2], ys[:, 3]
-        t_isco = self._isco_time(ts, x_a, self.x_final, ts[-1])
+            ts, ys = self._integrate(x_init, e0, l0, eta, m1, m2, s1z, s2z)
+            x_a, e_a, l_a, phi_a = ys[:, 0], ys[:, 1], ys[:, 2], ys[:, 3]
+            t_isco = self._isco_time(ts, x_a, self.x_final, ts[-1])
 
-        # detector grid -> dynamics time (geometric units), ISCO pinned at t_c
-        t_geo = (times - t_c) / m_sec + t_isco
-        valid = (t_geo >= 0.0) & (t_geo <= t_isco)
-        tq = jnp.clip(t_geo, 0.0, t_isco)
+            # detector grid -> dynamics time (geometric units), ISCO pinned at t_c
+            t_geo = (times - t_c) / m_sec + t_isco
+            valid = (t_geo >= 0.0) & (t_geo <= t_isco)
+            tq = jnp.clip(t_geo, 0.0, t_isco)
 
-        x_t = jnp.interp(tq, ts, x_a)
-        e_t = jnp.interp(tq, ts, e_a)
-        l_t = jnp.interp(tq, ts, l_a)
-        phi_t = jnp.interp(tq, ts, phi_a)
+            x_t = jnp.interp(tq, ts, x_a)
+            e_t = jnp.interp(tq, ts, e_a)
+            l_t = jnp.interp(tq, ts, l_a)
+            phi_t = jnp.interp(tq, ts, phi_a)
 
-        u_t = jax.vmap(self._kepler, in_axes=(0, 0))(l_t, e_t)
-        r_t = jax.vmap(lambda u, x, e: self._separation(u, eta, x, e, m1, m2, s1z, s2z))(
-            u_t, x_t, e_t
-        )
-        phidot_t = jax.vmap(
-            lambda u, x, e: self._dphi_dt(u, eta, m1, m2, s1z, s2z, x, e, self.mode_pn_order)
-        )(u_t, x_t, e_t)
-        dt_geo = (times[1] - times[0]) / m_sec
-        rdot_t = jnp.gradient(r_t) / dt_geo
-
-        # modes in esigmapy's conventions: r in Msun units, phidot in 1/Msun, R in m
-        hlm_batch = jax.vmap(
-            self._hlm,
-            in_axes=(None, None, None, None, 0, 0, 0, 0, None, None, None, None, 0),
-        )
-        from .harmonics import spin_weighted_ylm
-
-        h = jnp.zeros(times.shape, dtype=jnp.complex128)
-        for l, m in self.modes:
-            hlm = (
-                hlm_batch(
-                    l,
-                    m,
-                    m_total,
-                    eta,
-                    r_t * m_total,
-                    rdot_t,
-                    phi_t,
-                    phidot_t / m_total,
-                    r_si,
-                    self.mode_pn_order,
-                    s1z,
-                    s2z,
-                    x_t,
-                )
-                * self._mrsun
+            u_t = jax.vmap(self._kepler, in_axes=(0, 0))(l_t, e_t)
+            r_t = jax.vmap(lambda u, x, e: self._separation(u, eta, x, e, m1, m2, s1z, s2z))(
+                u_t, x_t, e_t
             )
-            # h = sum_lm h_lm * (-2)Y_lm; negative m via h_{l,-m} = (-1)^l conj(h_lm)
-            h = h + hlm * spin_weighted_ylm(iota, beta, l, m)
-            h = h + (-1.0) ** l * jnp.conj(hlm) * spin_weighted_ylm(iota, beta, l, -m)
+            phidot_t = jax.vmap(
+                lambda u, x, e: self._dphi_dt(u, eta, m1, m2, s1z, s2z, x, e, self.mode_pn_order)
+            )(u_t, x_t, e_t)
+            dt_geo = (times[1] - times[0]) / m_sec
+            rdot_t = jnp.gradient(r_t) / dt_geo
 
-        # smooth turn-on and pre-ISCO turn-off tapers (widths in geometric time)
-        on_geo = jnp.maximum(self.taper_on_seconds / m_sec, 1e-12)
-        off_geo = jnp.maximum(self.taper_off_seconds / m_sec, 1e-12)
-        w_on = 0.5 - 0.5 * jnp.cos(jnp.pi * jnp.clip(t_geo / on_geo, 0.0, 1.0))
-        w_off = 0.5 - 0.5 * jnp.cos(jnp.pi * jnp.clip((t_isco - t_geo) / off_geo, 0.0, 1.0))
-        w = jnp.where(valid, w_on * w_off, 0.0)
+            # modes in esigmapy's conventions: r in Msun units, phidot in 1/Msun, R in m
+            hlm_batch = jax.vmap(
+                self._hlm,
+                in_axes=(None, None, None, None, 0, 0, 0, 0, None, None, None, None, 0),
+            )
+            from .harmonics import spin_weighted_ylm
 
-        return w * h.real, -w * h.imag
+            h = jnp.zeros(times.shape, dtype=jnp.complex128)
+            for l, m in self.modes:
+                hlm = (
+                    hlm_batch(
+                        l,
+                        m,
+                        m_total,
+                        eta,
+                        r_t * m_total,
+                        rdot_t,
+                        phi_t,
+                        phidot_t / m_total,
+                        r_si,
+                        self.mode_pn_order,
+                        s1z,
+                        s2z,
+                        x_t,
+                    )
+                    * self._mrsun
+                )
+                # h = sum_lm h_lm * (-2)Y_lm; negative m via h_{l,-m} = (-1)^l conj(h_lm)
+                h = h + hlm * spin_weighted_ylm(iota, beta, l, m)
+                h = h + (-1.0) ** l * jnp.conj(hlm) * spin_weighted_ylm(iota, beta, l, -m)
+
+            # smooth turn-on and pre-ISCO turn-off tapers (widths in geometric time)
+            on_geo = jnp.maximum(self.taper_on_seconds / m_sec, 1e-12)
+            off_geo = jnp.maximum(self.taper_off_seconds / m_sec, 1e-12)
+            w_on = 0.5 - 0.5 * jnp.cos(jnp.pi * jnp.clip(t_geo / on_geo, 0.0, 1.0))
+            w_off = 0.5 - 0.5 * jnp.cos(jnp.pi * jnp.clip((t_isco - t_geo) / off_geo, 0.0, 1.0))
+            w = jnp.where(valid, w_on * w_off, 0.0)
+
+            return w * h.real, -w * h.imag
+
+        return _compute(params, times)

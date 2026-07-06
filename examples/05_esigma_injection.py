@@ -13,6 +13,8 @@ from pathlib import Path
 import jax
 
 jax.config.update("jax_enable_x64", True)
+# Enable persistent compilation cache so XLA doesn't recompile on subsequent runs
+jax.config.update("jax_compilation_cache_dir", str(Path.home() / ".jax_cache"))
 
 import jax.numpy as jnp
 import numpy as np
@@ -38,10 +40,15 @@ def main(n_chains: int = 100, n_epochs: int = 100, n_production: int = 2000):
     duration = 4.0
     t_c = 1126259462.4
 
+    print("Initializing ESIGMA waveform model...")
+    print("  Using rad_pn_order=8, mode_pn_order=8 (4PN) and memory-efficient adjoint to profile performance.")
     waveform = ESIGMAInspiral(
         f_lower=f_lower,
         modes=((2, 2), (3, 3)),
-        n_ode_grid=1024,
+        rad_pn_order=8,
+        mode_pn_order=8,
+        n_ode_grid=512,
+        max_ode_steps=2048,
     )
 
     INJECTION = dict(
@@ -105,8 +112,11 @@ def main(n_chains: int = 100, n_epochs: int = 100, n_production: int = 2000):
     x0 = best_of_prior_init(key, problem, cfg.n_chains, n_draws=1_000)
     print(f"init: best-of-prior in {time.time() - t0:.1f} s")
 
+    print(f"Starting sampler.run with {n_chains} chains... (This will trigger XLA compilation)")
+    t0 = time.time()
     res = sampler.run(key, x0=x0)
     dt_run = time.time() - t0
+    print("Sampling complete!")
 
     phys = sampler.to_physical(res.samples)
     flat = phys.reshape(-1, problem.n_dim)
