@@ -5,18 +5,31 @@ The engine-facing contract is ``WaveformModel``: a callable
     (params: dict[str, scalar], times: (n,) array of geocentric GPS seconds)
         -> (h_plus, h_cross) each of shape (n,)
 
-that is JAX-traceable and (for gradient kernels) differentiable in the parameters.
-Your production JAX waveform plugs in by satisfying this signature — nothing in
-``jaxpe.gw`` depends on how the polarizations are computed.
+that is JAX-traceable and differentiable in the parameters.
 
-``ToyChirp`` is a quadrupole chirp with PN-flavoured frequency evolution. It exists to
-exercise and validate the pipeline (its injections are recovered with itself), NOT for
-production science: the PN coefficients are truncated and not meant to match any
-LALSimulation approximant.
+Motivation & Math
+-----------------
+In the linear regime of General Relativity, the metric perturbation $h_{\mu\nu}$ far from 
+the source can be decomposed into two transverse-traceless (TT) polarization states, 
+$h_+$ and $h_\\times$. For a binary system in the inspiral phase, the dominant radiation 
+arises from the time-varying mass quadrupole moment $I_{ij}$. To leading order, the 
+strain at a distance $d$ is:
+$$ h_{ij}^{\\text{TT}} = \\frac{2G}{c^4 d} \\ddot{I}_{ij}^{\\text{TT}}(t - d/c) $$
 
-Parameter names follow bilby conventions where they overlap:
-``chirp_mass`` [Msun], ``mass_ratio`` (m2/m1 <= 1), ``luminosity_distance`` [Mpc],
-``inclination``, ``phase``, ``geocent_time`` [GPS s].
+For a binary of component masses $m_1$ and $m_2$ (total mass $M=m_1+m_2$, symmetric 
+mass ratio $\\eta = m_1 m_2 / M^2$), the orbital phase evolution is governed by the 
+loss of energy and angular momentum to gravitational radiation. The Post-Newtonian (PN) 
+expansion characterizes this evolution as an asymptotic series in $v/c$.
+
+The ``ToyChirp`` model provided here implements a truncated PN frequency and phase 
+evolution up to the Innermost Stable Circular Orbit (ISCO). While not a production-level 
+LALSimulation approximant, it rigorously exposes the non-linear relationship between the 
+masses $(\\mathcal{M}_c, q)$, the phase $\\phi_c$, and the resulting wave morphology, 
+serving as a robust pedagogical sandbox for parameter estimation.
+
+Parameter names follow standard conventions:
+``chirp_mass`` [Msun], ``mass_ratio`` ($q \le 1$), ``luminosity_distance`` [Mpc],
+``inclination`` ($\\iota$), ``phase`` ($\\phi_c$), ``geocent_time`` ($t_c$).
 """
 
 from collections.abc import Callable

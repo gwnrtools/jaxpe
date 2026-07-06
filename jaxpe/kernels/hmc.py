@@ -1,25 +1,31 @@
 """Hamiltonian Monte Carlo (HMC) with a fixed-length leapfrog trajectory.
 
-Hamiltonian Monte Carlo solves the "random walk" problem of standard MCMC by
-using gradient information to simulate Hamiltonian dynamics. By treating the negative
-log-posterior as a potential energy well, we can assign a random momentum to our chain
-and let it "roll" along the contours of the probability distribution.
+Hamiltonian Monte Carlo (HMC) reformulates the statistical sampling problem as a 
+classical mechanics simulation. To efficiently explore the high-dimensional, highly 
+correlated posterior manifold of a gravitational-wave event, HMC suppresses random-walk 
+behavior by exploiting the exact gradient of the posterior, driving coherent excursions 
+across the parameter space.
 
 Motivation & Math
 -----------------
-Let $x$ be the position (our parameters $\theta$) and $p$ be an auxiliary momentum variable.
-We define a Hamiltonian $H(x, p)$:
-$$ H(x, p) = U(x) + K(p) $$
-where $U(x) = -\log \pi(x)$ is the potential energy (negative log-posterior) and
-$K(p) = \frac{1}{2} p^T M^{-1} p$ is the kinetic energy, with $M$ being the mass matrix.
+Let $\mathbf{q} \in \mathbb{R}^n$ denote our target parameters (the position in 
+configuration space) and $\mathbf{p} \in \mathbb{R}^n$ denote an auxiliary momentum vector. 
+We construct the phase space $(\mathbf{q}, \mathbf{p})$ and define a Hamiltonian:
+$$ H(\mathbf{q}, \mathbf{p}) = U(\mathbf{q}) + K(\mathbf{p}) $$
+where $U(\mathbf{q}) = -\log \pi(\mathbf{q}|d)$ is the potential energy (the negative 
+log-posterior of the GW data) and $K(\mathbf{p}) = \frac{1}{2} \mathbf{p}^T \mathbf{M}^{-1} \mathbf{p}$ 
+is the kinetic energy for a chosen mass matrix $\mathbf{M}$.
 
-Hamilton's equations describe the time evolution of this system:
-$$ \frac{dx}{dt} = \frac{\partial H}{\partial p} = M^{-1} p $$
-$$ \frac{dp}{dt} = -\frac{\partial H}{\partial x} = -\nabla U(x) = \nabla \log \pi(x) $$
+The system evolves along contours of constant $H$ according to Hamilton's equations:
+$$ \frac{d\mathbf{q}}{dt} = \frac{\partial H}{\partial \mathbf{p}} = \mathbf{M}^{-1} \mathbf{p} $$
+$$ \frac{d\mathbf{p}}{dt} = -\frac{\partial H}{\partial \mathbf{q}} = \nabla_{\mathbf{q}} \log \pi(\mathbf{q}|d) $$
 
-Since $H(x,p)$ is conserved along these trajectories, a perfect simulation would always
-be accepted in the Metropolis-Hastings step. In practice, we discretize time using the
-leapfrog integrator.
+By Liouville's theorem, this flow is volume-preserving. Furthermore, the symplectic 
+structure of Hamilton's equations ensures that the transformation is reversible. 
+In practice, we discretize time using a symplectic integrator—the leapfrog algorithm. 
+Because the numerical integration introduces $\mathcal{O}(\epsilon^2)$ energy errors, 
+we append a Metropolis-Hastings acceptance step based on the energy discrepancy 
+$\Delta H = H(\mathbf{q}_{\text{new}}, \mathbf{p}_{\text{new}}) - H(\mathbf{q}, \mathbf{p})$.
 
 Implementation Details
 ----------------------
