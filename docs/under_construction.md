@@ -56,3 +56,13 @@ This document meticulously records the experiments, observations, and key learni
   ```
 - **Result**: The compiler churned for **45 minutes** and then crashed with the exact same `LLVM ERROR: Unable to allocate section memory!`
 - **Learning**: Even with `RecursiveCheckpointAdjoint(checkpoints=16)`, the unrolled reverse-AD tape for 2048 steps of the highly complex 4PN waveform over 20 parallel chains is simply too massive for 31 GB of RAM. The adjoint checkpointing mitigated some pressure, but not enough to cross the finish line.
+
+## 7. Current Run: 4PN + Relaxed ODE Tolerance (1e-4)
+- **Configuration**:
+  - Restored full precision: `4PN` (`rad_pn_order=8`, `mode_pn_order=8`)
+  - **The Fix**: Relaxed the ODE solver tolerance `ode_eps` from a strict `1e-8` down to `1e-4`. This allows the Tsit5 solver to take much larger adaptive steps, securely completing the inspiral within `256` steps. We bounded `max_ode_steps=256` and `n_ode_grid=256`.
+- **Hypothesis**: By allowing the solver to take larger steps, the maximum bound of the AD tape loop is slashed by an order of magnitude (from 2048 to 256), which should definitively prevent the LLVM compiler from running out of memory while retaining the 4PN mathematics.
+- **Command Line**:
+  ```bash
+  time XLA_FLAGS="--xla_cpu_parallel_codegen_split_count=1" MALLOC_ARENA_MAX=1 JAX_PLATFORMS=cpu conda run -n lalsuite-dev python examples/05_esigma_injection.py --n-chains 20 --n-epochs 10 --n-production 100
+  ```
