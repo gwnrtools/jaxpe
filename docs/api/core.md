@@ -1,6 +1,6 @@
 ---
 title: core
-parent: API Reference
+parent: jaxpe
 layout: default
 ---
 

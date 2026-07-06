@@ -1,67 +1,37 @@
 ---
 title: sampler
-parent: API Reference
+parent: jaxpe
 layout: default
 ---
 
-# `jaxpe.sampler`
+# Sec. IV: Global-Local Sampler (`jaxpe.sampler`)
 {: .no_toc }
 
 1. TOC
 {:toc}
 
-The `sampler` module provides the orchestration loop for the flowMC-style global-local sampling algorithm.
+Standard local MCMC kernels (like HMC or MALA) are extraordinarily efficient at exploring the local geometry of a single posterior mode. However, the true gravitational-wave posterior is notoriously multi-modal. Local gradients provide no information about disconnected modes, trapping the chains.
+
+## Global-Local Orchestration
+
+To circumvent this topological obstruction, the `sampler` orchestrates a "global-local" loop. Once the Normalizing Flow is trained on accumulated MCMC samples, it acts as an analytic proxy for the posterior: $$q_\phi(\mathbf{x}) \approx \pi(\mathbf{x}|d)$$. 
+
+We then propose independent global jumps $$\mathbf{y} \sim q_\phi(\mathbf{y})$$ and accept them via the Metropolis-Hastings criterion:
+
+$$
+\alpha(\mathbf{x} \to \mathbf{y}) = \min\left(1, \frac{\pi(\mathbf{y}|d) q_\phi(\mathbf{x})}{\pi(\mathbf{x}|d) q_\phi(\mathbf{y})}\right)
+$$
+
+Because the learned density $$q_\phi$$ accurately approximates the disconnected mode structure, this acceptance probability remains high even for inter-modal jumps.
 
 ## `Sampler`
 
 The main class that orchestrates the local kernels and the global normalizing flow proposals.
 
-```python
-class Sampler:
-    def __init__(self, local_kernel, problem, config):
-        """
-        Initialize the Sampler.
-        """
-        pass
-
-    def run(self, key, x0):
-        """
-        Execute the sampling loop.
-        """
-        pass
-
-    def to_physical(self, samples):
-        """
-        Transform the raw unconstrained samples back into the physical space.
-        """
-        pass
-```
-
 ## `GlobalLocalConfig`
 
-Configuration object for the `Sampler`.
-
-```python
-class GlobalLocalConfig:
-    def __init__(self, n_chains):
-        """
-        Configure the number of chains and other hyper-parameters.
-        """
-        pass
-```
+Configuration object controlling the number of chains, neural network architecture, and adaptation.
 
 ## Initialization
 
-Initialization is critical for highly multimodal posteriors (like GW PE).
-
-### `best_of_prior_init`
-
-Evaluates the log-likelihood over a large number of prior draws and selects the best candidates to seed the chains, preventing mode collapse.
-
-```python
-def best_of_prior_init(key, problem, n_chains):
-    """
-    Return `n_chains` initial positions drawn from the prior, weighted by likelihood.
-    """
-    pass
-```
+Initialization is critical for highly multimodal posteriors (like GW PE). `best_of_prior_init` evaluates the log-likelihood over a large number of prior draws and selects the best candidates to seed the chains, preventing mode collapse.

@@ -1,22 +1,28 @@
 ---
 title: gw
-parent: API Reference
+parent: jaxpe
 layout: default
 ---
 
-# `jaxpe.gw`
+# Sec. II: Gravitational-Wave Physics (`jaxpe.gw`)
 {: .no_toc }
 
 1. TOC
 {:toc}
 
-The `gw` module builds a frequency-domain likelihood from a user-supplied, JAX-differentiable time-domain waveform model and standard GW priors.
+In this section, we detail the underlying gravitational-wave physics module (`jaxpe.gw`), including the waveform construction, detector responses, and the frequency-domain likelihood.
 
-## Components
+## Waveform Construction
+
+The generation of gravitational waves from perturbed black holes relies on evolving the Newman-Penrose scalar $$\Psi_4$$. As the waves propagate to the transverse-traceless (TT) gauge of our detectors on Earth, they manifest as the metric strain components $$h_+(t)$$ and $$h_\times(t)$$.
 
 ### `ToyChirp`
 
-A toy time-domain waveform model used for testing and validation.
+A toy time-domain waveform model used for testing and validation. It demonstrates the fundamental quadrupole radiation physics.
+
+## The Frequency-Domain Likelihood
+
+The `gw` module builds a frequency-domain likelihood from a user-supplied, JAX-differentiable time-domain waveform model and standard GW priors. Assuming the detector noise $$n(t)$$ is stationary and Gaussian with a one-sided power spectral density (PSD) $$S_n(f)$$, the likelihood of observing data $$d$$ given parameters $$\boldsymbol{\theta}$$ is governed by the Whittle likelihood in the frequency domain.
 
 ### `make_injection`
 
