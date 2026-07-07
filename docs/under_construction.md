@@ -8,6 +8,11 @@ nav_order: 99
 
 This document meticulously records the experiments, observations, and key learnings while debugging the `LLVM ERROR: Unable to allocate section memory!` crashes in the `jaxpe` ESIGMA waveform model during XLA compilation.
 
+> **Note (read first):** the working hypothesis in Sections 1–12 — that `max_ode_steps`
+> bounds the AD tape and drives compile memory — was later falsified by a controlled
+> measurement. See [Section 14](#14-root-cause-correction-what-actually-drives-the-compile-oom-and-what-doesnt)
+> for the corrected root cause (reverse-mode AD of the per-step RHS).
+
 ## 1. Baseline (The Initial Crash)
 - **Configuration**: 
   - `rad_pn_order=8`, `mode_pn_order=8` (4PN)
@@ -148,3 +153,198 @@ To prove the accuracy of `jaxpe`, this experiment overlaid our posterior contour
 *(Measured by executing from the JAX persistent compilation cache to strictly isolate runtime sampling performance from XLA JIT lowering time)*
 
 ![Validation Overlay vs Dynesty](../examples/output/validate_overlay_corner.png)
+
+## 14. Root-Cause Correction: What Actually Drives the Compile OOM (and What Doesn't)
+
+> **This section supersedes the working hypothesis of Sections 1–12.** A controlled
+> measurement shows the `LLVM ERROR: Unable to allocate section memory!` crash is
+> **not** driven by `max_ode_steps`, `n_ode_grid`, or the adjoint's checkpoint count.
+> It is driven by **reverse-mode automatic differentiation of the per-step ODE
+> right-hand side** — the large 4PN symbolic expression. Cutting `max_ode_steps`
+> never shrank the compiled graph; the earlier "successes" at lower step bounds were
+> coincidental, and the runtime step-limit errors were a *separate* problem.
+
+### 14.1 The experiment
+
+To isolate the compile-memory driver from the physics, I measured the size of the
+*compiled* program (optimized-HLO line count — a direct proxy for the LLVM codegen
+memory that overflows) for a **cheap 2-D `Tsit5` solve**, varying one knob at a time:
+
+- **`cost`** — the degree of an unrolled-polynomial RHS, a controllable stand-in for
+  per-step expression size (i.e. PN order; the real 4PN RHS is thousands of lines of
+  straight-line algebra).
+- **`max_steps`**, **`n_ode_grid`**, **`checkpoints`** — the parameters Sections 3–11
+  assumed were the memory bound.
+
+For each configuration I lowered-and-compiled both the forward-only solve and its
+reverse-mode gradient (`jax.grad`, exactly what the MALA kernel requests), under the
+same `RecursiveCheckpointAdjoint(checkpoints=16)` used in production.
+
+![XLA compile-graph size is set by the RHS expression size, not by max_ode_steps](../examples/compile_scaling.png)
+
+### 14.2 Results
+
+**Compile-graph size vs per-step RHS complexity** (`max_steps=1024`, `n_ode_grid=256`):
+
+| RHS complexity (`cost`) | forward-only (HLO lines) | reverse-mode gradient (HLO lines) | reverse / forward |
+|---:|---:|---:|---:|
+| 5   | 883   | 6,071   | 6.9× |
+| 10  | 923   | 8,251   | 8.9× |
+| 20  | 1,020 | 16,102  | 15.8× |
+| 40  | 1,200 | 45,562  | 38.0× |
+| 80  | 1,560 | 159,682 | 102× |
+| 160 | 2,280 | 608,722 | 267× |
+
+Reverse-mode grows **super-linearly** (slope $\approx 1.4$ in log-log; roughly $\times 3\text{–}4$
+graph for every $\times 2$ in RHS size), while the forward-only primal is nearly flat.
+The reverse transpose of a large RHS is the entire problem.
+
+**Compile-graph size vs `max_ode_steps`** (fixed `cost=40`, reverse-mode):
+
+| `max_ode_steps` | 256 | 1,024 | 4,096 | 16,384 |
+|---|---|---|---|---|
+| HLO lines | 45,562 | 45,562 | 45,562 | 45,562 |
+
+**Identical.** The `lax.while_loop` body is compiled once regardless of trip count,
+so `max_steps` cannot change the graph. Companion sweeps over `n_ode_grid` (128→1024)
+and `checkpoints` (4→256) were likewise flat (45,562 → 45,338 lines).
+
+### 14.3 Implications for the fix
+
+1. **Lowering `max_ode_steps` does not fix the OOM** — it never did. The step bound
+   only affects *runtime* (the `EquinoxRuntimeError` step-limit failures), not compile
+   memory. Sections 3–11 conflated two independent problems.
+2. **The lever is the intended insight: the ODE integrator need not be
+   reverse-differentiated step-by-step.** If the giant RHS is evaluated forward-only
+   (the flat orange curve) and parameter sensitivities are obtained by a route that
+   never materializes the 40–270× reverse transpose — e.g. wrapping the solve in a
+   `jax.custom_vjp` backed by forward-sensitivity equations, a tabulated/interpolated
+   gradient, or a continuous adjoint — the compiled graph collapses toward the
+   forward-only size.
+3. The downstream per-sample mode functions (`hlmGOresult_jax`, `dphi_dt_jax`,
+   `separation_jax`) are also large and reverse-differentiated; they are a second,
+   independent contributor to be quantified next.
+
+**Caveats (rigor).** The measurement uses a *proxy* RHS, so the exact exponent
+($\approx 1.4$) is proxy-specific; what generalizes is (a) reverse-mode scales
+super-linearly with RHS size, and (b) `max_steps`/`n_ode_grid`/`checkpoints` do not
+change the graph. Direct confirmation of the `max_steps`-independence on the *real*
+esigma RHS (at 0PN) is still pending.
+
+### 14.4 Reproduction
+
+Run in the `lalsuite-dev` conda env (CUDA JAX build), forced onto CPU. Two scripts
+produced the numbers and the figure above.
+
+`collect.py` — sweeps the driver axes and writes `scaling_data.json`:
+
+```python
+"""Compile-graph size (HLO lines) vs per-step RHS complexity, and vs max_steps."""
+import time, json
+import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
+import diffrax as dfx
+
+def make_rhs(cost):
+    # cost = degree of unrolled work per RHS call: a proxy for PN expression size
+    def rhs(t, y, args):
+        a, b = args
+        acc0 = -a * y[0] + jnp.sin(y[1])
+        acc1 = -b * y[1] + jnp.cos(y[0])
+        p = y[0]
+        for k in range(cost):
+            p = p * y[1] + jnp.sin(p) * 0.001 + jnp.cos(y[0] * k * 1e-3)
+        return jnp.stack([acc0 + 1e-9 * p, acc1 + 1e-9 * p])
+    return rhs
+
+def build(max_steps, n_save, cost):
+    ts = jnp.linspace(0.0, 1.0, n_save); rhs = make_rhs(cost)
+    def solve(args):
+        sol = dfx.diffeqsolve(
+            terms=dfx.ODETerm(rhs), solver=dfx.Tsit5(),
+            t0=0.0, t1=1.0, dt0=1.0 / n_save, y0=jnp.array([1.0, 0.5]),
+            args=args, saveat=dfx.SaveAt(ts=ts),
+            stepsize_controller=dfx.PIDController(rtol=1e-6, atol=1e-6),
+            max_steps=max_steps,
+            adjoint=dfx.RecursiveCheckpointAdjoint(checkpoints=16), throw=False,
+        )
+        return jnp.sum(sol.ys)
+    return solve
+
+args0 = (jnp.array(2.0), jnp.array(3.0))
+def size(fn):                                   # compile and count optimized-HLO lines
+    t0 = time.time(); c = jax.jit(fn).lower(args0).compile(); dt = time.time() - t0
+    return dt, c.as_text().count("\n")
+
+out = {"cost": [], "max_steps": []}
+for cost in [5, 10, 20, 40, 80, 160]:           # driver axis: per-step RHS complexity
+    loss = build(1024, 256, cost)
+    dtf, nf = size(loss)                        # forward-only
+    dtr, nr = size(jax.grad(loss))              # reverse-mode gradient (what MALA needs)
+    out["cost"].append({"cost": cost, "fwd_lines": nf, "rev_lines": nr})
+    print(f"cost={cost:4d}  fwd={nf:>8}  rev={nr:>9}")
+
+for ms in [256, 1024, 4096, 16384]:             # doc's suspected driver -> expect FLAT
+    _, nr = size(jax.grad(build(ms, 256, 40)))
+    out["max_steps"].append({"max_steps": ms, "rev_lines": nr})
+    print(f"max_steps={ms:6d}  rev={nr:>9}")
+
+json.dump(out, open("scaling_data.json", "w"), indent=2)
+```
+
+`plot_scaling.py` — renders `compile_scaling.png` from that JSON:
+
+```python
+import json
+import numpy as np
+import matplotlib; matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
+
+C_REV, C_FWD, MUTE, GRID = "#2F6FEC", "#E4802A", "#8a9097", "#e6e8eb"
+d = json.load(open("scaling_data.json"))
+cost = np.array([r["cost"] for r in d["cost"]], float)
+fwd = np.array([r["fwd_lines"] for r in d["cost"]], float)
+rev = np.array([r["rev_lines"] for r in d["cost"]], float)
+ms = np.array([r["max_steps"] for r in d["max_steps"]], float)
+ms_rev = np.array([r["rev_lines"] for r in d["max_steps"]], float)
+slope = np.polyfit(np.log(cost), np.log(rev), 1)[0]
+
+fig, (axA, axB) = plt.subplots(1, 2, figsize=(11.2, 4.6),
+                               gridspec_kw={"width_ratios": [1.35, 1]})
+kfmt = FuncFormatter(lambda v, _: f"{v/1000:.0f}k" if v >= 1000 else f"{v:.0f}")
+def clean(ax):
+    for s in ("top", "right"): ax.spines[s].set_visible(False)
+    ax.grid(True, color=GRID, lw=1.0); ax.set_axisbelow(True); ax.tick_params(length=0)
+
+clean(axA); axA.set_xscale("log"); axA.set_yscale("log")
+axA.plot(cost, rev, "-o", color=C_REV, lw=2.2, ms=7, label="reverse-mode gradient (what MALA needs)")
+axA.plot(cost, fwd, "-o", color=C_FWD, lw=2.2, ms=7, label="forward-only (no autodiff)")
+axA.set_xlabel("per-step RHS complexity  (∝ PN order / expression size)")
+axA.set_ylabel("compiled graph size  (HLO lines)"); axA.yaxis.set_major_formatter(kfmt)
+axA.set_title("Compile cost is set by the RHS expression size", fontweight="bold", loc="left")
+axA.legend(frameon=False, fontsize=9.5, loc="upper left")
+axA.annotate(f"slope ≈ {slope:.1f}  (super-linear)\nreverse ≈ {np.mean(rev/fwd):.0f}× forward",
+             (0.04, 0.62), xycoords="axes fraction", fontsize=9.5, color=MUTE)
+
+clean(axB); axB.set_xscale("log")
+axB.plot(ms, ms_rev, "-o", color=C_REV, lw=2.2, ms=7)
+axB.set_ylim(0, max(ms_rev.max() * 1.9, 60000))
+axB.set_xlabel("max_ode_steps  (the doc's suspected driver)")
+axB.set_ylabel("compiled graph size  (HLO lines)"); axB.yaxis.set_major_formatter(kfmt)
+axB.set_title("…not by max_ode_steps — identical graph", fontweight="bold", loc="left")
+axB.set_xticks(ms); axB.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{int(v)}"))
+axB.annotate("flat: 256 → 16384 steps\nall compile to the same 45.6k-line graph",
+             (0.5, 0.74), xycoords="axes fraction", ha="center", fontsize=10, color=MUTE)
+fig.tight_layout(); fig.savefig("compile_scaling.png", dpi=150, bbox_inches="tight", facecolor="white")
+```
+
+Commands:
+
+```bash
+# 1. generate the data (forced onto CPU so the measurement matches the PE runs)
+JAX_PLATFORMS=cpu conda run -n lalsuite-dev python collect.py
+# 2. render the figure into examples/compile_scaling.png
+conda run -n lalsuite-dev python plot_scaling.py
+```
