@@ -149,7 +149,9 @@ def _global_block(flow, key, x, log_prob, logp_fn, n_steps: int):
         log_q_y = jax.vmap(flow.log_prob)(y)
         log_p_y = jax.vmap(logp_fn)(y)
         log_ratio = log_p_y - log_prob + log_q - log_q_y
-        accept = jnp.log(jax.random.uniform(k_acc, (n_chains,))) < jnp.minimum(log_ratio, 0.0)
+        accept = jnp.log(jax.random.uniform(k_acc, (n_chains,))) < jnp.minimum(
+            log_ratio, 0.0
+        )
         x = jnp.where(accept[:, None], y, x)
         log_prob = jnp.where(accept, log_p_y, log_prob)
         log_q = jnp.where(accept, log_q_y, log_q)
@@ -248,7 +250,11 @@ class Sampler:
 
             new_samples = xs.reshape(-1, self.n_dim)
             if not warmup:
-                buffer = new_samples if buffer is None else jnp.concatenate([buffer, new_samples])
+                buffer = (
+                    new_samples
+                    if buffer is None
+                    else jnp.concatenate([buffer, new_samples])
+                )
                 buffer = buffer[-cfg.buffer_size :]
 
             # Unadjusted kernels (ULD) always report acceptance 1: skip step-size targeting.
@@ -260,7 +266,10 @@ class Sampler:
                 scale_src = new_samples if buffer is None else buffer
                 if hasattr(kernel, "scale"):
                     kernel = with_updates(kernel, scale=ensemble_scale(scale_src))
-                elif hasattr(kernel, "cov") and getattr(kernel, "metric_fn", None) is None:
+                elif (
+                    hasattr(kernel, "cov")
+                    and getattr(kernel, "metric_fn", None) is None
+                ):
                     kernel = with_updates(kernel, cov=ensemble_cov(scale_src))
 
             if warmup:

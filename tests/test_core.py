@@ -57,7 +57,9 @@ def test_prior_normalized(prior):
         lo, hi = prior.mu - 20 * prior.sigma, prior.mu + 20 * prior.sigma
     else:
         lo, hi = prior.low, prior.high
-    integral, err = quad(lambda x: float(jnp.exp(prior.log_prob(jnp.asarray(x)))), lo, hi)
+    integral, err = quad(
+        lambda x: float(jnp.exp(prior.log_prob(jnp.asarray(x)))), lo, hi
+    )
     assert abs(integral - 1.0) < max(1e-8, 10 * err)
 
 
@@ -71,7 +73,9 @@ def test_prior_sample_moments(prior):
     else:
         lo, hi = prior.low, prior.high
         assert samples.min() >= lo and samples.max() <= hi
-    mean_quad, _ = quad(lambda x: x * float(jnp.exp(prior.log_prob(jnp.asarray(x)))), lo, hi)
+    mean_quad, _ = quad(
+        lambda x: x * float(jnp.exp(prior.log_prob(jnp.asarray(x)))), lo, hi
+    )
     std = float(samples.std())
     assert abs(float(samples.mean()) - mean_quad) < 5 * std / np.sqrt(len(samples))
 
@@ -102,7 +106,9 @@ def test_joint_unconstrained_density_normalized():
     """log_prob_unconstrained must integrate to 1 over R^n (checked in 1-D)."""
     joint = JointPrior({"a": Uniform(low=2.0, high=3.0)})
     integral, err = quad(
-        lambda y: float(jnp.exp(joint.log_prob_unconstrained(jnp.asarray([y])))), -30, 30
+        lambda y: float(jnp.exp(joint.log_prob_unconstrained(jnp.asarray([y])))),
+        -30,
+        30,
     )
     assert abs(integral - 1.0) < 1e-6
 

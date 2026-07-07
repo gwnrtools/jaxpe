@@ -51,7 +51,9 @@ class MMALA(Kernel):
 
     needs_gradient: ClassVar[bool] = True
     step_size: jax.Array
-    metric_fn: Callable | None = eqx.field(static=True, default=None)  # x -> (n, n) PSD G(x)
+    metric_fn: Callable | None = eqx.field(
+        static=True, default=None
+    )  # x -> (n, n) PSD G(x)
     cov: jax.Array | None = None  # constant proposal covariance if metric_fn is None
 
     def __init__(self, step_size: float, metric_fn=None, cov=None):

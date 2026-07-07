@@ -79,7 +79,9 @@ class PowerLaw(Prior):
 
     def log_prob(self, x):
         inside = (x >= self.low) & (x <= self.high)
-        return jnp.where(inside, self.alpha * jnp.log(x) - jnp.log(self._norm()), -jnp.inf)
+        return jnp.where(
+            inside, self.alpha * jnp.log(x) - jnp.log(self._norm()), -jnp.inf
+        )
 
     def sample(self, key, shape=()):
         u = jax.random.uniform(key, shape)

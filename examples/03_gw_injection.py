@@ -47,7 +47,10 @@ def main(noise_seed=42, n_chains=80):
         f_min=20.0,
         noise_seed=noise_seed,
     )
-    print("optimal SNRs:", like.optimal_snr({k: jnp.asarray(v) for k, v in INJECTION.items()}))
+    print(
+        "optimal SNRs:",
+        like.optimal_snr({k: jnp.asarray(v) for k, v in INJECTION.items()}),
+    )
 
     prior = bbh_priors(
         chirp_mass=(25.0, 35.0),
@@ -102,7 +105,9 @@ def main(noise_seed=42, n_chains=80):
     print("\nposterior (median [16%, 84%]) vs truth:")
     for i, n in enumerate(names):
         q16, q50, q84 = np.percentile(flat[:, i], [16, 50, 84])
-        print(f"  {n:22s} {q50:10.4f} [{q16:10.4f}, {q84:10.4f}]   truth {truths[i]:10.4f}")
+        print(
+            f"  {n:22s} {q50:10.4f} [{q16:10.4f}, {q84:10.4f}]   truth {truths[i]:10.4f}"
+        )
 
     OUT.mkdir(exist_ok=True)
     tag = "zero_noise" if noise_seed is None else f"seed{noise_seed}"

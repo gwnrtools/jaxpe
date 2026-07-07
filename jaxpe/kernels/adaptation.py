@@ -31,7 +31,12 @@ TARGET_ACCEPTANCE = {"RandomWalk": 0.234, "MALA": 0.574, "MMALA": 0.574, "HMC": 
 
 
 def adapted_step_size(
-    step_size, accept_rate, target: float, gamma: float = 1.0, lo: float = 1e-8, hi: float = 1e3
+    step_size,
+    accept_rate,
+    target: float,
+    gamma: float = 1.0,
+    lo: float = 1e-8,
+    hi: float = 1e3,
 ):
     """
     Robbins-Monro update of the step size toward a target acceptance rate.
@@ -75,7 +80,9 @@ def ensemble_cov(xs, jitter: float = 1e-6):
     flat = xs.reshape(-1, xs.shape[-1])
     cov = jnp.cov(flat.T)
     cov = jnp.atleast_2d(cov)
-    return cov + jitter * jnp.trace(cov) / cov.shape[0] * jnp.eye(cov.shape[0], dtype=cov.dtype)
+    return cov + jitter * jnp.trace(cov) / cov.shape[0] * jnp.eye(
+        cov.shape[0], dtype=cov.dtype
+    )
 
 
 def with_updates(kernel, **updates):

@@ -44,7 +44,9 @@ def _epoch(flow_params, flow_static, opt_state, optimizer, batches):
         params = eqx.apply_updates(params, updates)
         return (params, opt_state), loss
 
-    (flow_params, opt_state), losses = jax.lax.scan(step, (flow_params, opt_state), batches)
+    (flow_params, opt_state), losses = jax.lax.scan(
+        step, (flow_params, opt_state), batches
+    )
     return flow_params, opt_state, jnp.mean(losses)
 
 

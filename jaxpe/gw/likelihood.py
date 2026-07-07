@@ -106,7 +106,9 @@ class NetworkLikelihood:
     def polarizations_fd(self, params: dict):
         st = self._static()
         hp, hc = self.waveform(params, st["times"])
-        return td_to_fd(hp, st["dt"], st["window"]), td_to_fd(hc, st["dt"], st["window"])
+        return td_to_fd(hp, st["dt"], st["window"]), td_to_fd(
+            hc, st["dt"], st["window"]
+        )
 
     def _gmst(self, params):
         return self.gmst_ref + EARTH_OMEGA * (params["geocent_time"] - self.t_ref)
@@ -155,7 +157,11 @@ class NetworkLikelihood:
         out = {}
         for det in self.detectors:
             h = strains[det.name]
-            hh = 4.0 * st["df"] * jnp.sum((h.real**2 + h.imag**2) * st["inv_psd_banded"][det.name])
+            hh = (
+                4.0
+                * st["df"]
+                * jnp.sum((h.real**2 + h.imag**2) * st["inv_psd_banded"][det.name])
+            )
             out[det.name] = float(jnp.sqrt(hh))
         return out
 

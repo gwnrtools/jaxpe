@@ -69,9 +69,9 @@ def test_kernel_recovers_gaussian_moments(kernel):
     assert np.all(mean_err < 0.2 * std), f"mean error {mean_err}"
     cov_est = np.cov(np.asarray(samples).T)
     cov_tol = 0.25 * np.outer(std, std)
-    assert np.all(np.abs(cov_est - np.asarray(COV)) < cov_tol), (
-        f"cov error\n{cov_est - np.asarray(COV)}"
-    )
+    assert np.all(
+        np.abs(cov_est - np.asarray(COV)) < cov_tol
+    ), f"cov error\n{cov_est - np.asarray(COV)}"
 
 
 def test_mala_preconditioner_improves_acceptance():
@@ -79,7 +79,9 @@ def test_mala_preconditioner_improves_acceptance():
     key = jax.random.PRNGKey(3)
     x0 = jax.random.normal(key, (32, N_DIM)) + MEAN
     _, _, _, info_plain = run_chains(key, MALA(step_size=1.0), logp, x0, 500)
-    _, _, _, info_scaled = run_chains(key, MALA(step_size=1.0, scale=STD), logp, x0, 500)
+    _, _, _, info_scaled = run_chains(
+        key, MALA(step_size=1.0, scale=STD), logp, x0, 500
+    )
     assert jnp.mean(info_scaled.accepted) > jnp.mean(info_plain.accepted) + 0.1
 
 
@@ -117,15 +119,17 @@ def test_uld_recovers_gaussian_moments():
     assert np.all(mean_err < 0.25 * std), f"mean error {mean_err}"
     cov_est = np.cov(np.asarray(samples).T)
     cov_tol = 0.3 * np.outer(std, std)
-    assert np.all(np.abs(cov_est - np.asarray(COV)) < cov_tol), (
-        f"cov error\n{cov_est - np.asarray(COV)}"
-    )
+    assert np.all(
+        np.abs(cov_est - np.asarray(COV)) < cov_tol
+    ), f"cov error\n{cov_est - np.asarray(COV)}"
 
 
 def test_run_chains_thinning_shape():
     key = jax.random.PRNGKey(2)
     x0 = jax.random.normal(key, (8, N_DIM))
-    _, xs, logps, infos = run_chains(key, RandomWalk(step_size=0.5), logp, x0, 100, thin=10)
+    _, xs, logps, infos = run_chains(
+        key, RandomWalk(step_size=0.5), logp, x0, 100, thin=10
+    )
     assert xs.shape == (10, 8, N_DIM)
     assert logps.shape == (10, 8)
 

@@ -74,7 +74,9 @@ def trace_plot(xs, names=None, max_chains: int = 8):
     """
     xs = np.asarray(xs)
     n_dim = xs.shape[-1]
-    fig, axes = plt.subplots(n_dim, 1, figsize=(8, 1.8 * n_dim), sharex=True, squeeze=False)
+    fig, axes = plt.subplots(
+        n_dim, 1, figsize=(8, 1.8 * n_dim), sharex=True, squeeze=False
+    )
     for j in range(n_dim):
         ax = axes[j, 0]
         ax.plot(xs[:, :max_chains, j], alpha=0.6, lw=0.5)

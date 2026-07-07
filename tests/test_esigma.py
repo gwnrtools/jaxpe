@@ -80,7 +80,17 @@ def test_spin_weighted_ylm():
 
     rng = np.random.default_rng(0)
     worst = 0
-    for l, m in [(2, 2), (2, -2), (2, 1), (2, -1), (3, 3), (3, -3), (3, 2), (4, 4), (4, -4)]:
+    for l, m in [
+        (2, 2),
+        (2, -2),
+        (2, 1),
+        (2, -1),
+        (3, 3),
+        (3, -3),
+        (3, 2),
+        (4, 4),
+        (4, -4),
+    ]:
         for _ in range(6):
             io, ph = rng.uniform(0, np.pi), rng.uniform(0, 2 * np.pi)
             ours = complex(spin_weighted_ylm(io, ph, l, m))

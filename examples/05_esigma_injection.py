@@ -35,13 +35,20 @@ from jaxpe.sampler import GlobalLocalConfig, Sampler, best_of_prior_init
 OUT = Path(__file__).parent / "output"
 
 
-def main(n_chains: int = 100, n_epochs: int = 100, n_production: int = 2000, pn_order: int = 8):
+def main(
+    n_chains: int = 100,
+    n_epochs: int = 100,
+    n_production: int = 2000,
+    pn_order: int = 8,
+):
     f_lower = 30.0
     duration = 4.0
     t_c = 1126259462.4
 
     print("Initializing ESIGMA waveform model...")
-    print(f"  Using PN order {pn_order} with relaxed ode_eps=1e-3 and max_ode_steps=16384 to shrink the AD tape.")
+    print(
+        f"  Using PN order {pn_order} with relaxed ode_eps=1e-3 and max_ode_steps=16384 to shrink the AD tape."
+    )
     waveform = ESIGMAInspiral(
         f_lower=f_lower,
         modes=((2, 2), (3, 3)),
@@ -77,7 +84,10 @@ def main(n_chains: int = 100, n_epochs: int = 100, n_production: int = 2000, pn_
         noise_seed=None,
     )
 
-    print("Injected SNR:", like.optimal_snr({k: jnp.asarray(v) for k, v in INJECTION.items()}))
+    print(
+        "Injected SNR:",
+        like.optimal_snr({k: jnp.asarray(v) for k, v in INJECTION.items()}),
+    )
 
     prior = ebbh_priors(
         chirp_mass=(20.0, 30.0),
@@ -113,7 +123,9 @@ def main(n_chains: int = 100, n_epochs: int = 100, n_production: int = 2000, pn_
     x0 = best_of_prior_init(key, problem, cfg.n_chains, n_draws=1_000)
     print(f"init: best-of-prior in {time.time() - t0:.1f} s")
 
-    print(f"Starting sampler.run with {n_chains} chains... (This will trigger XLA compilation)")
+    print(
+        f"Starting sampler.run with {n_chains} chains... (This will trigger XLA compilation)"
+    )
     t0 = time.time()
     res = sampler.run(key, x0=x0)
     dt_run = time.time() - t0
@@ -130,7 +142,9 @@ def main(n_chains: int = 100, n_epochs: int = 100, n_production: int = 2000, pn_
     print("\nRecovery Summary (Median [16%, 84%]):")
     for i, n in enumerate(names):
         q16, q50, q84 = np.percentile(flat[:, i], [16, 50, 84])
-        print(f"  {n:20s}: {q50:8.3f} [{q16:8.3f}, {q84:8.3f}]  (True: {truths[i]:8.3f})")
+        print(
+            f"  {n:20s}: {q50:8.3f} [{q16:8.3f}, {q84:8.3f}]  (True: {truths[i]:8.3f})"
+        )
 
     OUT.mkdir(exist_ok=True)
     np.save(OUT / "esigma_injection_samples.npy", flat)
@@ -148,4 +162,9 @@ if __name__ == "__main__":
     ap.add_argument("--n-production", type=int, default=10)
     ap.add_argument("--pn-order", type=int, default=8)
     args = ap.parse_args()
-    main(n_chains=args.n_chains, n_epochs=args.n_epochs, n_production=args.n_production, pn_order=args.pn_order)
+    main(
+        n_chains=args.n_chains,
+        n_epochs=args.n_epochs,
+        n_production=args.n_production,
+        pn_order=args.pn_order,
+    )

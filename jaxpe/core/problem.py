@@ -47,7 +47,9 @@ class InferenceProblem:
     def log_posterior(self, y):
         """Unnormalized log-posterior density in unconstrained coordinates, shape (n_dim,) -> scalar."""
         x = self.prior.to_physical(y)
-        log_p = self.log_likelihood_vec(x) + self.prior.log_prob(x) + self.prior.log_det(y)
+        log_p = (
+            self.log_likelihood_vec(x) + self.prior.log_prob(x) + self.prior.log_det(y)
+        )
         return jnp.where(jnp.isfinite(log_p), log_p, -jnp.inf)
 
     def sample_unconstrained(self, key, n: int):

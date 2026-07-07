@@ -71,4 +71,8 @@ class Interval(Bijection):
 
     def log_det(self, y):
         # d/dy sigmoid = sigmoid(y) sigmoid(-y); use log_sigmoid for stability
-        return jnp.log(self.high - self.low) + jax.nn.log_sigmoid(y) + jax.nn.log_sigmoid(-y)
+        return (
+            jnp.log(self.high - self.low)
+            + jax.nn.log_sigmoid(y)
+            + jax.nn.log_sigmoid(-y)
+        )

@@ -45,7 +45,9 @@ def aligo_zdhp_psd(freqs, f_low: float = 10.0):
     """
     freqs = np.asarray(freqs, float)
     x = np.where(freqs > 0, freqs / 215.0, 1.0)
-    psd = 1e-49 * (x**-4.14 - 5.0 * x**-2 + 111.0 * (1.0 - x**2 + 0.5 * x**4) / (1.0 + 0.5 * x**2))
+    psd = 1e-49 * (
+        x**-4.14 - 5.0 * x**-2 + 111.0 * (1.0 - x**2 + 0.5 * x**4) / (1.0 + 0.5 * x**2)
+    )
     return np.where(freqs >= f_low, psd, np.inf)
 
 

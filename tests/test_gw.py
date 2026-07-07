@@ -54,14 +54,19 @@ def test_detector_geometry_matches_lal():
             fp_l, fc_l = lal.ComputeDetAMResponse(ld.response, ra, dec, psi, gmst)
             fp, fc = antenna_pattern(det, ra, dec, psi, gmst)
             assert abs(float(fp) - fp_l) < 2e-6 and abs(float(fc) - fc_l) < 2e-6
-            dt_l = lal.TimeDelayFromEarthCenter(ld.location, ra, dec, lal.LIGOTimeGPS(T_C))
+            dt_l = lal.TimeDelayFromEarthCenter(
+                ld.location, ra, dec, lal.LIGOTimeGPS(T_C)
+            )
             dt = float(time_delay_from_geocenter(det, ra, dec, gmst))
             assert abs(dt - dt_l) < 1e-9
 
 
 def test_gmst_matches_lal():
     for gps in [1126259462.4, 1187008882.4, 1264316116.4]:
-        assert abs(gmst_from_gps(gps) - lal.GreenwichMeanSiderealTime(gps) % (2 * np.pi)) < 1e-9
+        assert (
+            abs(gmst_from_gps(gps) - lal.GreenwichMeanSiderealTime(gps) % (2 * np.pi))
+            < 1e-9
+        )
 
 
 @pytest.fixture(scope="module")

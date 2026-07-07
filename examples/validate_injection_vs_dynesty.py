@@ -47,7 +47,9 @@ def bilby_priors(t_c):
     p = bilby.core.prior.PriorDict()
     p["chirp_mass"] = bilby.core.prior.Uniform(25.0, 35.0, "chirp_mass")
     p["mass_ratio"] = bilby.core.prior.Uniform(0.25, 1.0, "mass_ratio")
-    p["luminosity_distance"] = bilby.core.prior.PowerLaw(2.0, 100.0, 2000.0, "luminosity_distance")
+    p["luminosity_distance"] = bilby.core.prior.PowerLaw(
+        2.0, 100.0, 2000.0, "luminosity_distance"
+    )
     p["inclination"] = bilby.core.prior.Sine(name="inclination")
     p["phase"] = bilby.core.prior.Uniform(0.0, 2 * np.pi, "phase")
     p["ra"] = bilby.core.prior.Uniform(0.0, 2 * np.pi, "ra")
@@ -95,7 +97,9 @@ def main(nlive=400):
     )
     dyn = result.posterior[names].to_numpy()
 
-    print(f"\ndynesty posterior samples: {len(dyn)}, jaxpe samples: {len(jaxpe_samples)}")
+    print(
+        f"\ndynesty posterior samples: {len(dyn)}, jaxpe samples: {len(jaxpe_samples)}"
+    )
     print("\nper-parameter JS divergence (bits), threshold ~0.02:")
     worst = 0.0
     for i, n in enumerate(names):
@@ -131,7 +135,9 @@ def main(nlive=400):
         hist_kwargs=dict(density=True),
     )
     fig.savefig(OUT / "validate_overlay_corner.png", dpi=120)
-    print(f"overlay corner (blue=jaxpe, orange=dynesty) -> {OUT / 'validate_overlay_corner.png'}")
+    print(
+        f"overlay corner (blue=jaxpe, orange=dynesty) -> {OUT / 'validate_overlay_corner.png'}"
+    )
 
 
 if __name__ == "__main__":

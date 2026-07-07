@@ -74,15 +74,17 @@ def test_global_local_recovers_mixture_weights():
     key = jax.random.PRNGKey(1)
     k0, k1, krun = jax.random.split(key, 3)
     comp = jax.random.bernoulli(k0, 0.1, (cfg.n_chains,))
-    x0 = jnp.where(comp[:, None], 2.0, -2.0) + 0.3 * jax.random.normal(k1, (cfg.n_chains, 2))
+    x0 = jnp.where(comp[:, None], 2.0, -2.0) + 0.3 * jax.random.normal(
+        k1, (cfg.n_chains, 2)
+    )
 
     res = sampler.run(krun, x0=x0)
 
     w = _mode_weight(res.samples)
     assert abs(w - 0.65) < 0.08, f"mode weight {w}, expected 0.65"
-    assert max(res.global_acceptance[-3:]) > 0.2, (
-        f"global acceptance too low: {res.global_acceptance}"
-    )
+    assert (
+        max(res.global_acceptance[-3:]) > 0.2
+    ), f"global acceptance too low: {res.global_acceptance}"
     rhat = split_rhat(res.samples)
     assert np.all(rhat < 1.15), f"R-hat {rhat}"
     ess = effective_sample_size(res.samples)
@@ -96,7 +98,9 @@ def test_global_local_recovers_mixture_weights():
 
 def test_sampler_with_problem_physical_output():
     """Problem-based path: bounded prior, unimodal likelihood; physical samples in bounds."""
-    prior = JointPrior({"a": Uniform(low=0.0, high=10.0), "b": Gaussian(mu=0.0, sigma=2.0)})
+    prior = JointPrior(
+        {"a": Uniform(low=0.0, high=10.0), "b": Gaussian(mu=0.0, sigma=2.0)}
+    )
     problem = InferenceProblem(
         prior=prior,
         log_likelihood=lambda p: (

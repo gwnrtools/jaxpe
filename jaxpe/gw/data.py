@@ -58,7 +58,9 @@ def simulate_noise_fd(rng: np.random.Generator, psd, duration: float):
     psd = np.asarray(psd, float)
     sigma = np.sqrt(psd * duration) / 2.0
     sigma = np.where(np.isfinite(sigma), sigma, 0.0)
-    return sigma * (rng.standard_normal(psd.shape) + 1j * rng.standard_normal(psd.shape))
+    return sigma * (
+        rng.standard_normal(psd.shape) + 1j * rng.standard_normal(psd.shape)
+    )
 
 
 def make_injection(

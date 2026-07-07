@@ -1,5 +1,10 @@
 from .conditioning import rfft_freqs, td_to_fd, time_shift, tukey_window
-from .data import fetch_open_strain, likelihood_from_strain, make_injection, simulate_noise_fd
+from .data import (
+    fetch_open_strain,
+    likelihood_from_strain,
+    make_injection,
+    simulate_noise_fd,
+)
 from .detectors import (
     DETECTORS,
     Detector,

@@ -51,7 +51,9 @@ def bbh_priors(
             "ra": Uniform(low=0.0, high=2 * np.pi),
             "dec": Cosine(),
             "psi": Uniform(low=0.0, high=np.pi),
-            "geocent_time": Uniform(low=geocent_time - time_width, high=geocent_time + time_width),
+            "geocent_time": Uniform(
+                low=geocent_time - time_width, high=geocent_time + time_width
+            ),
         }
     )
 
@@ -93,7 +95,9 @@ def ebbh_priors(
             "ra": Uniform(low=0.0, high=2 * np.pi),
             "dec": Cosine(),
             "psi": Uniform(low=0.0, high=np.pi),
-            "geocent_time": Uniform(low=geocent_time - time_width, high=geocent_time + time_width),
+            "geocent_time": Uniform(
+                low=geocent_time - time_width, high=geocent_time + time_width
+            ),
         }
     )
     return JointPrior(priors)
