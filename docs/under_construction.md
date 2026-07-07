@@ -164,6 +164,115 @@ To prove the accuracy of `jaxpe`, this experiment overlaid our posterior contour
 > never shrank the compiled graph; the earlier "successes" at lower step bounds were
 > coincidental, and the runtime step-limit errors were a *separate* problem.
 
+### 14.0 Does gradient-based MCMC require reverse-differentiating the integrator step-by-step?
+
+The guiding insight under test is:
+
+> *We do not need the entire ODE integrator inside ESIGMA to be differentiable — i.e.
+> we do not need to differentiate with respect to individual ODE integration steps.*
+
+**Short answer: no, gradient-based MCMC does not require it — the insight is correct in
+direction, with one refinement that decides whether it actually helps.** Two things are
+easy to conflate:
+
+**1. What the sampler fundamentally needs.** MALA (used in `05_esigma_injection.py`)
+and HMC both need exactly one object: $\nabla_\vartheta \log \pi(\vartheta)$, the gradient
+of the *scalar* log-posterior, where $\vartheta$ is the **full** sampled (unconstrained)
+parameter vector. Because the ODE trajectory depends on the **intrinsic** subset of
+$\vartheta$ — chirp mass, mass ratio, eccentricity, mean anomaly, spins (the $\lesssim 6$
+parameters that enter the RHS, denoted $\theta$ below) — that gradient genuinely contains
+the parameter-sensitivities $\partial y/\partial\theta$. So one **cannot** simply
+`stop_gradient` the ODE output — that yields a wrong gradient. (Aside: for MCMC a wrong
+gradient is only an *efficiency* loss, not a correctness bug — MALA's MH ratio and HMC's
+leapfrog+accept still target $\pi$ exactly, as long as the drift is used consistently.
+But we need not lean on that, because the methods below give the *exact* gradient.)
+
+**2. *How* those sensitivities are computed — this is where the insight is right.**
+"Differentiate the individual ODE steps" is one specific method: reverse-mode backprop
+through the solver's internal `while_loop` (`RecursiveCheckpointAdjoint`). That is
+precisely the operation that materializes the transpose of the giant RHS — the 40–270×
+blowup measured in §14.2. It is *not* the only way to obtain $\partial y/\partial\theta$.
+The clean alternative:
+
+> **Forward sensitivity equations.** Write the inspiral ODE as $\dot y = f(y,\theta)$,
+> where $\dot{(\,)} \equiv \mathrm{d}/\mathrm{d}s$ over the reparametrized integration
+> variable $s\in[0,1]$ (the `_rhs` domain), the **state** is
+> $y=(x,e,l,\phi)\in\mathbb{R}^{n}$ with $n=4$ — inverse orbital radius / PN frequency
+> variable $x$, eccentricity $e$, mean anomaly $l$, orbital phase $\phi$.
+>
+> The **parameter vector** $\theta\in\mathbb{R}^{p}$ is the set of inputs the ODE
+> actually depends on — and it is deliberately *not* the full MCMC sample vector. It is
+> the small subset ($p\lesssim 6$) of **intrinsic** parameters that enter the dynamics:
+> chirp mass $\mathcal{M}$, mass ratio $q$, initial eccentricity $e_0$, initial mean
+> anomaly $l_0$, and the aligned spins $S_{1z},S_{2z}$. The code maps these to the actual
+> RHS arguments $(\eta,m_1,m_2,S_{1z},S_{2z})$, the initial state $y(0)$, and the
+> time-scale $t_{\max}$, all of which are smooth closed-form functions of $\theta$. The
+> remaining sampled (**extrinsic**) parameters — luminosity distance, inclination, phase,
+> sky position $(\alpha,\delta)$, polarization, coalescence time — never appear in $f$;
+> they act *downstream* of the solve (distance rescales the amplitude, the angles enter
+> the spin-weighted harmonics and detector response) and are differentiated by ordinary
+> reverse-mode AD, so they are absent from $\theta$. In other words, the full log-posterior
+> gradient $\nabla\log\pi$ reaches the intrinsic parameters *only* through $\partial y/\partial\theta$
+> — which is exactly the quantity $S$ supplies — while everything else is cheap. Here
+> $f:\mathbb{R}^{n}\times\mathbb{R}^{p}\to\mathbb{R}^{n}$ is the vector field (the PN
+> right-hand side).
+>
+> Define the **sensitivity matrix** $S \equiv \partial y/\partial\theta \in \mathbb{R}^{n\times p}$,
+> i.e. $S_{ij} = \partial y_i/\partial\theta_j$ — how state component $i$ responds to
+> parameter $j$. Differentiating $\dot y = f(y,\theta)$ with respect to $\theta$ gives the
+> **variational (sensitivity) equation**
+>
+> $$ \dot S \;=\; J\,S \;+\; \frac{\partial f}{\partial\theta}, \qquad J \equiv \frac{\partial f}{\partial y}\in\mathbb{R}^{n\times n}, \quad \frac{\partial f}{\partial\theta}\in\mathbb{R}^{n\times p}, \qquad S(0) = \frac{\partial y(0)}{\partial\theta}, $$
+>
+> where $J=\partial f/\partial y$ is the **state Jacobian** of the vector field,
+> $\partial f/\partial\theta$ is its **explicit parameter Jacobian**, and the initial
+> condition $S(0)$ is generally nonzero because $y(0)$ itself depends on $\theta$
+> (e.g. $x(0)$ depends on the masses; $e(0),l(0)$ are sampled directly). Both Jacobians
+> are formed by **forward-mode AD (a `jvp`) of the RHS** — cost $\sim 2\text{–}3\times$ the
+> primal RHS, and, crucially, *never* the reverse transpose of $f$ that blows up the
+> compile graph.
+>
+> Integrate the augmented system $(y,S)\in\mathbb{R}^{n}\times\mathbb{R}^{n\times p}$ with
+> the *same* solver and step sequence as the primal, treating the solver's adaptive
+> control flow (step acceptance, PID controller) as a non-differentiated black box.
+> Finally wrap the whole solve in a `jax.custom_vjp`: the **forward pass** returns the
+> saved trajectory $Y\in\mathbb{R}^{G\times n}$ ($G=$ `n_ode_grid` output points) and
+> stashes $S\in\mathbb{R}^{G\times n\times p}$ as the residual; the **backward pass**,
+> given the incoming cotangent $\bar Y\in\mathbb{R}^{G\times n}$ (same shape as the
+> trajectory), returns the parameter cotangent by one contraction,
+> $\bar\theta_j = \sum_{g=1}^{G}\sum_{i=1}^{n} \bar Y_{gi}\,S_{gij}$ — no differentiation
+> of any individual integrator step.
+
+That path never reverse-differentiates a single integrator step. The only derivative of
+the RHS it ever builds is a **forward-mode jvp** ($\sim 2\text{–}3\times$ the primal — the
+flat orange curve), not the reverse transpose. That is the mechanism that collapses the
+compile graph, and it yields the *exact* gradient (same discretization as the primal),
+not an approximation.
+
+**The refinement to watch:** "avoid step-by-step reverse" is *necessary* but not
+*sufficient* on its own — the replacement matters.
+
+- **Forward sensitivity (`custom_vjp`)** → builds only the jvp → compile graph collapses.
+  This is the route that realizes the insight.
+- **Continuous adjoint (`BacksolveAdjoint`)** also avoids reverse-through-the-loop, *but*
+  its backward ODE's RHS still contains the RHS **transpose** ($\partial f/\partial y$
+  applied to the adjoint), so it does not obviously shrink the graph. On the cheap proxy
+  it compiled *larger* than `RecursiveCheckpointAdjoint` (6,604 vs 4,965 HLO lines); it
+  has **not** been measured on the real RHS, so it cannot yet be recommended.
+
+Two structural facts favour the forward-sensitivity route here: (i) the number of ODE
+parameters is tiny ($\lesssim 6$), and forward-sensitivity cost scales with that count
+and can be batched so the *graph* does not grow with it; (ii) the extrinsic parameters
+(distance, inclination, phase, sky position, coalescence time) never touch the ODE — they
+are applied downstream in ordinary, cheaply-differentiable array math.
+
+**Net.** The precise statement of the fix is: *compute the ODE's parameter sensitivities
+by forward propagation and hand them to the outer reverse-mode via a `custom_vjp`, so the
+integrator's steps are never reverse-differentiated.* One caveat from §14.2 still stands:
+the downstream mode functions (`hlmGOresult_jax`, `dphi_dt_jax`, `separation_jax`) are also
+large and currently reverse-differentiated, so they are a second contributor to quantify
+before declaring victory.
+
 ### 14.1 The experiment
 
 To isolate the compile-memory driver from the physics, I measured the size of the
