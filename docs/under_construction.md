@@ -90,3 +90,16 @@ This document meticulously records the experiments, observations, and key learni
   ```bash
   time XLA_FLAGS="--xla_cpu_parallel_codegen_split_count=1" MALLOC_ARENA_MAX=1 JAX_PLATFORMS=cpu conda run -n lalsuite-dev python examples/05_esigma_injection.py --n-chains 20 --n-epochs 10 --n-production 100 --pn-order 8
   ```
+- **Result**: The compilation succeeded beautifully in ~6 minutes without any memory issues! However, the runtime solver *still* hit the 512 step limit before finishing the inspiral.
+- **Learning**: The memory bounds for `max_ode_steps=512` easily fit within 31GB RAM for 4PN. The remaining issue is purely numerical: `ode_eps=1e-4` is still a bit too strict, causing the adaptive step controller to take >512 steps.
+
+## 10. Current Run: 4PN with Looser Tolerance (1e-3)
+- **Configuration**:
+  - `4PN`
+  - `max_ode_steps=512`, `n_ode_grid=512`
+  - Relaxed ODE tolerance: `ode_eps=1e-3`
+- **Hypothesis**: By relaxing the numerical tolerance to `1e-3`, the step size controller will take larger steps and confidently finish the full inspiral well within the 512 step limit, achieving the first end-to-end parameter estimation run with the 4PN waveform.
+- **Command Line**:
+  ```bash
+  time XLA_FLAGS="--xla_cpu_parallel_codegen_split_count=1" MALLOC_ARENA_MAX=1 JAX_PLATFORMS=cpu conda run -n lalsuite-dev python examples/05_esigma_injection.py --n-chains 20 --n-epochs 10 --n-production 100 --pn-order 8
+  ```
