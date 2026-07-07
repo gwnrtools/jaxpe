@@ -77,3 +77,16 @@ This document meticulously records the experiments, observations, and key learni
   ```bash
   bash run_experiments.sh
   ```
+- **Result**: **MASSIVE SUCCESS!** Every single PN order from 4PN down to 0PN successfully compiled and ran without triggering any LLVM OOM errors! The compilation for 4PN finished in ~3 minutes. All runs eventually crashed with a *runtime* error: `EquinoxRuntimeError: The maximum number of solver steps was reached. Try increasing max_steps`. 
+- **Learning**: The hypothesis was completely correct. Bounding the reverse-mode AD tape to 256 loops completely resolved the XLA compiler memory explosion, even for the astronomically complex 4PN expressions! The only issue is that 256 steps is not quite enough to reach the merger at `ode_eps=1e-4`.
+
+## 9. Current Run: 4PN Final Validation (max_steps=512)
+- **Configuration**:
+  - `4PN` (`rad_pn_order=8`, `mode_pn_order=8`)
+  - `ode_eps=1e-4`
+  - Increased `max_ode_steps=512` and `n_ode_grid=512`.
+- **Hypothesis**: Since 256 steps comfortably fit in memory and compiled rapidly, doubling the tape limit to 512 should still stay well within the 31 GB limit, while finally providing the ODE solver enough steps to complete the inspiral phase. This should result in a fully successful end-to-end 4PN parameter estimation run!
+- **Command Line**:
+  ```bash
+  time XLA_FLAGS="--xla_cpu_parallel_codegen_split_count=1" MALLOC_ARENA_MAX=1 JAX_PLATFORMS=cpu conda run -n lalsuite-dev python examples/05_esigma_injection.py --n-chains 20 --n-epochs 10 --n-production 100 --pn-order 8
+  ```

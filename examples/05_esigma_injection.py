@@ -48,8 +48,8 @@ def main(n_chains: int = 100, n_epochs: int = 100, n_production: int = 2000, pn_
         rad_pn_order=pn_order,
         mode_pn_order=pn_order,
         ode_eps=1e-4,
-        n_ode_grid=256,
-        max_ode_steps=256,
+        n_ode_grid=512,
+        max_ode_steps=512,
     )
 
     INJECTION = dict(
