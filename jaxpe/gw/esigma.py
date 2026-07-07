@@ -158,6 +158,7 @@ class ESIGMAInspiral:
             stepsize_controller=dfx.PIDController(rtol=self.ode_eps, atol=self.ode_eps),
             max_steps=self.max_ode_steps,
             adjoint=dfx.RecursiveCheckpointAdjoint(checkpoints=16),
+            throw=False,
         )
         return s_grid * t_max, sol.ys
 

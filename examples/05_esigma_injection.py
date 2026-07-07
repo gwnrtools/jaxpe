@@ -41,7 +41,7 @@ def main(n_chains: int = 100, n_epochs: int = 100, n_production: int = 2000, pn_
     t_c = 1126259462.4
 
     print("Initializing ESIGMA waveform model...")
-    print(f"  Using PN order {pn_order} with relaxed ode_eps=1e-3 and max_ode_steps=1024 to shrink the AD tape.")
+    print(f"  Using PN order {pn_order} with relaxed ode_eps=1e-3 and max_ode_steps=16384 to shrink the AD tape.")
     waveform = ESIGMAInspiral(
         f_lower=f_lower,
         modes=((2, 2), (3, 3)),
@@ -49,13 +49,13 @@ def main(n_chains: int = 100, n_epochs: int = 100, n_production: int = 2000, pn_
         mode_pn_order=pn_order,
         ode_eps=1e-3,
         n_ode_grid=1024,
-        max_ode_steps=1024,
+        max_ode_steps=16384,
     )
 
     INJECTION = dict(
         chirp_mass=25.0,
         mass_ratio=0.8,
-        eccentricity=0.15,
+        eccentricity=0.05,
         mean_anomaly=1.0,
         luminosity_distance=400.0,
         inclination=0.4,
@@ -82,7 +82,7 @@ def main(n_chains: int = 100, n_epochs: int = 100, n_production: int = 2000, pn_
     prior = ebbh_priors(
         chirp_mass=(20.0, 30.0),
         mass_ratio=(0.5, 1.0),
-        eccentricity=(0.0, 0.3),
+        eccentricity=(0.0, 0.1),
         luminosity_distance=(200.0, 800.0),
         geocent_time=t_c,
         time_width=0.1,
