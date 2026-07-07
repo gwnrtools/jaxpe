@@ -32,6 +32,8 @@ exclude:
   - vendor/
   - Gemfile
   - Gemfile.lock
+  - AGENTS.md
+  - CLAUDE.md
 
 # ── kramdown ────────────────────────────────────────────────────────────────
 # math_engine mathjax: kramdown extracts $$...$$ spans/blocks and emits
