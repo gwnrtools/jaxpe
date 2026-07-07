@@ -9,7 +9,7 @@ has_children: true
 
 ### I. INTRODUCTION
 
-The direct observation of gravitational waves from coalescing compact binaries [1] necessitates highly accurate and computationally efficient parameter estimation frameworks. The fundamental objective is to solve an inverse problem: given a noisy interferometric strain dataset $$d(t)$$, compute the posterior probability measure $$\pi(\boldsymbol{\theta}\mid d)$$ over the parameters $$\boldsymbol{\theta} \in \mathcal{M}$$ characterizing the astrophysical source, where $$\mathcal{M}$$ denotes the $$D$$-dimensional differentiable parameter manifold.
+The direct observation of gravitational waves from coalescing compact binaries [1] necessitates highly accurate and computationally efficient parameter estimation frameworks. The fundamental objective is to solve an inverse problem: given a noisy interferometric strain dataset $$d(t)$$, compute the posterior probability measure $$\pi (\boldsymbol{\theta} | d)$$ over the parameters $$\boldsymbol{\theta} \in \mathcal{M}$$ characterizing the astrophysical source, where $$\mathcal{M}$$ denotes the $$D$$-dimensional differentiable parameter manifold.
 
 The generation of gravitational waves fundamentally stems from the non-linear dynamics of General Relativity (GR), governed by the Einstein Field Equations. For coalescing compact binaries, constructing accurate waveforms requires a progression of comprehensive mathematical frameworks. We utilize Post-Newtonian (PN) expansions [3] to approximate the weak-field, slow-velocity inspiral phase. As the binary enters the highly non-linear, strong-field regime of the merger, we must deploy full Numerical Relativity (NR) [5] to solve the unadulterated Einstein equations. Finally, for simpler situations involving the ringdown of the remnant perturbed black hole, the dynamics can be mathematically encapsulated by the Teukolsky master equation, where the Newman-Penrose Weyl scalar $$\Psi_4$$ dictates the outgoing radiation field. Together, these frameworks yield deterministic models for the cross and plus metric strain polarizations:
 
@@ -41,7 +41,7 @@ $$
 \pi(\boldsymbol{\theta} | d) = \frac{\mathcal{L}(d | \boldsymbol{\theta}) p(\boldsymbol{\theta})}{\mathcal{Z}}
 $$
 
-where $$\mathcal{Z} = \int_{\mathcal{M}} \mathcal{L}(d \mid \boldsymbol{\theta}) p(\boldsymbol{\theta}) d\boldsymbol{\theta}$$ is the marginal likelihood (Bayesian evidence). Evaluating this integral explicitly is analytically intractable. The posterior support for binary black hole mergers typically forms a highly non-convex geometry within a $$\mathcal{O}(15)$$-dimensional manifold, characterized by severe degeneracies and multimodal domains. Traditional Markov Chain Monte Carlo (MCMC) algorithms employing symmetric random-walk proposals suffer from exponential mixing times in such topologies.
+where $$\mathcal{Z} = \int_{\mathcal{M}} \mathcal{L}(d | \boldsymbol{\theta}) p(\boldsymbol{\theta}) d\boldsymbol{\theta}$$ is the marginal likelihood (Bayesian evidence). Evaluating this integral explicitly is analytically intractable. The posterior support for binary black hole mergers typically forms a highly non-convex geometry within a $$\mathcal{O}(15)$$-dimensional manifold, characterized by severe degeneracies and multimodal domains. Traditional Markov Chain Monte Carlo (MCMC) algorithms employing symmetric random-walk proposals suffer from exponential mixing times in such topologies.
 
 ### II. GRADIENT-DIRECTED MARKOV CHAIN MONTE CARLO
 
