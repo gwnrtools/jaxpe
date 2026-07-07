@@ -103,3 +103,16 @@ This document meticulously records the experiments, observations, and key learni
   ```bash
   time XLA_FLAGS="--xla_cpu_parallel_codegen_split_count=1" MALLOC_ARENA_MAX=1 JAX_PLATFORMS=cpu conda run -n lalsuite-dev python examples/05_esigma_injection.py --n-chains 20 --n-epochs 10 --n-production 100 --pn-order 8
   ```
+- **Result**: Compilation cleanly succeeded again! But the runtime solver *still* ran out of steps at 512.
+- **Learning**: This is a physics issue! The injected signal has `eccentricity=0.15`. Eccentric orbits cause wild oscillations in orbital frequency near periapsis, making the ODE highly stiff and forcing the adaptive step size controller to take thousands of tiny steps even at relaxed tolerances. 
+
+## 11. Current Run: The Goldilocks Bound (1024 steps)
+- **Configuration**:
+  - `4PN`
+  - `ode_eps=1e-3`
+  - Increased `max_ode_steps=1024`, `n_ode_grid=1024`
+- **Hypothesis**: Since 2048 steps crashes LLVM and 512 steps safely compiles, 1024 steps might be the "Goldilocks" zone: it may just barely fit inside the 31GB RAM during compilation, while providing the Tsit5 solver enough headroom to conquer the stiff eccentric periapsis passages.
+- **Command Line**:
+  ```bash
+  time XLA_FLAGS="--xla_cpu_parallel_codegen_split_count=1" MALLOC_ARENA_MAX=1 JAX_PLATFORMS=cpu conda run -n lalsuite-dev python examples/05_esigma_injection.py --n-chains 20 --n-epochs 10 --n-production 100 --pn-order 8
+  ```

@@ -41,15 +41,15 @@ def main(n_chains: int = 100, n_epochs: int = 100, n_production: int = 2000, pn_
     t_c = 1126259462.4
 
     print("Initializing ESIGMA waveform model...")
-    print(f"  Using PN order {pn_order} with relaxed ode_eps=1e-3 and max_ode_steps=512 to shrink the AD tape.")
+    print(f"  Using PN order {pn_order} with relaxed ode_eps=1e-3 and max_ode_steps=1024 to shrink the AD tape.")
     waveform = ESIGMAInspiral(
         f_lower=f_lower,
         modes=((2, 2), (3, 3)),
         rad_pn_order=pn_order,
         mode_pn_order=pn_order,
         ode_eps=1e-3,
-        n_ode_grid=512,
-        max_ode_steps=512,
+        n_ode_grid=1024,
+        max_ode_steps=1024,
     )
 
     INJECTION = dict(
