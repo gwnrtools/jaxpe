@@ -67,6 +67,7 @@ class ESIGMAInspiral:
         taper_on_seconds: float = 0.05,
         taper_off_seconds: float = 0.02,
         s1z_table_points: int = 2049,
+        adjoint_mode: str = "forward_sensitivity",
     ):
         import diffrax
         from esigmapy.inspiral.jax_backend.generator import LAL_MRSUN_SI, LAL_PC_SI
@@ -75,7 +76,10 @@ class ESIGMAInspiral:
             dphi_dt_jax,
             eccentric_x_model_odes_jax,
         )
-        from esigmapy.inspiral.jax_backend.kepler import separation_jax, solve_kepler_jax
+        from esigmapy.inspiral.jax_backend.kepler import (
+            separation_jax,
+            solve_kepler_jax,
+        )
         from esigmapy.inspiral.numba_backend.pn_inspiral import x_dot_4pn_SF
 
         self.f_lower = float(f_lower)
@@ -88,6 +92,7 @@ class ESIGMAInspiral:
         self.max_ode_steps = int(max_ode_steps)
         self.taper_on_seconds = float(taper_on_seconds)
         self.taper_off_seconds = float(taper_off_seconds)
+        self.adjoint_mode = adjoint_mode
 
         self._diffrax = diffrax
         self._odes = eccentric_x_model_odes_jax
@@ -133,18 +138,13 @@ class ESIGMAInspiral:
 
         return rhs
 
-    def _integrate(self, x_init, e0, l0, eta, m1, m2, s1z, s2z):
-        """Solve the x-model ODEs on a static, parameter-independent grid s in [0, 1].
-
-        The physical span is [0, T_max(params)] (0PN circular Peters time, 1.5 safety
-        factor — eccentricity only shortens the inspiral, so this always covers the
-        ISCO crossing); T_max enters only as the RHS time-dilation factor (see
-        ``_rhs``), not as the solver's output-time grid.
-        """
+    def _solve_ys(self, theta, adjoint):
+        x_init, e0, l0, m1, m2, s1z, s2z = theta
+        eta = m1 * m2 / (m1 + m2) ** 2
         dfx = self._diffrax
         t_max = 1.5 * (5.0 / 256.0) / eta * (x_init**-4 - self.x_final**-4)
-        s_grid = jnp.linspace(0.0, 1.0, self.n_ode_grid)
         sf_val = eta * jnp.interp(s1z, self._sf_grid, self._sf_vals)
+        s_grid = jnp.linspace(0.0, 1.0, self.n_ode_grid)
 
         sol = dfx.diffeqsolve(
             terms=dfx.ODETerm(self._rhs(sf_val, t_max)),
@@ -157,10 +157,51 @@ class ESIGMAInspiral:
             saveat=dfx.SaveAt(ts=s_grid),
             stepsize_controller=dfx.PIDController(rtol=self.ode_eps, atol=self.ode_eps),
             max_steps=self.max_ode_steps,
-            adjoint=dfx.RecursiveCheckpointAdjoint(checkpoints=16),
+            adjoint=adjoint,
             throw=False,
         )
-        return s_grid * t_max, sol.ys
+        return sol.ys
+
+    def _integrate(self, x_init, e0, l0, eta, m1, m2, s1z, s2z):
+        """Solve the x-model ODEs with exact forward-sensitivities via custom_vjp.
+
+        This prevents the outer reverse-mode AD from tracing through the ODE solver,
+        collapsing the XLA compile graph size while returning the exact gradients.
+        """
+        dfx = self._diffrax
+        theta = jnp.stack([x_init, e0, l0, m1, m2, s1z, s2z])
+
+        if self.adjoint_mode == "recursive_checkpoint":
+            # Baseline reverse-mode (leads to compile OOM for large PN orders)
+            ys = self._solve_ys(
+                theta, adjoint=dfx.RecursiveCheckpointAdjoint(checkpoints=16)
+            )
+        elif self.adjoint_mode == "forward_sensitivity":
+            # New forward-sensitivity formulation
+            @jax.custom_vjp
+            def solve_ys(theta_inner):
+                return self._solve_ys(theta_inner, adjoint=dfx.DirectAdjoint())
+
+            def solve_ys_fwd(theta_inner):
+                ys_val = self._solve_ys(theta_inner, adjoint=dfx.DirectAdjoint())
+                jac = jax.jacfwd(
+                    lambda th: self._solve_ys(th, adjoint=dfx.ForwardMode())
+                )(theta_inner)
+                return ys_val, jac
+
+            def solve_ys_bwd(jac, ybar):
+                # ybar: (G, 4), jac: (G, 4, 7) -> theta cotangent: (7,)
+                return (jnp.tensordot(ybar, jac, axes=([0, 1], [0, 1])),)
+
+            solve_ys.defvjp(solve_ys_fwd, solve_ys_bwd)
+            ys = solve_ys(theta)
+        else:
+            raise ValueError(f"Unknown adjoint_mode: {self.adjoint_mode}")
+
+        # Reconstruct ts explicitly outside the custom_vjp boundary so it differentiates normally
+        t_max = 1.5 * (5.0 / 256.0) / eta * (x_init**-4 - self.x_final**-4)
+        s_grid = jnp.linspace(0.0, 1.0, self.n_ode_grid)
+        return s_grid * t_max, ys
 
     @staticmethod
     def _isco_time(ts, x_arr, x_final, t_max):
@@ -211,11 +252,13 @@ class ESIGMAInspiral:
             phi_t = jnp.interp(tq, ts, phi_a)
 
             u_t = jax.vmap(self._kepler, in_axes=(0, 0))(l_t, e_t)
-            r_t = jax.vmap(lambda u, x, e: self._separation(u, eta, x, e, m1, m2, s1z, s2z))(
-                u_t, x_t, e_t
-            )
+            r_t = jax.vmap(
+                lambda u, x, e: self._separation(u, eta, x, e, m1, m2, s1z, s2z)
+            )(u_t, x_t, e_t)
             phidot_t = jax.vmap(
-                lambda u, x, e: self._dphi_dt(u, eta, m1, m2, s1z, s2z, x, e, self.mode_pn_order)
+                lambda u, x, e: self._dphi_dt(
+                    u, eta, m1, m2, s1z, s2z, x, e, self.mode_pn_order
+                )
             )(u_t, x_t, e_t)
             dt_geo = (times[1] - times[0]) / m_sec
             rdot_t = jnp.gradient(r_t) / dt_geo
@@ -249,13 +292,17 @@ class ESIGMAInspiral:
                 )
                 # h = sum_lm h_lm * (-2)Y_lm; negative m via h_{l,-m} = (-1)^l conj(h_lm)
                 h = h + hlm * spin_weighted_ylm(iota, beta, l, m)
-                h = h + (-1.0) ** l * jnp.conj(hlm) * spin_weighted_ylm(iota, beta, l, -m)
+                h = h + (-1.0) ** l * jnp.conj(hlm) * spin_weighted_ylm(
+                    iota, beta, l, -m
+                )
 
             # smooth turn-on and pre-ISCO turn-off tapers (widths in geometric time)
             on_geo = jnp.maximum(self.taper_on_seconds / m_sec, 1e-12)
             off_geo = jnp.maximum(self.taper_off_seconds / m_sec, 1e-12)
             w_on = 0.5 - 0.5 * jnp.cos(jnp.pi * jnp.clip(t_geo / on_geo, 0.0, 1.0))
-            w_off = 0.5 - 0.5 * jnp.cos(jnp.pi * jnp.clip((t_isco - t_geo) / off_geo, 0.0, 1.0))
+            w_off = 0.5 - 0.5 * jnp.cos(
+                jnp.pi * jnp.clip((t_isco - t_geo) / off_geo, 0.0, 1.0)
+            )
             w = jnp.where(valid, w_on * w_off, 0.0)
 
             return w * h.real, -w * h.imag
