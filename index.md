@@ -9,7 +9,7 @@ has_children: true
 
 ### I. INTRODUCTION
 
-The direct observation of gravitational waves from coalescing compact binaries [1] necessitates highly accurate and computationally efficient parameter estimation frameworks. The fundamental objective is to solve an inverse problem: given a noisy interferometric strain dataset $$d(t)$$, compute the posterior probability measure $$\pi (\boldsymbol{\theta} | d)$$ over the parameters $$\boldsymbol{\theta} \in \mathcal{M}$$ characterizing the astrophysical source, where $$\mathcal{M}$$ denotes the $$D$$-dimensional differentiable parameter manifold.
+The direct observation of gravitational waves from coalescing compact binaries [1] necessitates highly accurate and computationally efficient parameter estimation frameworks. The fundamental objective is to solve an inverse problem: given a noisy interferometric strain dataset $$d(t)$$, compute the posterior probability measure $$\pi (\boldsymbol{\theta} \mid d)$$ over the parameters $$\boldsymbol{\theta} \in \mathcal{M}$$ characterizing the astrophysical source, where $$\mathcal{M}$$ denotes the $$D$$-dimensional differentiable parameter manifold.
 
 The generation of gravitational waves fundamentally stems from the non-linear dynamics of General Relativity (GR), governed by the Einstein Field Equations. For coalescing compact binaries, constructing accurate waveforms requires a progression of comprehensive mathematical frameworks. We utilize Post-Newtonian (PN) expansions [3] to approximate the weak-field, slow-velocity inspiral phase. As the binary enters the highly non-linear, strong-field regime of the merger, we must deploy full Numerical Relativity (NR) [5] to solve the unadulterated Einstein equations. Finally, for simpler situations involving the ringdown of the remnant perturbed black hole, the dynamics can be mathematically encapsulated by the Teukolsky master equation, where the Newman-Penrose Weyl scalar $$\Psi_4$$ dictates the outgoing radiation field. Together, these frameworks yield deterministic models for the cross and plus metric strain polarizations:
 
@@ -26,35 +26,35 @@ $$
 Assuming the detector noise $$n(t)$$ is a wide-sense stationary Gaussian stochastic process characterized by a one-sided power spectral density (PSD) $$S_n(f)$$, the likelihood of observing the data $$d$$ is evaluated via the Whittle likelihood formalism in the frequency domain [6]. We define the noise-weighted inner product between two frequency-domain series $$\tilde{a}(f)$$ and $$\tilde{b}(f)$$ as:
 
 $$
-(a | b) = 4 \Re \int_{0}^{\infty} \frac{\tilde{a}^*(f) \tilde{b}(f)}{S_n(f)} df
+(a \mid b) = 4 \Re \int_{0}^{\infty} \frac{\tilde{a}^*(f) \tilde{b}(f)}{S_n(f)} df
 $$
 
 The corresponding likelihood functional takes the form of a multivariate Gaussian evaluated over the frequency bins:
 
 $$
-\mathcal{L}(d | \boldsymbol{\theta}) \propto \exp\left[ -\frac{1}{2} (d - h(\boldsymbol{\theta}) | d - h(\boldsymbol{\theta})) \right]
+\mathcal{L}(d \mid \boldsymbol{\theta}) \propto \exp\left[ -\frac{1}{2} (d - h(\boldsymbol{\theta}) \mid d - h(\boldsymbol{\theta})) \right]
 $$
 
 Bayesian inference dictates that this likelihood is updated by the prior probability measure $$p(\boldsymbol{\theta})$$ to yield the posterior distribution:
 
 $$
-\pi(\boldsymbol{\theta} | d) = \frac{\mathcal{L}(d | \boldsymbol{\theta}) p(\boldsymbol{\theta})}{\mathcal{Z}}
+\pi(\boldsymbol{\theta} \mid d) = \frac{\mathcal{L}(d \mid \boldsymbol{\theta}) p(\boldsymbol{\theta})}{\mathcal{Z}}
 $$
 
-where $$\mathcal{Z} = \int_{\mathcal{M}} \mathcal{L}(d | \boldsymbol{\theta}) p(\boldsymbol{\theta}) d\boldsymbol{\theta}$$ is the marginal likelihood (Bayesian evidence). Evaluating this integral explicitly is analytically intractable. The posterior support for binary black hole mergers typically forms a highly non-convex geometry within a $$\mathcal{O}(15)$$-dimensional manifold, characterized by severe degeneracies and multimodal domains. Traditional Markov Chain Monte Carlo (MCMC) algorithms employing symmetric random-walk proposals suffer from exponential mixing times in such topologies.
+where $$\mathcal{Z} = \int_{\mathcal{M}} \mathcal{L}(d \mid \boldsymbol{\theta}) p(\boldsymbol{\theta}) d\boldsymbol{\theta}$$ is the marginal likelihood (Bayesian evidence). Evaluating this integral explicitly is analytically intractable. The posterior support for binary black hole mergers typically forms a highly non-convex geometry within a $$\mathcal{O}(15)$$-dimensional manifold, characterized by severe degeneracies and multimodal domains. Traditional Markov Chain Monte Carlo (MCMC) algorithms employing symmetric random-walk proposals suffer from exponential mixing times in such topologies.
 
 ### II. GRADIENT-DIRECTED MARKOV CHAIN MONTE CARLO
 
 To accelerate convergence, `jaxpe` employs gradient-directed MCMC algorithms. By utilizing automatic differentiation (AD) natively supported by the JAX framework, the gradient of the log-posterior target density is computed exactly:
 
 $$
-\nabla_{\boldsymbol{\theta}} \log \pi(\boldsymbol{\theta}|d)
+\nabla_{\boldsymbol{\theta}} \log \pi(\boldsymbol{\theta} \mid d)
 $$
 
 Hamiltonian Monte Carlo (HMC) [7, 8] maps the statistical sampling problem onto the deterministic integration of classical Hamiltonian dynamics. The negative log-posterior is treated as a scalar potential energy function $$U(\boldsymbol{\theta})$$ on the manifold $$\mathcal{M}$$:
 
 $$
-U(\boldsymbol{\theta}) = -\log \pi(\boldsymbol{\theta}|d)
+U(\boldsymbol{\theta}) = -\log \pi(\boldsymbol{\theta} \mid d)
 $$
 
 An auxiliary momentum vector $$\mathbf{p} \in T^*_{\boldsymbol{\theta}}\mathcal{M}$$ is introduced in the cotangent space, equipped with a kinetic energy metric defined by an inverse mass matrix $$\mathbf{M}^{-1}$$:
@@ -88,7 +88,7 @@ The diffeomorphic parameters $$\phi$$ are optimized by minimizing the Kullback-L
 During the global sampling phase, independent proposals $$\mathbf{y} \sim q_\phi(\mathbf{y})$$ are drawn. To guarantee the stationarity of the Markov chain with respect to the exact posterior $$\pi$$, these proposals are filtered via the Metropolis-Hastings acceptance probability $$\alpha$$:
 
 $$
-\alpha(\mathbf{x} \to \mathbf{y}) = \min\left(1, \frac{\pi(\mathbf{y}|d) q_\phi(\mathbf{x})}{\pi(\mathbf{x}|d) q_\phi(\mathbf{y})}\right)
+\alpha(\mathbf{x} \to \mathbf{y}) = \min\left(1, \frac{\pi(\mathbf{y} \mid d) q_\phi(\mathbf{x})}{\pi(\mathbf{x} \mid d) q_\phi(\mathbf{y})}\right)
 $$
 
 Because $$q_\phi$$ closely approximates $$\pi$$, the acceptance ratio approaches unity, allowing the Markov chain to transition seamlessly between disconnected modes without violating detailed balance.
