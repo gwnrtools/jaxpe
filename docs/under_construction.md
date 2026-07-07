@@ -457,3 +457,123 @@ JAX_PLATFORMS=cpu conda run -n lalsuite-dev python collect.py
 # 2. render the figure into examples/compile_scaling.png
 conda run -n lalsuite-dev python plot_scaling.py
 ```
+
+### 14.5 Implementation plan: forward-sensitivity `custom_vjp` for the ODE solve
+
+Per §14.0, the concrete change is to stop the outer reverse-mode from ever transposing
+the 4PN RHS, by isolating the ODE solve behind a `jax.custom_vjp` whose backward is built
+from *forward-mode* sensitivities.
+
+**Current state.** In `jaxpe/gw/esigma.py`, `ESIGMAInspiral._integrate` (L136) calls
+`diffrax.diffeqsolve(..., adjoint=RecursiveCheckpointAdjoint(checkpoints=16))` (L149–160).
+MALA's `jax.value_and_grad(log_posterior)` reverse-differentiates the whole chain
+`_compute → _integrate → diffeqsolve`, which materializes the RHS transpose measured in
+§14.2. The solve's gradient-carrying inputs are the eight derived scalars
+`(x_init, e0, l0, eta, m1, m2, s1z, s2z)` passed at L199 — themselves smooth closed-form
+functions of the $\le 6$ sampled intrinsics.
+
+**Constraints.**
+- Gradient must stay *exact* (correctness > speed). MALA/HMC tolerate approximate
+  gradients only as an efficiency loss, but forward sensitivity gives the exact value, so
+  we keep exactness.
+- Minimal, localized change: Phase A touches `_integrate` only — not the sampler, not the
+  mode reconstruction.
+- diffrax 0.7.2 exposes `ForwardMode`. It has been checked end-to-end in the §14.1 harness:
+  on the cheap 2-D solve, `ForwardMode` + `jacfwd` reproduced the
+  `RecursiveCheckpointAdjoint` reverse-mode gradient to all printed digits
+  ($-3.8438\times10^{1}$) and compiled to **1,170** HLO lines vs **4,965** for reverse-mode
+  — a 4× smaller graph even before the RHS is large.
+
+**Design (Phase A).**
+
+1. Factor the θ-dependent solve into a pure function of a single packed vector
+   $\theta\in\mathbb{R}^{p}$ (start with the $p=8$ derived scalars; optionally push the
+   boundary up to the $p=6$ sampled intrinsics by moving the mass algebra inside):
+
+   ```python
+   def _solve_ys(self, theta, adjoint):
+       x_init, e0, l0, eta, m1, m2, s1z, s2z = theta
+       t_max = 1.5 * (5.0 / 256.0) / eta * (x_init**-4 - self.x_final**-4)
+       sf_val = eta * jnp.interp(s1z, self._sf_grid, self._sf_vals)
+       s_grid = jnp.linspace(0.0, 1.0, self.n_ode_grid)
+       sol = self._diffrax.diffeqsolve(
+           terms=self._diffrax.ODETerm(self._rhs(sf_val, t_max)),
+           solver=self._diffrax.Tsit5(), t0=0.0, t1=1.0, dt0=s_grid[1] - s_grid[0],
+           y0=jnp.stack([x_init, e0, l0, jnp.zeros_like(x_init)]),
+           args=(eta, m1, m2, s1z, s2z), saveat=self._diffrax.SaveAt(ts=s_grid),
+           stepsize_controller=self._diffrax.PIDController(rtol=self.ode_eps, atol=self.ode_eps),
+           max_steps=self.max_ode_steps, adjoint=adjoint, throw=False)
+       return sol.ys                       # (G, 4)
+   ```
+
+2. Wrap it in a `custom_vjp` that computes $\partial y/\partial\theta$ by forward-mode and
+   stashes it as the residual:
+
+   ```python
+   @jax.custom_vjp
+   def solve_ys(theta):
+       return self._solve_ys(theta, adjoint=DirectAdjoint())      # primal; never AD'd, any adjoint ok
+
+   def solve_ys_fwd(theta):
+       ys  = self._solve_ys(theta, adjoint=DirectAdjoint())
+       jac = jax.jacfwd(lambda th: self._solve_ys(th, adjoint=ForwardMode()))(theta)  # (G,4,p)
+       return ys, jac
+
+   def solve_ys_bwd(jac, ybar):            # ybar: (G,4)  ->  theta cotangent: (p,)
+       return (jnp.tensordot(ybar, jac, axes=([0, 1], [0, 1])),)
+
+   solve_ys.defvjp(solve_ys_fwd, solve_ys_bwd)
+   ```
+
+   The outer reverse-mode now sees only `solve_ys_bwd` (a `tensordot`); the 4PN RHS is
+   evaluated forward-only (primal + one batched `jvp`), never transposed. `ts = s_grid *
+   t_max` stays outside the boundary and differentiates through ordinary cheap AD.
+
+3. Call `solve_ys` from `_integrate`/`_compute` in place of the inline solve; leave
+   `@jax.remat` on `_compute` (L179) unchanged. (Minor: `ys` is computed once as primal and
+   again inside `jacfwd`; the two can be fused with a single `jax.jvp` sweep over a basis if
+   the extra primal solve matters.)
+
+**Tradeoffs.** Forward-mode costs $p{+}1$ solves' worth of work per gradient (one primal +
+$p$ tangents) versus reverse's forward+backward, where $p$ is the number of *independent*
+gradient-carrying inputs. The naive 8-scalar interface
+`(x_init, e0, l0, eta, m1, m2, s1z, s2z)` over-counts, and it mixes two physically distinct
+kinds of quantity: **parameters** that stay fixed through the inspiral — $\eta,m_1,m_2$
+(mass reparametrizations of $(\mathcal{M},q)$) and the spins $S_{1z},S_{2z}$ — and **initial
+conditions** of the evolved state $y=(x,e,l,\phi)$, namely $x_{\text{init}},e_0,l_0$. In
+particular $x_{\text{init}}$ is *not* a mass constant: it is the initial value of the evolved
+kinematic variable $x=(M\omega_{\text{orb}})^{2/3}$ (set by the binary's orbital angular
+velocity $\omega_{\text{orb}}$), which this code merely *pins* through the fixed start
+frequency, $x_{\text{init}}=(M\pi f_{\text{lower}})^{2/3}$ — so only because
+$f_{\text{lower}}$ is held constant does it, like $\eta,m_1,m_2$, reduce to a deterministic
+function of $(\mathcal{M},q)$. Pushing the `custom_vjp` boundary up to the sampled intrinsics
+themselves therefore collapses the interface to the true independent set —
+$(\mathcal{M},q,e_0,l_0)$ plus the aligned spins if they are sampled, i.e. $p=4$–$6$ — so the
+backward is ~$5$–$7$ forward solves. The ODE is a small share of runtime, and this buys us
+out of a hard compile-time OOM. Residual memory for `jac` is
+$G\times4\times p\times N_{\text{chains}} \lesssim 1024\times4\times6\times20 \approx 5$ MB —
+negligible.
+
+**Validation (before → after; must all pass).**
+- *Correctness*: at 0PN and 2PN on a small grid, assert `solve_ys`'s gradient of a scalar
+  reduction of `ys` matches (a) `RecursiveCheckpointAdjoint` reverse-mode and (b) central
+  finite differences, to the ODE tolerance.
+- *Compile*: record optimized-HLO lines and compile wall-time of
+  `jax.grad(scalar ∘ _compute)` before vs after — the RHS-transpose contribution should
+  disappear.
+- *End-to-end*: unchanged injected SNR; a short MALA run (few chains/steps) reproduces the
+  pre-change chain statistics within Monte-Carlo noise.
+
+**Recommendation & staging.** Land Phase A (ODE only) first and **re-measure the full
+pipeline compile.** §14.2 flags a second contributor — the per-sample mode functions
+`hlmGOresult_jax`, `dphi_dt_jax`, `separation_jax` (`go_terms.py`, ~6k lines), still
+reverse-differentiated in the `hlm_batch` block (esigma.py L224–252). If they still
+overflow, **Phase B** applies the same forward-sensitivity `custom_vjp` to the
+intrinsic→modes map. Phase B is more invasive because the detector-grid remap
+$t_{\text{geo}} = (\text{times} - t_c)/m_{\text{sec}} + t_{\text{isco}}$ and the tapers mix
+the intrinsic $\theta$ with the extrinsic $t_c$; the boundary must keep $t_c$ (and the
+angles/distance) on the ordinary-AD side. Decide Phase B only on measured evidence.
+
+**Rollback.** Keep the gradient path selectable (constructor arg or env flag:
+`{forward_sensitivity, recursive_checkpoint}`) so we can A/B correctness and compile size
+and revert instantly if `ForwardMode` misbehaves on the full RHS.
