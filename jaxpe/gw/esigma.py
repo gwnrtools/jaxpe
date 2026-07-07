@@ -163,11 +163,7 @@ class ESIGMAInspiral:
         return sol.ys
 
     def _integrate(self, x_init, e0, l0, eta, m1, m2, s1z, s2z):
-        """Solve the x-model ODEs with exact forward-sensitivities via custom_vjp.
-
-        This prevents the outer reverse-mode AD from tracing through the ODE solver,
-        collapsing the XLA compile graph size while returning the exact gradients.
-        """
+        """Solve the x-model ODEs."""
         dfx = self._diffrax
         theta = jnp.stack([x_init, e0, l0, m1, m2, s1z, s2z])
 
@@ -177,28 +173,12 @@ class ESIGMAInspiral:
                 theta, adjoint=dfx.RecursiveCheckpointAdjoint(checkpoints=16)
             )
         elif self.adjoint_mode == "forward_sensitivity":
-            # New forward-sensitivity formulation
-            @jax.custom_vjp
-            def solve_ys(theta_inner):
-                return self._solve_ys(theta_inner, adjoint=dfx.DirectAdjoint())
-
-            def solve_ys_fwd(theta_inner):
-                ys_val = self._solve_ys(theta_inner, adjoint=dfx.DirectAdjoint())
-                jac = jax.jacfwd(
-                    lambda th: self._solve_ys(th, adjoint=dfx.ForwardMode())
-                )(theta_inner)
-                return ys_val, jac
-
-            def solve_ys_bwd(jac, ybar):
-                # ybar: (G, 4), jac: (G, 4, 7) -> theta cotangent: (7,)
-                return (jnp.tensordot(ybar, jac, axes=([0, 1], [0, 1])),)
-
-            solve_ys.defvjp(solve_ys_fwd, solve_ys_bwd)
-            ys = solve_ys(theta)
+            # Forward-mode pushes directly through the ODE steps via DirectAdjoint
+            ys = self._solve_ys(theta, adjoint=dfx.DirectAdjoint())
         else:
             raise ValueError(f"Unknown adjoint_mode: {self.adjoint_mode}")
 
-        # Reconstruct ts explicitly outside the custom_vjp boundary so it differentiates normally
+        # Reconstruct ts explicitly
         t_max = 1.5 * (5.0 / 256.0) / eta * (x_init**-4 - self.x_final**-4)
         s_grid = jnp.linspace(0.0, 1.0, self.n_ode_grid)
         return s_grid * t_max, ys
@@ -219,12 +199,94 @@ class ESIGMAInspiral:
     def __call__(self, params: dict, times: jax.Array):
         @jax.remat
         def _compute(params, times):
+            def _heavy_math(theta, times):
+                mc, q, e0, l0, s1z, s2z, t_c = theta
+                eta = q / (1.0 + q) ** 2
+                m_total = mc / eta**0.6
+                m1 = m_total / (1.0 + q)
+                m2 = m_total * q / (1.0 + q)
+
+                m_sec = m_total * MTSUN_SI
+                x_init = (m_sec * jnp.pi * self.f_lower) ** (2.0 / 3.0)
+
+                ts, ys = self._integrate(x_init, e0, l0, eta, m1, m2, s1z, s2z)
+                x_a, e_a, l_a, phi_a = ys[:, 0], ys[:, 1], ys[:, 2], ys[:, 3]
+                t_isco = self._isco_time(ts, x_a, self.x_final, ts[-1])
+
+                t_geo = (times - t_c) / m_sec + t_isco
+                valid = (t_geo >= 0.0) & (t_geo <= t_isco)
+                tq = jnp.clip(t_geo, 0.0, t_isco)
+
+                x_t = jnp.interp(tq, ts, x_a)
+                e_t = jnp.interp(tq, ts, e_a)
+                l_t = jnp.interp(tq, ts, l_a)
+                phi_t = jnp.interp(tq, ts, phi_a)
+
+                u_t = jax.vmap(self._kepler, in_axes=(0, 0))(l_t, e_t)
+                r_t = jax.vmap(
+                    lambda u, x, e: self._separation(u, eta, x, e, m1, m2, s1z, s2z)
+                )(u_t, x_t, e_t)
+                phidot_t = jax.vmap(
+                    lambda u, x, e: self._dphi_dt(
+                        u, eta, m1, m2, s1z, s2z, x, e, self.mode_pn_order
+                    )
+                )(u_t, x_t, e_t)
+                dt_geo = (times[1] - times[0]) / m_sec
+                rdot_t = jnp.gradient(r_t) / dt_geo
+
+                hlm_batch = jax.vmap(
+                    self._hlm,
+                    in_axes=(
+                        None,
+                        None,
+                        None,
+                        None,
+                        0,
+                        0,
+                        0,
+                        0,
+                        None,
+                        None,
+                        None,
+                        None,
+                        0,
+                    ),
+                )
+
+                hlms = []
+                for l, m in self.modes:
+                    hlm = (
+                        hlm_batch(
+                            l,
+                            m,
+                            m_total,
+                            eta,
+                            r_t * m_total,
+                            rdot_t,
+                            phi_t,
+                            phidot_t / m_total,
+                            self._mpc_m,
+                            self.mode_pn_order,
+                            s1z,
+                            s2z,
+                            x_t,
+                        )
+                        * self._mrsun
+                    )
+                    hlms.append(hlm)
+                hlms = jnp.stack(hlms)
+
+                on_geo = jnp.maximum(self.taper_on_seconds / m_sec, 1e-12)
+                off_geo = jnp.maximum(self.taper_off_seconds / m_sec, 1e-12)
+                w_on = 0.5 - 0.5 * jnp.cos(jnp.pi * jnp.clip(t_geo / on_geo, 0.0, 1.0))
+                w_off = 0.5 - 0.5 * jnp.cos(
+                    jnp.pi * jnp.clip((t_isco - t_geo) / off_geo, 0.0, 1.0)
+                )
+                w = jnp.where(valid, w_on * w_off, 0.0)
+                return hlms, w
+
             mc = params["chirp_mass"]
             q = params["mass_ratio"]
-            eta = q / (1.0 + q) ** 2
-            m_total = mc / eta**0.6
-            m1 = m_total / (1.0 + q)
-            m2 = m_total * q / (1.0 + q)
             s1z = params.get("spin1z", jnp.zeros(()))
             s2z = params.get("spin2z", jnp.zeros(()))
             e0 = params.get("eccentricity", jnp.zeros(()))
@@ -234,76 +296,41 @@ class ESIGMAInspiral:
             t_c = params["geocent_time"]
             r_si = params["luminosity_distance"] * self._mpc_m
 
-            m_sec = m_total * MTSUN_SI
-            x_init = (m_sec * jnp.pi * self.f_lower) ** (2.0 / 3.0)
+            theta = jnp.stack([mc, q, e0, l0, s1z, s2z, t_c])
 
-            ts, ys = self._integrate(x_init, e0, l0, eta, m1, m2, s1z, s2z)
-            x_a, e_a, l_a, phi_a = ys[:, 0], ys[:, 1], ys[:, 2], ys[:, 3]
-            t_isco = self._isco_time(ts, x_a, self.x_final, ts[-1])
-
-            # detector grid -> dynamics time (geometric units), ISCO pinned at t_c
-            t_geo = (times - t_c) / m_sec + t_isco
-            valid = (t_geo >= 0.0) & (t_geo <= t_isco)
-            tq = jnp.clip(t_geo, 0.0, t_isco)
-
-            x_t = jnp.interp(tq, ts, x_a)
-            e_t = jnp.interp(tq, ts, e_a)
-            l_t = jnp.interp(tq, ts, l_a)
-            phi_t = jnp.interp(tq, ts, phi_a)
-
-            u_t = jax.vmap(self._kepler, in_axes=(0, 0))(l_t, e_t)
-            r_t = jax.vmap(
-                lambda u, x, e: self._separation(u, eta, x, e, m1, m2, s1z, s2z)
-            )(u_t, x_t, e_t)
-            phidot_t = jax.vmap(
-                lambda u, x, e: self._dphi_dt(
-                    u, eta, m1, m2, s1z, s2z, x, e, self.mode_pn_order
+            if self.adjoint_mode == "recursive_checkpoint":
+                hlms, w = _heavy_math(theta, times)
+            elif self.adjoint_mode == "forward_sensitivity":
+                heavy_math = jax.custom_vjp(
+                    lambda th, tms: _heavy_math(th, tms)
                 )
-            )(u_t, x_t, e_t)
-            dt_geo = (times[1] - times[0]) / m_sec
-            rdot_t = jnp.gradient(r_t) / dt_geo
+                    
+                def heavy_fwd(th, tms):
+                    out = _heavy_math(th, tms)
+                    jac = jax.jacfwd(lambda t: _heavy_math(t, tms))(th)
+                    return out, jac
+                    
+                def heavy_bwd(jac, g):
+                    j_hlms, j_w = jac
+                    g_hlms, g_w = g
+                    term1 = jnp.real(jnp.tensordot(g_hlms, j_hlms, axes=([0, 1], [0, 1])))
+                    term2 = jnp.tensordot(g_w, j_w, axes=([0], [0]))
+                    return (term1 + term2, None)
+                    
+                heavy_math.defvjp(heavy_fwd, heavy_bwd)
+                hlms, w = heavy_math(theta, times)
+            else:
+                raise ValueError(f"Unknown adjoint_mode: {self.adjoint_mode}")
 
-            # modes in esigmapy's conventions: r in Msun units, phidot in 1/Msun, R in m
-            hlm_batch = jax.vmap(
-                self._hlm,
-                in_axes=(None, None, None, None, 0, 0, 0, 0, None, None, None, None, 0),
-            )
             from .harmonics import spin_weighted_ylm
 
             h = jnp.zeros(times.shape, dtype=jnp.complex128)
-            for l, m in self.modes:
-                hlm = (
-                    hlm_batch(
-                        l,
-                        m,
-                        m_total,
-                        eta,
-                        r_t * m_total,
-                        rdot_t,
-                        phi_t,
-                        phidot_t / m_total,
-                        r_si,
-                        self.mode_pn_order,
-                        s1z,
-                        s2z,
-                        x_t,
-                    )
-                    * self._mrsun
-                )
-                # h = sum_lm h_lm * (-2)Y_lm; negative m via h_{l,-m} = (-1)^l conj(h_lm)
+            for i, (l, m) in enumerate(self.modes):
+                hlm = hlms[i] * (self._mpc_m / r_si)
                 h = h + hlm * spin_weighted_ylm(iota, beta, l, m)
                 h = h + (-1.0) ** l * jnp.conj(hlm) * spin_weighted_ylm(
                     iota, beta, l, -m
                 )
-
-            # smooth turn-on and pre-ISCO turn-off tapers (widths in geometric time)
-            on_geo = jnp.maximum(self.taper_on_seconds / m_sec, 1e-12)
-            off_geo = jnp.maximum(self.taper_off_seconds / m_sec, 1e-12)
-            w_on = 0.5 - 0.5 * jnp.cos(jnp.pi * jnp.clip(t_geo / on_geo, 0.0, 1.0))
-            w_off = 0.5 - 0.5 * jnp.cos(
-                jnp.pi * jnp.clip((t_isco - t_geo) / off_geo, 0.0, 1.0)
-            )
-            w = jnp.where(valid, w_on * w_off, 0.0)
 
             return w * h.real, -w * h.imag
 

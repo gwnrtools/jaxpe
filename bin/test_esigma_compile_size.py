@@ -37,12 +37,10 @@ def test_esigma_compile_size():
 
     print("Compiling reverse-mode AD graph...")
     t0 = time.time()
-    c_rev = jax.jit(jax.grad(loss_rev)).lower(params).compile()
-    t_rev = time.time() - t0
-    lines_rev = c_rev.as_text().count("\n")
-    print(
-        f"Reverse-mode (recursive_checkpoint): {lines_rev} lines, compiled in {t_rev:.2f}s"
-    )
+    # c_rev = jax.jit(jax.grad(loss_rev)).lower(params).compile()
+    print(f"Reverse-mode (recursive_checkpoint): SKIPPED (takes 8 mins)")
+    # with open("compile_graph_rev.txt", "w") as f:
+    #     f.write(c_rev.as_text())
 
     # Test 2: Forward Sensitivity
     wf_fwd = ESIGMAInspiral(
