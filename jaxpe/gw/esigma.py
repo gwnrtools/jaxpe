@@ -301,22 +301,22 @@ class ESIGMAInspiral:
             if self.adjoint_mode == "recursive_checkpoint":
                 hlms, w = _heavy_math(theta, times)
             elif self.adjoint_mode == "forward_sensitivity":
-                heavy_math = jax.custom_vjp(
-                    lambda th, tms: _heavy_math(th, tms)
-                )
-                    
+                heavy_math = jax.custom_vjp(lambda th, tms: _heavy_math(th, tms))
+
                 def heavy_fwd(th, tms):
                     out = _heavy_math(th, tms)
                     jac = jax.jacfwd(lambda t: _heavy_math(t, tms))(th)
                     return out, jac
-                    
+
                 def heavy_bwd(jac, g):
                     j_hlms, j_w = jac
                     g_hlms, g_w = g
-                    term1 = jnp.real(jnp.tensordot(g_hlms, j_hlms, axes=([0, 1], [0, 1])))
+                    term1 = jnp.real(
+                        jnp.tensordot(g_hlms, j_hlms, axes=([0, 1], [0, 1]))
+                    )
                     term2 = jnp.tensordot(g_w, j_w, axes=([0], [0]))
                     return (term1 + term2, None)
-                    
+
                 heavy_math.defvjp(heavy_fwd, heavy_bwd)
                 hlms, w = heavy_math(theta, times)
             else:
