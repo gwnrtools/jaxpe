@@ -2,30 +2,30 @@ r"""ESIGMA inspiral waveform adapter: esigmapy's JAX backend as a jaxpe Waveform
 
 Motivation & Math
 -----------------
-To extract the underlying astrophysics of coalescing compact binaries, we construct highly 
-accurate waveform templates. In the framework of black hole perturbation theory, the 
-gravitational radiation is encoded in the Newman-Penrose scalar $\Psi_4$, which obeys the 
-Teukolsky equation. Asymptotic evaluation of $\Psi_4$ yields the two polarization states 
-$h_+$ and $h_\times$. For eccentric binaries, the dynamics are solved via a coupled set of 
+To extract the underlying astrophysics of coalescing compact binaries, we construct highly
+accurate waveform templates. In the framework of black hole perturbation theory, the
+gravitational radiation is encoded in the Newman-Penrose scalar $\Psi_4$, which obeys the
+Teukolsky equation. Asymptotic evaluation of $\Psi_4$ yields the two polarization states
+$h_+$ and $h_\times$. For eccentric binaries, the dynamics are solved via a coupled set of
 Post-Newtonian (PN) ordinary differential equations (ODEs).
 
-The ESIGMA model implemented here evolves the binary through an eccentric inspiral. The 
-orbital dynamics—characterized by the semi-latus rectum $p$ (or inverse radius $x$), 
-eccentricity $e$, and mean anomaly $l$—are integrated utilizing the Tsit5 solver. The 
-radiation field is then constructed by decomposing the strain into spin-weighted spherical 
+The ESIGMA model implemented here evolves the binary through an eccentric inspiral. The
+orbital dynamics—characterized by the semi-latus rectum $p$ (or inverse radius $x$),
+eccentricity $e$, and mean anomaly $l$—are integrated utilizing the Tsit5 solver. The
+radiation field is then constructed by decomposing the strain into spin-weighted spherical
 harmonics ${}_{-2}Y_{lm}(\iota, \phi)$:
 $$ h_+ - i h_\times = \sum_{l=2}^{\infty} \sum_{m=-l}^{l} h_{lm}(t) {}_{-2}Y_{lm}(\iota, \phi) $$
 
-esigmapy's high-level API returns non-traceable numpy arrays. This adapter meticulously 
-rebuilds the pipeline from JAX-differentiable primitives so the map 
-$\boldsymbol{\theta} \to (h_+, h_\times)$ is fully compatible with our gradient-based 
+esigmapy's high-level API returns non-traceable numpy arrays. This adapter meticulously
+rebuilds the pipeline from JAX-differentiable primitives so the map
+$\boldsymbol{\theta} \to (h_+, h_\times)$ is fully compatible with our gradient-based
 MCMC samplers.
 
 Implementation details:
   1. diffrax Tsit5 integration of the eccentric ODEs on a fixed-length time grid.
   2. Sub-grid ISCO-crossing localization via linear interpolation.
   3. Kepler's equation solved over the mapped detector time grid.
-  4. Spherical harmonic modes $h_{lm}$ built from esigmapy's kernels, applying the 
+  4. Spherical harmonic modes $h_{lm}$ built from esigmapy's kernels, applying the
      non-precessing symmetry $h_{l,-m} = (-1)^l h_{lm}^*$.
 """
 
@@ -177,6 +177,15 @@ class ESIGMAInspiral:
             ys = self._solve_ys(theta, adjoint=dfx.DirectAdjoint())
         else:
             raise ValueError(f"Unknown adjoint_mode: {self.adjoint_mode}")
+
+        # Cap x at the ISCO value. Past ISCO the RHS is frozen (dydt=0), which under AD
+        # holds the sensitivity dx/dtheta frozen at its inflated pre-freeze value; summed
+        # over the frozen tail this produces a spurious, ~O(100x) parameter gradient
+        # (worst for eccentricity, whose whole effect enters through the crossing). The
+        # frozen x overshoots x_final by ~1e-8, so jnp.minimum leaves the waveform
+        # unchanged (< 1e-5 relative) while giving derivative 0 exactly on the plateau —
+        # which is the correct sensitivity there. See docs/under_construction.md §17-18.
+        ys = ys.at[:, 0].set(jnp.minimum(ys[:, 0], self.x_final))
 
         # Reconstruct ts explicitly
         t_max = 1.5 * (5.0 / 256.0) / eta * (x_init**-4 - self.x_final**-4)
