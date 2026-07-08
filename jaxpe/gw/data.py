@@ -24,7 +24,7 @@ import numpy as np
 
 from .conditioning import rfft_freqs
 from .detectors import DETECTORS, gmst_from_gps
-from .likelihood import NetworkLikelihood
+from .likelihood import FDNetworkLikelihood, TDNetworkLikelihood
 from .psd import aligo_zdhp_psd, welch_psd
 from .waveform import WaveformModel
 
@@ -75,7 +75,7 @@ def make_injection(
     noise_seed: int | None = None,
     post_trigger: float = 2.0,
     tukey_alpha: float = 0.1,
-) -> NetworkLikelihood:
+) -> TDNetworkLikelihood | FDNetworkLikelihood:
     """
     Inject a simulated gravitational wave signal into simulated noise.
 
@@ -131,7 +131,12 @@ def make_injection(
     psds = {name: np.asarray(psd_fn(freqs)) for name in detector_names}
 
     gmst_ref = gmst_from_gps(t_c)
-    like = NetworkLikelihood(
+    LikelihoodClass = (
+        FDNetworkLikelihood
+        if getattr(waveform, "is_fd", False)
+        else TDNetworkLikelihood
+    )
+    like = LikelihoodClass(
         waveform=waveform,
         detectors=detectors,
         data_fd={name: np.zeros(len(freqs), complex) for name in detector_names},
@@ -184,10 +189,9 @@ def likelihood_from_strain(
     duration: float = 8.0,
     psd_strain: dict | None = None,
     f_min: float = 20.0,
-    f_max: float | None = None,
     post_trigger: float = 2.0,
     tukey_alpha: float = 0.1,
-) -> NetworkLikelihood:
+) -> TDNetworkLikelihood | FDNetworkLikelihood:
     """Build a likelihood from real strain around ``trigger_time``.
 
     ``strain`` maps detector name -> downloaded strain array whose first sample is at
@@ -216,7 +220,12 @@ def likelihood_from_strain(
         src = (psd_strain or strain)[name]
         psds[name] = welch_psd(src, sampling_rate, seg_duration=duration, freqs=freqs)
 
-    return NetworkLikelihood(
+    LikelihoodClass = (
+        FDNetworkLikelihood
+        if getattr(waveform, "is_fd", False)
+        else TDNetworkLikelihood
+    )
+    return LikelihoodClass(
         waveform=waveform,
         detectors=tuple(DETECTORS[name] for name in strain),
         data_fd=data_fd,

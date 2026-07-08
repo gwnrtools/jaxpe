@@ -29,6 +29,7 @@ def bbh_priors(
     luminosity_distance=(100.0, 2000.0),
     geocent_time=None,
     time_width: float = 0.1,
+    aligned_spins: tuple | None = None,
 ) -> JointPrior:
     """Aligned-spin-free toy-BBH prior set matching ``ToyChirp``'s parameters.
 
@@ -39,10 +40,15 @@ def bbh_priors(
 
     if geocent_time is None:
         raise ValueError("geocent_time (trigger-time estimate) is required")
-    return JointPrior(
+    priors: dict[str, Prior] = {
+        "chirp_mass": Uniform(low=chirp_mass[0], high=chirp_mass[1]),
+        "mass_ratio": Uniform(low=mass_ratio[0], high=mass_ratio[1]),
+    }
+    if aligned_spins is not None:
+        priors["spin1z"] = Uniform(low=aligned_spins[0], high=aligned_spins[1])
+        priors["spin2z"] = Uniform(low=aligned_spins[0], high=aligned_spins[1])
+    priors.update(
         {
-            "chirp_mass": Uniform(low=chirp_mass[0], high=chirp_mass[1]),
-            "mass_ratio": Uniform(low=mass_ratio[0], high=mass_ratio[1]),
             "luminosity_distance": PowerLaw(
                 alpha=2.0, low=luminosity_distance[0], high=luminosity_distance[1]
             ),
@@ -56,6 +62,7 @@ def bbh_priors(
             ),
         }
     )
+    return JointPrior(priors)
 
 
 def ebbh_priors(

@@ -47,7 +47,7 @@ def project_to_detector(det: Detector, hp_fd, hc_fd, freqs, ra, dec, psi, gmst):
 
 
 @dataclass(frozen=True)
-class NetworkLikelihood:
+class TDNetworkLikelihood:
     """Whittle likelihood for a network of detectors sharing one time/frequency grid.
 
     Parameters
@@ -168,3 +168,15 @@ class NetworkLikelihood:
     def problem(self, prior: JointPrior) -> InferenceProblem:
         """Bundle with a prior into the engine's InferenceProblem."""
         return InferenceProblem(prior=prior, log_likelihood=self.log_likelihood)
+
+
+@dataclass(frozen=True)
+class FDNetworkLikelihood(TDNetworkLikelihood):
+    """Network likelihood for Frequency Domain waveform models.
+    Overrides polarizations_fd to bypass the time-domain to frequency-domain FFT.
+    """
+
+    def polarizations_fd(self, params: dict):
+        st = self._static()
+        hp_fd, hc_fd = self.waveform(params, st["freqs"])
+        return hp_fd, hc_fd

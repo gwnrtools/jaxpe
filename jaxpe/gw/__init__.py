@@ -13,9 +13,10 @@ from .detectors import (
     time_delay_from_geocenter,
 )
 from .harmonics import spin_weighted_ylm
-from .likelihood import NetworkLikelihood, project_to_detector
+from .likelihood import FDNetworkLikelihood, TDNetworkLikelihood, project_to_detector
 from .priors import bbh_priors, ebbh_priors
 from .psd import aligo_zdhp_psd, psd_from_file, welch_psd
+from .phenomd import IMRPhenomD
 from .waveform import ToyChirp, WaveformModel, mismatch_f32_f64
 
 try:  # requires the optional esigmapy dependency
@@ -39,7 +40,8 @@ __all__ = [
     "aligo_zdhp_psd",
     "psd_from_file",
     "welch_psd",
-    "NetworkLikelihood",
+    "TDNetworkLikelihood",
+    "FDNetworkLikelihood",
     "project_to_detector",
     "make_injection",
     "simulate_noise_fd",
@@ -49,4 +51,5 @@ __all__ = [
     "ebbh_priors",
     "spin_weighted_ylm",
     "ESIGMAInspiral",
+    "IMRPhenomD",
 ]
