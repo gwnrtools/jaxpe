@@ -1,0 +1,8 @@
+{
+    "chirp_mass": [20.0, 40.0],
+    "mass_ratio": [0.5, 1.0],
+    "eccentricity": [0.0, 0.1],
+    "luminosity_distance": [200.0, 800.0],
+    "geocent_time": 1126259462.4,
+    "time_width": 0.1
+}

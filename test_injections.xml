@@ -1,0 +1,18 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!DOCTYPE LIGO_LW SYSTEM "http://ldas-sw.ligo.caltech.edu/doc/ligolwAPI/html/ligolw_dtd.txt">
+<LIGO_LW>
+  <Table Name="sim_inspiral:table">
+    <Column Name="sim_inspiral:mchirp" Type="real_8"/>
+    <Column Name="sim_inspiral:mass1" Type="real_8"/>
+    <Column Name="sim_inspiral:mass2" Type="real_8"/>
+    <Column Name="sim_inspiral:distance" Type="real_8"/>
+    <Column Name="sim_inspiral:inclination" Type="real_8"/>
+    <Column Name="sim_inspiral:coa_phase" Type="real_8"/>
+    <Column Name="sim_inspiral:geocent_end_time" Type="int_4s"/>
+    <Column Name="sim_inspiral:geocent_end_time_ns" Type="int_4s"/>
+    <Stream Name="sim_inspiral:table" Type="Local" Delimiter=",">
+      30.0,40.0,20.0,400.0,0.5,1.2,1126259462,400000000,
+      25.0,30.0,20.0,350.0,0.4,1.5,1126259470,500000000
+    </Stream>
+  </Table>
+</LIGO_LW>
