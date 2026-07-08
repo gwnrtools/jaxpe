@@ -632,3 +632,235 @@ Modern gradient-based samplers like MALA or HMC typically require roughly $O(10^
 
 **Conclusion**:
 A comprehensive 4PN eccentric, spinning PE on GW150914 can run end-to-end on a single CPU core in under 24 hours. Because the graph size is now strictly constrained, running this same Phase B graph on an accelerator (GPU/TPU) will further drop the per-evaluation time significantly, easily reducing the end-to-end production PE wall-clock to just a couple of hours per chain.
+
+## 17. Independent Verification of Phase A/B — and a Critical Eccentricity-Gradient Bug
+
+An independent audit re-ran the Phase A/B code on the real esigma model (0PN for fast
+reverse-mode compiles, plus a 4PN compile check). Two headline conclusions: **(i) the
+`custom_vjp` implementation is correct and the compile-OOM fix is real and reproducible;
+(ii) there is a *critical, pre-existing* bug in the gradient with respect to eccentricity**,
+rooted in differentiating through the ISCO clip — independent of Phase A/B and present in the
+original reverse-mode code as well.
+
+### 17.1 What verified cleanly
+
+| Check | Result | Verdict |
+|---|---|---|
+| 4PN forward-sensitivity `jax.grad` compiles (no OOM) | 144,631 HLO lines, 127 s | ✅ reproduces §16 (144,647 / 128 s) |
+| `custom_vjp` grad == reverse-mode baseline (nonzero waveform, all 10 params) | max abs diff 2.1e-27 (~1e-9 rel) | ✅ machine precision |
+| Complex cotangent convention `Re(g·J)` (no conjugation) | matches JAX's actual `R→C` VJP rule (empirically) | ✅ correct |
+| Distance refactor `h_lm(R=1\,\mathrm{Mpc}) \times (\mathrm{mpc\_m}/r_{\rm si})` | `h_lm ∝ 1/R` exact to 2.1e-17 | ✅ exact |
+| `jax.vmap(jax.grad(·))` over chains vs per-chain loop | worst diff 2.9e-26 | ✅ production-safe |
+| AD vs central finite differences, step-size swept | chirp_mass 5e-5, mean_anomaly 1.5e-4, geocent_time 3e-8, inclination/phase/distance ≤1e-9 | ✅ AD correct |
+
+The forward-mode-behind-`custom_vjp` design is implemented correctly, the complex-VJP
+convention is right, and the intrinsic→modes boundary faithfully reproduces the reverse-mode
+gradient. The compile bottleneck is genuinely solved.
+
+### 17.2 The eccentricity gradient is wrong (ISCO-clip differentiation)
+
+While every *extrinsic* parameter and `chirp_mass`/`mean_anomaly` matched finite differences,
+**`eccentricity` does not** — and the discrepancy is not an FD artifact. Isolating stage by
+stage (w.r.t. `e0`, at 0PN, reference `e0 = 0.05`):
+
+| Reduction | AD | central FD | note |
+|---|---:|---:|---|
+| `sum(ys)` (raw ODE trajectory) | +3.23e3 | −9.79e2 | **wrong sign** |
+| `sum(x_a)` (x-channel only) | +1.15e2 | +4.5 | 25× too large |
+| `t_isco` (ISCO time) | −1.50e3 | −4.5 | 330× too large |
+| `chirp_mass` control: `sum(ys)` | −563.50 | −563.48 | ✅ 4e-5 |
+| `chirp_mass` control: `t_isco` | −196.60 | −196.61 | ✅ 4e-5 |
+
+The airtight piece needs no FD at all: a **primal** fine-scan of `t_isco(e0)` is essentially
+flat — `2191.5141 ± 1e-4` over `e0 ∈ [0.0498, 0.0502]`, with `argmax_idx` fixed at 84 — so the
+true `d(t_isco)/d(e0)` is `O(-4.5)` (small, negative: more eccentric ⇒ slightly earlier
+merger, as physics demands). AD reports **−1502**, wrong by ~2.5 orders of magnitude.
+
+**Root cause.** The inspiral variable `x` accelerates toward a coalescence singularity
+(`x_dot` grows steeply), and the ISCO handling in `_rhs` freezes the state with a hard switch:
+
+```python
+past_isco = y[0] >= x_final
+y_capped  = y.at[0].set(jnp.where(past_isco, x_final, y[0]))
+dydt      = odes(t, y_capped, ...)
+dydt      = jnp.where(past_isco, jnp.zeros_like(dydt), dydt)   # hard freeze
+```
+
+The forward sensitivity `S = ∂y/∂e0` grows very large as the trajectory approaches the
+near-singular region, and the hard `jnp.where` freeze *captures S at that inflated value*
+instead of the bounded, physical sensitivity of the (capped) trajectory. Finite differences,
+comparing two already-capped trajectories, see only the small true change. `_isco_time`
+([`jnp.argmax` + sub-grid interp](#)) then amplifies the corrupted `∂x/∂e0` near the crossing.
+This is **mode-independent** (forward-sensitivity and both reverse adjoints agree to 1e-9) and
+therefore **pre-existing** — the original reverse-mode code differentiated the identical primal.
+
+**Scope.** Confirmed broken: `eccentricity`. Confirmed fine: `mean_anomaly` (its effect does
+not couple to the near-singular crossing). Untested: spins (no dynamical effect at 0PN — needs
+a higher-PN check). Verified at 0PN; the clip mechanism is PN-independent (the inspiral always
+diverges into the clip), so the bug is expected at 4PN, though the magnitude there is not yet
+measured.
+
+**Why `chirp_mass` escapes but `eccentricity` does not — the `t_max` distinction.** The
+integration uses `t = s · t_max` on a fixed grid `s ∈ [0,1]`, with
+
+```python
+t_max = 1.5 * (5.0 / 256.0) / eta * (x_init**-4 - x_final**-4)
+```
+
+This `t_max` variable is the **0PN _circular_ Peters time × 1.5**, a function of the *masses*
+only (`eta`, `x_init`) — it is a deliberately generous *upper bound* on the integration window,
+**not** the physical merger time, and it contains no `e0`. (The physical fact that eccentricity
+shortens the merger is real and *is* captured — through the dynamics reaching `x_final` earlier
+within `[0, t_max]`, i.e. via `s_cross → t_isco`; the FD value `d(t_isco)/d(e0) ≈ -4.5 < 0`
+confirms it.) Consequently:
+- `chirp_mass` enters through **both** the smooth `t_max(masses)` prefactor **and** the
+  crossing; the large, correctly-differentiated `t_max` term *dominates and masks* the ISCO-clip
+  error — so its gradient matches FD.
+- `eccentricity` enters through the crossing **only**; there is no `t_max` term to mask the
+  clip error, so the corrupted sensitivity is the entire gradient. This is why the bug surfaces
+  starkly and specifically on eccentricity.
+
+### 17.3 Test-quality gaps (the in-repo correctness evidence is weak)
+
+- `bin/test_esigma_compile_size.py` references an undefined `lines_rev` (the reverse compile is
+  commented out) and therefore `NameError`s **before** its gradient-match check runs.
+- That script uses `geocent_time = 0.0` with `times ∈ [0,1]`, for which the signal lies entirely
+  outside the valid window — **the waveform is identically zero**, so its gradient comparison
+  (even if reached) is `0 == 0`, i.e. vacuous. The `d/dθ = 0` outputs at that config confirm this.
+- `bin/test_gradients_fast.py` prints `g_rev` and `g_fwd` but never asserts they are equal.
+- **No committed test asserts `forward_sensitivity == recursive_checkpoint` on a nonzero
+  waveform.** The audit's `verify_phaseB.py` (t_c mid-window) does, and passes; it should be
+  committed as the regression test.
+
+The §16 timing (831 ms/grad) was measured on a *valid* config (waveform nonzero, ODE converged
+in 168/1024 steps), so the number is real; but the "under 24 h" projection is single-chain /
+single-core (production `vmap`s 20–100 chains → ~20–100× on one core), the loss benchmarked is
+`sum(hp)+sum(hc)` rather than the 3-detector Whittle likelihood, and the GPU extrapolation is
+speculative (a T2000 has 4 GB; the `n_ode_grid=1024` forward-sensitivity state may not fit).
+Treat it as an order-of-magnitude ballpark.
+
+### 17.4 Plan: differentiable ISCO handling (fixes the eccentricity gradient)
+
+**Current state → Constraints → Options → Recommendation.**
+
+- **Current state.** ISCO enforced by a hard `jnp.where` freeze in `_rhs`, plus an `argmax`-based
+  `_isco_time`. Both are non-smooth in the parameters and sit exactly where the sensitivity is
+  largest, corrupting `∂/∂e0`.
+- **Constraints.** (a) Keep the fixed `s ∈ [0,1]` output grid — the reparametrization exists
+  specifically to avoid moving-output-time adjoint errors, so event-based termination (which
+  reintroduces a parameter-dependent endpoint) is discouraged. (b) Keep the PN RHS evaluated only
+  where it is valid (`x ≤ x_final`). (c) Preserve the physical pre-ISCO waveform to the accuracy of
+  the existing parity test (`test_esigma_parity`, ≤8%). (d) Correctness of the gradient (must match
+  FD) outranks a small change in the ISCO cutoff detail (the model is inspiral-only and tapers to
+  zero near ISCO anyway).
+- **Options.**
+  1. **Smooth RHS gate (recommended).** Replace the hard freeze with a smooth multiplicative
+     window that ramps `dydt → 0` over a thin band `[x_final - Δ, x_final]` (e.g. a cosine or
+     logistic gate), so `x` asymptotes smoothly to the cutoff with no discontinuity and the
+     sensitivity stays bounded. Localize `t_isco` on a differentiable threshold within the band
+     (or via a smooth arg-crossing) instead of `argmax`.
+  2. **`custom_jvp`/`stop_gradient` at the clip.** Detach the spurious sensitivity in the frozen
+     region. Weaker: the blow-up is accumulated *before* the freeze, so post-hoc detaching may not
+     fully cure it.
+  3. **Event-based termination** at `x = x_final`. Cleanest physically but violates constraint (a).
+- **Recommendation.** Prototype Option 1. First *measure* the per-grid-point `∂x/∂e0` profile to
+  confirm the blow-up is localized at the clip (informs the band width `Δ`), then implement the
+  smooth gate + differentiable ISCO time, and validate `∂(loss)/∂e0` against finite differences
+  (target ≤1e-3 rel) while checking the primal waveform is unchanged to parity-test tolerance.
+  Results in §18.
+
+## 18. Prototype: Differentiable ISCO Handling — Results
+
+All experiments at 0PN (fast, exact reverse compiles), reference `e0 = 0.05`,
+`x_final = 0.25`, `n_ode_grid = 128–256`. Gradients are `forward_sensitivity` unless noted;
+FD is central difference with a swept/appropriate step. Scripts in the audit scratchpad.
+
+### 18.1 Root cause confirmed at grid-point resolution
+
+Per-grid-point `∂x/∂e0` (AD vs FD) across the clip index (i=84, where `x` first reaches
+`x_final`):
+
+| region | `x_a[i]` | `∂x/∂e0` AD | `∂x/∂e0` FD | note |
+|---|---:|---:|---:|---|
+| pre-clip (i ≤ 83) | 0.15 → 0.21 | 0.21 → 0.96 | 0.21 → 0.96 | **AD ≡ FD** (max diff 3.6e-6) |
+| clip & beyond (i ≥ 84) | 0.25000 (frozen) | **2.5187 (frozen)** | 0.0076 | AD/FD ≈ 333 |
+
+The hard `dydt = jnp.where(past_isco, 0, dydt)` freezes the *sensitivity* `S = ∂y/∂e0` at its
+inflated pre-freeze value; with `dydt≡0` post-clip, `dS/dt≡0`, so that inflated `S` is held
+constant across all ~44 frozen grid points. Summed, `∂(Σx)/∂e0` = AD `110.8` vs FD `0.33`. The
+pre-ISCO trajectory and its gradient are already exact — the entire error is the frozen tail.
+
+### 18.2 Prototype A — smooth RHS gate (complete gradient fix; changes the near-merger template)
+
+Replace the hard freeze with a C¹ multiplicative gate so `dydt` ramps to zero smoothly and `S`
+relaxes instead of freezing:
+
+```python
+u    = jnp.clip((x - x_final) / delta, 0.0, 1.0)      # band above x_final
+gate = 0.5 * (1.0 + jnp.cos(jnp.pi * u))              # 1 at x<=x_final, C1 -> 0 at x_final+delta
+dydt = odes(t, y.at[0].set(jnp.minimum(x, x_final + delta)), args) * gate
+```
+
+**Gradient: fixed, and robustly so.** On the full waveform loss, *every* parameter matches FD;
+eccentricity `rel|AD−FD|` drops from ~0.99 to **3.7e-5**. The fix is insensitive to the gate
+width — `rel` stays ~1e-4 for `Δ ∈ [0.001, 0.05]`. Pre-band trajectory is byte-identical to the
+hard clip (max diff 0.0).
+
+**Cost: it changes the near-merger template.** Because a smooth cutoff of width `Δ` redistributes
+the last ~`Δ` of (loudest) merger signal, the full-waveform change vs the hard clip scales with
+`Δ` and is sizeable:
+
+| `Δ` | ecc `rel|AD−FD|` | `‖Δh‖/‖h‖` (band above `x_final`) | `‖Δh‖/‖h‖` (band below, cut at `x_final`) |
+|---:|---:|---:|---:|
+| 0.010 | 1.5e-4 | 0.42 | 0.39 |
+| 0.005 | 1.6e-4 | 0.27 | 0.22 |
+| 0.002 | 1.0e-4 | 0.13 | 0.099 |
+| 0.001 | 5.7e-5 | 0.072 | 0.052 |
+
+Both band placements behave similarly; the change concentrates at coalescence. Even `Δ=0.001`
+moves the template ~5%. **So the gate fully fixes the gradient but must be re-validated against the
+esigmapy reference near merger before production — the `test_esigma_parity` check only covers the
+first 20% (early inspiral) and would not catch this.**
+
+### 18.3 Prototype B — post-hoc trajectory cap (template-preserving; partial gradient fix)
+
+Keep the hard-clip forward pass exactly, but cap the *stored* trajectory before `_isco_time`/interp:
+
+```python
+ys = ys.at[:, 0].set(jnp.minimum(ys[:, 0], self.x_final))   # x-channel only
+```
+
+`jnp.minimum` has derivative 0 exactly where `x ≥ x_final` (killing the frozen-`S` artifact) and
+passes through below. Measured effect:
+
+- **Template change: `‖Δh‖/‖h‖ = 2.3e-6`** — essentially zero (the frozen `x` overshoots `x_final`
+  by only +1.2e-8, so `min` changes the value negligibly while fixing the derivative).
+- **Eccentricity `rel|AD−FD|`: 0.99 → 0.028.** The `x`-channel and `t_isco` sensitivities are fully
+  corrected; the residual 2.8% comes from the **`e/l/φ` channels**, which also freeze but have no
+  analogous constant to cap to. Their leakage is small because the near-merger region is tapered.
+- All other parameters remain correct (≤1e-3).
+
+### 18.4 Assessment & recommendation
+
+| approach | ecc gradient error | template change | complexity | risk |
+|---|---:|---:|---|---|
+| hard clip (current) | ~99% (wrong) | — | — | **breaks eccentric PE gradients** |
+| **B: post-hoc `x`-cap** | ~2.8% | ~2e-6 | 1 line | none (template preserved) |
+| **A: smooth gate** | ~1e-4 | ∝ Δ (≥5%) | ~5 lines + Δ knob | needs merger-region re-validation |
+
+**Recommended path:**
+1. **Land Prototype B first** — a one-line, template-preserving change that removes ~97% of the
+   pathological eccentricity gradient with zero risk to the validated waveform. For MALA/HMC (which
+   tolerate approximate gradients via the MH correction) a ~3% residual is a large improvement over a
+   20×-inflated, formerly wrong-sign sensitivity, and unblocks eccentric sampling immediately.
+2. **Optionally extend B to `e/l/φ`** (freeze each post-crossing channel to a differentiable
+   crossing value, or a `custom_jvp` supplying the implicit-function-theorem crossing sensitivity)
+   to drive the residual toward machine precision while keeping the template fixed.
+3. **Reserve Prototype A (smooth gate)** for when a fully smooth ODE is wanted; adopt only with a
+   merger-region fidelity re-validation against the esigmapy reference (extend `test_esigma_parity`
+   past the first 20%) and a dynesty cross-check, and choose `Δ` as small as ODE stiffness permits.
+
+**Caveats.** All numbers are 0PN; the clip mechanism is PN-independent so the fix should transfer to
+4PN, but the residual magnitude (B) and the step-count impact of the gate (A, which makes `dydt→0`
+near ISCO and may need a larger `max_ode_steps`) must be confirmed at 4PN. Spin gradients were only
+exercised weakly at 0PN.
