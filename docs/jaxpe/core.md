@@ -15,7 +15,7 @@ This section formalizes the geometrical substrate of `jaxpe`. Continuous Hamilto
 
 ## Boundary Removal via Diffeomorphisms
 
-The physical universe dictates strict boundaries: a black hole mass $$m > 0$$, a dimensionless spin $$a \in [0, 1]$$, an inclination $$\iota \in [0, \pi]$$. The physical parameter manifold $$\mathcal{M}_\theta$$ is therefore a manifold with boundaries. 
+The physical universe dictates strict boundaries: a black hole mass $$m > 0$$, a dimensionless spin $$a \in [0, 1]$$, an inclination $$\iota \in [0, \pi]$$. The physical parameter manifold $$\mathcal{M}_\theta$$ is therefore a manifold with boundaries.
 
 To satisfy the geometrical requirements of the MCMC kernels, we must construct a smooth, bijective, and differentiable mapping—a diffeomorphism $$f: \mathcal{M}_\theta \to \mathcal{X}$$—that maps the bounded physical space onto an unconstrained latent manifold $$\mathcal{X} \cong \mathbb{R}^D$$ [1].
 

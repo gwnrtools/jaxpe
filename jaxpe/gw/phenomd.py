@@ -34,7 +34,8 @@ class IMRPhenomD:
         iota = params["inclination"]
 
         arr = jnp.stack([mc, eta, s1z, s2z, dist, tc, phic, iota])
-        hp, hc = gen_IMRPhenomD_hphc(freqs, arr, self.f_ref)
+        safe_freqs = jnp.where(freqs == 0.0, 1e-5, freqs)
+        hp, hc = gen_IMRPhenomD_hphc(safe_freqs, arr, self.f_ref)
 
         return hp, hc
 
@@ -3179,12 +3180,16 @@ def get_transition_frequencies(
 
     # Amplitude transition frequencies
     f3 = 0.014 / (M * MTSUN)
-    f4_gammaneg_gtr_1 = lambda f_RD_, f_damp_, gamma3_, gamma2_: jnp.abs(
-        f_RD_ + (-f_damp_ * gamma3_) / gamma2_
-    )
-    f4_gammaneg_less_1 = lambda f_RD_, f_damp_, gamma3_, gamma2_: jnp.abs(
-        f_RD_ + (f_damp_ * (-1 + jnp.sqrt(1 - (gamma2_) ** 2.0)) * gamma3_) / gamma2_
-    )
+
+    def f4_gammaneg_gtr_1(f_RD_, f_damp_, gamma3_, gamma2_):
+        return jnp.abs(f_RD_ + (-f_damp_ * gamma3_) / gamma2_)
+
+    def f4_gammaneg_less_1(f_RD_, f_damp_, gamma3_, gamma2_):
+        return jnp.abs(
+            f_RD_
+            + (f_damp_ * (-1 + jnp.sqrt(1 - (gamma2_) ** 2.0)) * gamma3_) / gamma2_
+        )
+
     f4 = jax.lax.cond(
         gamma2 >= 1,
         f4_gammaneg_gtr_1,
@@ -3219,12 +3224,16 @@ def get_transition_frequencies_from_fRD_fdamp(
 
     # Amplitude transition frequencies
     f3 = 0.014 / (M * MTSUN)
-    f4_gammaneg_gtr_1 = lambda f_RD_, f_damp_, gamma3_, gamma2_: jnp.abs(
-        f_RD_ + (-f_damp_ * gamma3_) / gamma2_
-    )
-    f4_gammaneg_less_1 = lambda f_RD_, f_damp_, gamma3_, gamma2_: jnp.abs(
-        f_RD_ + (f_damp_ * (-1 + jnp.sqrt(1 - (gamma2_) ** 2.0)) * gamma3_) / gamma2_
-    )
+
+    def f4_gammaneg_gtr_1(f_RD_, f_damp_, gamma3_, gamma2_):
+        return jnp.abs(f_RD_ + (-f_damp_ * gamma3_) / gamma2_)
+
+    def f4_gammaneg_less_1(f_RD_, f_damp_, gamma3_, gamma2_):
+        return jnp.abs(
+            f_RD_
+            + (f_damp_ * (-1 + jnp.sqrt(1 - (gamma2_) ** 2.0)) * gamma3_) / gamma2_
+        )
+
     f4 = jax.lax.cond(
         gamma2 >= 1,
         f4_gammaneg_gtr_1,
@@ -4154,9 +4163,9 @@ def Phase(
     beta1_correction = dphi_Ins_f1 - dphi_IIa_f1
     beta0 = phi_Ins_f1 - beta1_correction * (f1 * M_s) - phi_IIa_f1
 
-    phi_IIa_func = lambda fM_s: (
-        get_IIa_raw_phase(fM_s, theta, coeffs) + beta1_correction * fM_s
-    )
+    def phi_IIa_func(fM_s):
+        return get_IIa_raw_phase(fM_s, theta, coeffs) + beta1_correction * fM_s
+
     phi_IIa = phi_IIa_func(f * M_s) + beta0
 
     # And finally, we do the same thing to get the phase of the merger-ringdown (region IIb)

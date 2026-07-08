@@ -1,30 +1,30 @@
 r"""Hamiltonian Monte Carlo (HMC) with a fixed-length leapfrog trajectory.
 
-Hamiltonian Monte Carlo (HMC) reformulates the statistical sampling problem as a 
-classical mechanics simulation. To efficiently explore the high-dimensional, highly 
-correlated posterior manifold of a gravitational-wave event, HMC suppresses random-walk 
-behavior by exploiting the exact gradient of the posterior, driving coherent excursions 
+Hamiltonian Monte Carlo (HMC) reformulates the statistical sampling problem as a
+classical mechanics simulation. To efficiently explore the high-dimensional, highly
+correlated posterior manifold of a gravitational-wave event, HMC suppresses random-walk
+behavior by exploiting the exact gradient of the posterior, driving coherent excursions
 across the parameter space.
 
 Motivation & Math
 -----------------
-Let $\mathbf{q} \in \mathbb{R}^n$ denote our target parameters (the position in 
-configuration space) and $\mathbf{p} \in \mathbb{R}^n$ denote an auxiliary momentum vector. 
+Let $\mathbf{q} \in \mathbb{R}^n$ denote our target parameters (the position in
+configuration space) and $\mathbf{p} \in \mathbb{R}^n$ denote an auxiliary momentum vector.
 We construct the phase space $(\mathbf{q}, \mathbf{p})$ and define a Hamiltonian:
 $$ H(\mathbf{q}, \mathbf{p}) = U(\mathbf{q}) + K(\mathbf{p}) $$
-where $U(\mathbf{q}) = -\log \pi(\mathbf{q}|d)$ is the potential energy (the negative 
-log-posterior of the GW data) and $K(\mathbf{p}) = \frac{1}{2} \mathbf{p}^T \mathbf{M}^{-1} \mathbf{p}$ 
+where $U(\mathbf{q}) = -\log \pi(\mathbf{q}|d)$ is the potential energy (the negative
+log-posterior of the GW data) and $K(\mathbf{p}) = \frac{1}{2} \mathbf{p}^T \mathbf{M}^{-1} \mathbf{p}$
 is the kinetic energy for a chosen mass matrix $\mathbf{M}$.
 
 The system evolves along contours of constant $H$ according to Hamilton's equations:
 $$ \frac{d\mathbf{q}}{dt} = \frac{\partial H}{\partial \mathbf{p}} = \mathbf{M}^{-1} \mathbf{p} $$
 $$ \frac{d\mathbf{p}}{dt} = -\frac{\partial H}{\partial \mathbf{q}} = \nabla_{\mathbf{q}} \log \pi(\mathbf{q}|d) $$
 
-By Liouville's theorem, this flow is volume-preserving. Furthermore, the symplectic 
-structure of Hamilton's equations ensures that the transformation is reversible. 
-In practice, we discretize time using a symplectic integrator—the leapfrog algorithm. 
-Because the numerical integration introduces $\mathcal{O}(\epsilon^2)$ energy errors, 
-we append a Metropolis-Hastings acceptance step based on the energy discrepancy 
+By Liouville's theorem, this flow is volume-preserving. Furthermore, the symplectic
+structure of Hamilton's equations ensures that the transformation is reversible.
+In practice, we discretize time using a symplectic integrator—the leapfrog algorithm.
+Because the numerical integration introduces $\mathcal{O}(\epsilon^2)$ energy errors,
+we append a Metropolis-Hastings acceptance step based on the energy discrepancy
 $\Delta H = H(\mathbf{q}_{\text{new}}, \mathbf{p}_{\text{new}}) - H(\mathbf{q}, \mathbf{p})$.
 
 Implementation Details

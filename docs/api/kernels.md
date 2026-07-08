@@ -16,12 +16,12 @@ In high-dimensional parameter spaces typical of gravitational-wave inference ($$
 ## Hamiltonian Monte Carlo on Symplectic Manifolds
 
 ### The Classical Hamiltonian Formalism
-In classical mechanics, a Hamiltonian $$H$$ is a scalar function that represents the total energy of a physical system. The fundamental objective of Hamiltonian mechanics is to describe the deterministic time evolution of this system. Rather than working solely with spatial coordinates, the Hamiltonian framework operates on the phase space of the system, defined by generalized coordinates (positions) $$\theta^\mu$$ and their conjugate momenta $$p_\mu$$. 
+In classical mechanics, a Hamiltonian $$H$$ is a scalar function that represents the total energy of a physical system. The fundamental objective of Hamiltonian mechanics is to describe the deterministic time evolution of this system. Rather than working solely with spatial coordinates, the Hamiltonian framework operates on the phase space of the system, defined by generalized coordinates (positions) $$\theta^\mu$$ and their conjugate momenta $$p_\mu$$.
 
 By evaluating the partial derivatives of the Hamiltonian scalar $$H(\theta, p)$$, Hamilton's equations of motion generate a vector field that perfectly dictates the trajectory of the particle over time, conserving total energy and preserving the volume of the phase space.
 
 ### Mapping Statistics to Mechanics
-Hamiltonian Monte Carlo (HMC) [1, 2] achieves extraordinary sampling efficiency by establishing a strict isomorphism between the purely statistical problem of sampling a probability distribution and the mechanical problem of simulating a physical particle's trajectory. 
+Hamiltonian Monte Carlo (HMC) [1, 2] achieves extraordinary sampling efficiency by establishing a strict isomorphism between the purely statistical problem of sampling a probability distribution and the mechanical problem of simulating a physical particle's trajectory.
 
 We elevate the $$D$$-dimensional parameter space of our gravitational-wave problem to act as the positional manifold $$\mathcal{M}$$. To construct the required phase space, we introduce a set of auxiliary variables $$p_\mu$$ that serve as the conjugate momenta. Geometrically, this combined space is the cotangent bundle $$T^*\mathcal{M}$$, which is naturally a symplectic manifold equipped with a closed, non-degenerate 2-form $$\omega = d\theta^\mu \wedge dp_\mu$$.
 

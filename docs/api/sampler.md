@@ -77,7 +77,7 @@ results = sampler.run(key, initial_positions)
 
 ### Initialization and Prior Support
 
-A Markov chain initialized in a vanishingly low probability region (or entirely confined to a single degenerate mode) requires a prohibitively long mixing time to achieve stationarity. 
+A Markov chain initialized in a vanishingly low probability region (or entirely confined to a single degenerate mode) requires a prohibitively long mixing time to achieve stationarity.
 
 The `best_of_prior_init` subroutine explicitly remedies this by evaluating the log-likelihood over a massive Monte Carlo batch (e.g., $$N=10^6$$) drawn directly from the prior measure $$p(\theta)$$. By seeding the initial chain states $$x_{(0)}$$ with the highest-probability candidates, we ensure that the empirical measure of the ensemble immediately populates all valleys of significant support, effectively nullifying the burn-in phase bottleneck.
 
@@ -87,10 +87,10 @@ In `jaxpe`, you can automate this optimal seeding using [`best_of_prior_init`](#
 from jaxpe.sampler.global_local import best_of_prior_init
 
 initial_positions = best_of_prior_init(
-    key, 
-    n_chains=100, 
-    prior=inference_problem.prior, 
-    logp_fn=inference_problem.log_prob, 
+    key,
+    n_chains=100,
+    prior=inference_problem.prior,
+    logp_fn=inference_problem.log_prob,
     n_samples=100_000
 )
 ```

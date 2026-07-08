@@ -77,7 +77,7 @@ While mathematically beautiful, CNFs require the numerical integration of an ODE
 
 ## Variational Training via the Kullback-Leibler Divergence
 
-To optimize the diffeomorphic mapping such that the pushforward measure $$Q_\phi$$ converges to the exact topology of the true posterior measure $$P$$, we minimize the Kullback-Leibler (KL) divergence from $$P$$ to $$Q_\phi$$. 
+To optimize the diffeomorphic mapping such that the pushforward measure $$Q_\phi$$ converges to the exact topology of the true posterior measure $$P$$, we minimize the Kullback-Leibler (KL) divergence from $$P$$ to $$Q_\phi$$.
 
 The KL divergence is the expectation of the logarithmic Radon-Nikodym derivative between the two measures:
 

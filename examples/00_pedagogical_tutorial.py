@@ -1,23 +1,21 @@
 """
 A Pedagogical Introduction to JAXPE: Parameter Estimation Step-by-Step
 
-Welcome to `jaxpe`! This script is designed for early graduate students and beginners 
-to understand the fundamentals of Parameter Estimation (PE) using `jaxpe`. 
-We will bypass the complexity of Gravitational Wave (GW) data analysis for now and 
-focus entirely on how to set up a probability distribution, configure an MCMC sampler, 
+Welcome to `jaxpe`! This script is designed for early graduate students and beginners
+to understand the fundamentals of Parameter Estimation (PE) using `jaxpe`.
+We will bypass the complexity of Gravitational Wave (GW) data analysis for now and
+focus entirely on how to set up a probability distribution, configure an MCMC sampler,
 and run parameter estimation.
 
-In this tutorial, we will sample from a "Rosenbrock" density (often called the 
-"banana" function). It is a classic test function for optimization and sampling algorithms 
-due to its curved, non-linear correlations, which make it tricky for simple samplers 
+In this tutorial, we will sample from a "Rosenbrock" density (often called the
+"banana" function). It is a classic test function for optimization and sampling algorithms
+due to its curved, non-linear correlations, which make it tricky for simple samplers
 but manageable for advanced ones like Hamiltonian Monte Carlo (HMC) or MALA.
 
 Let's dive in!
 """
 
 import jax
-import jax.numpy as jnp
-import numpy as np
 
 # We usually want to enforce double-precision (64-bit) floating point in scientific computing.
 # JAX defaults to 32-bit for neural network speed, but for PE we need the accuracy.

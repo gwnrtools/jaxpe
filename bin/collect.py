@@ -1,6 +1,7 @@
 """Compile-graph size (HLO lines) vs per-step RHS complexity, and vs max_steps."""
 
-import time, json
+import time
+import json
 import jax
 
 jax.config.update("jax_enable_x64", True)

@@ -23,7 +23,7 @@ dependencies = [
 
 [project.optional-dependencies]
 gwdata = ["gwpy", "gwosc"]
-dev = ["pytest", "ruff"]
+dev = ["pytest", "ruff", "black==24.10.0"]
 
 [tool.setuptools.packages.find]
 include = ["jaxpe*"]

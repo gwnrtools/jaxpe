@@ -57,7 +57,7 @@ def run_benchmark():
         val, grad = val_and_grad(params)
         jax.block_until_ready(grad)
     t_exec = (time.time() - t0) / 50.0
-    print(f"Time per gradient evaluation: {t_exec*1000:.2f} ms")
+    print(f"Time per gradient evaluation: {t_exec * 1000:.2f} ms")
 
 
 if __name__ == "__main__":

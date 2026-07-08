@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import json
-import os
 import time
 from pathlib import Path
 
@@ -22,17 +21,32 @@ from jaxpe.sampler import GlobalLocalConfig, Sampler, best_of_prior_init
 
 def main():
     parser = argparse.ArgumentParser(description="Run Production PE on an injection")
-    parser.add_argument("--injection-json", type=str, required=True, help="Path to JSON file with injection parameters")
-    parser.add_argument("--prior-json", type=str, required=True, help="Path to JSON file with prior bounds")
-    parser.add_argument("--psd-file", type=str, default=None, help="Path to 2-column ASCII PSD file (optional)")
+    parser.add_argument(
+        "--injection-json",
+        type=str,
+        required=True,
+        help="Path to JSON file with injection parameters",
+    )
+    parser.add_argument(
+        "--prior-json",
+        type=str,
+        required=True,
+        help="Path to JSON file with prior bounds",
+    )
+    parser.add_argument(
+        "--psd-file",
+        type=str,
+        default=None,
+        help="Path to 2-column ASCII PSD file (optional)",
+    )
     parser.add_argument("--outdir", type=str, required=True, help="Output directory")
-    
+
     # Sampler configuration
     parser.add_argument("--n-chains", type=int, default=100)
     parser.add_argument("--n-epochs", type=int, default=100)
     parser.add_argument("--n-production", type=int, default=2000)
     parser.add_argument("--pn-order", type=int, default=8)
-    
+
     args = parser.parse_args()
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -75,7 +89,10 @@ def main():
 
     like = make_injection(**kwargs)
 
-    print("Injected SNR:", like.optimal_snr({k: jnp.asarray(v) for k, v in injection_params.items()}))
+    print(
+        "Injected SNR:",
+        like.optimal_snr({k: jnp.asarray(v) for k, v in injection_params.items()}),
+    )
 
     # Prepare prior
     prior = ebbh_priors(**prior_kwargs)
@@ -106,7 +123,9 @@ def main():
     x0 = best_of_prior_init(key, problem, cfg.n_chains, n_draws=1_000)
     print(f"init: best-of-prior in {time.time() - t0:.1f} s")
 
-    print(f"Starting sampler.run with {args.n_chains} chains... (This will trigger XLA compilation)")
+    print(
+        f"Starting sampler.run with {args.n_chains} chains... (This will trigger XLA compilation)"
+    )
     t0 = time.time()
     res = sampler.run(key, x0=x0)
     dt_run = time.time() - t0
@@ -127,7 +146,7 @@ def main():
         print(f"  {n:20s}: {q50:8.3f} [{q16:8.3f}, {q84:8.3f}]  (True: {t_str})")
 
     np.save(outdir / "posterior_samples.npy", flat)
-    
+
     # Save corner plot if truths are mostly available
     try:
         fig = corner_plot(flat, names=names, truths=truths)
@@ -135,6 +154,7 @@ def main():
         print(f"\nsaved corner plot to {outdir / 'corner.png'}")
     except Exception as e:
         print(f"Warning: Could not generate corner plot: {e}")
+
 
 if __name__ == "__main__":
     main()

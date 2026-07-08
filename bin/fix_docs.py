@@ -1,7 +1,6 @@
 import os
 import glob
 import re
-import shutil
 
 
 # 1. Fix math and references in all .md files

@@ -17,7 +17,7 @@ This section details the statistical validation of the generated Markov chain en
 
 The Split R-hat ($$\hat{R}$$) statistic [1, 2] evaluates the geometric convergence of the ensemble by rigorously comparing the variance between $$M$$ independent Markov chains against the variance within the individual chains.
 
-Let $$\theta^\mu_{(m, i)}$$ denote the $$i$$-th sample of the $$\mu$$-th parameter in the $$m$$-th chain, where $$i = 1 \dots N$$. To detect non-stationarity within a single chain, we split each sequence in half, yielding $$2M$$ chains of length $$N/2$$. 
+Let $$\theta^\mu_{(m, i)}$$ denote the $$i$$-th sample of the $$\mu$$-th parameter in the $$m$$-th chain, where $$i = 1 \dots N$$. To detect non-stationarity within a single chain, we split each sequence in half, yielding $$2M$$ chains of length $$N/2$$.
 
 The empirical between-chain variance scalar $$B$$ and within-chain variance scalar $$W$$ for a parameter $$\theta$$ are defined explicitly as:
 

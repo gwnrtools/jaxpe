@@ -9,22 +9,22 @@ that is JAX-traceable and differentiable in the parameters.
 
 Motivation & Math
 -----------------
-In the linear regime of General Relativity, the metric perturbation $h_{\mu\nu}$ far from 
-the source can be decomposed into two transverse-traceless (TT) polarization states, 
-$h_+$ and $h_\\times$. For a binary system in the inspiral phase, the dominant radiation 
-arises from the time-varying mass quadrupole moment $I_{ij}$. To leading order, the 
+In the linear regime of General Relativity, the metric perturbation $h_{\mu\nu}$ far from
+the source can be decomposed into two transverse-traceless (TT) polarization states,
+$h_+$ and $h_\\times$. For a binary system in the inspiral phase, the dominant radiation
+arises from the time-varying mass quadrupole moment $I_{ij}$. To leading order, the
 strain at a distance $d$ is:
 $$ h_{ij}^{\\text{TT}} = \\frac{2G}{c^4 d} \\ddot{I}_{ij}^{\\text{TT}}(t - d/c) $$
 
-For a binary of component masses $m_1$ and $m_2$ (total mass $M=m_1+m_2$, symmetric 
-mass ratio $\\eta = m_1 m_2 / M^2$), the orbital phase evolution is governed by the 
-loss of energy and angular momentum to gravitational radiation. The Post-Newtonian (PN) 
+For a binary of component masses $m_1$ and $m_2$ (total mass $M=m_1+m_2$, symmetric
+mass ratio $\\eta = m_1 m_2 / M^2$), the orbital phase evolution is governed by the
+loss of energy and angular momentum to gravitational radiation. The Post-Newtonian (PN)
 expansion characterizes this evolution as an asymptotic series in $v/c$.
 
-The ``ToyChirp`` model provided here implements a truncated PN frequency and phase 
-evolution up to the Innermost Stable Circular Orbit (ISCO). While not a production-level 
-LALSimulation approximant, it rigorously exposes the non-linear relationship between the 
-masses $(\\mathcal{M}_c, q)$, the phase $\\phi_c$, and the resulting wave morphology, 
+The ``ToyChirp`` model provided here implements a truncated PN frequency and phase
+evolution up to the Innermost Stable Circular Orbit (ISCO). While not a production-level
+LALSimulation approximant, it rigorously exposes the non-linear relationship between the
+masses $(\\mathcal{M}_c, q)$, the phase $\\phi_c$, and the resulting wave morphology,
 serving as a robust pedagogical sandbox for parameter estimation.
 
 Parameter names follow standard conventions:

@@ -1,7 +1,6 @@
 """Script to run 5 production-level BBH injections using IMRPhenomD."""
 
 import time
-import os
 import json
 from pathlib import Path
 import jax
@@ -121,9 +120,9 @@ def main(n_chains=100, n_epochs=100, n_production=1000):
     summary = {}
 
     for name, spec in EVENTS.items():
-        print(f"\n=============================================")
+        print("\n=============================================")
         print(f"Running event: {name}")
-        print(f"=============================================")
+        print("=============================================")
 
         params = spec["params"]
         mc_prior = spec["mc_prior"]

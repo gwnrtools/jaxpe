@@ -189,6 +189,7 @@ def likelihood_from_strain(
     duration: float = 8.0,
     psd_strain: dict | None = None,
     f_min: float = 20.0,
+    f_max: float | None = None,
     post_trigger: float = 2.0,
     tukey_alpha: float = 0.1,
 ) -> TDNetworkLikelihood | FDNetworkLikelihood:
