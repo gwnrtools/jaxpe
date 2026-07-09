@@ -18,7 +18,7 @@ from jaxpe.gw import bbh_priors, make_injection
 from jaxpe.kernels import MALA
 from jaxpe.sampler import GlobalLocalConfig, Sampler, best_of_prior_init
 
-OUT = Path(__file__).parent / "output" / "production_events"
+OUT = Path(__file__).resolve().parent.parent / "output" / "production_events"
 OUT.mkdir(parents=True, exist_ok=True)
 
 EVENTS = {

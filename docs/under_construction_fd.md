@@ -1,31 +1,38 @@
-# Parameter Estimation for Prominent BBH Events using IMRPhenomD
+# jaxpe Parameter Estimation Suite
+## Frequency-Domain IMRPhenomD Injection Recovery
 
-**Status: Currently Running (Background Task)**
+This document summarizes the results of running the fully autonomous `jaxpe` sampler suite across 5 synthetic gravitational-wave injections based on parameters of prominent GWTC events.
 
-This document tracks the results of simulating and recovering 5 prominent Binary Black Hole (BBH) events using the `jaxpe` framework with the `IMRPhenomD` frequency-domain model. The sampler configuration uses a robust, publication-ready configuration: `n_chains=100`, `n_epochs=100`, `n_production=1000`.
+The inference pipeline utilized a zero-noise realization with advanced LIGO Zero-detuning high-power curves, integrated with our global-local normalizing flow Metropolis-Hastings kernel.
 
-## Event Summary
+### Recovery Summary
 
-| Event Name | Characteristic | Est. $M_c$ ($M_\odot$) | Est. $q$ | $d_L$ (Mpc) | Target SNR |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **GW150914** | First detection, heavy, equal-mass | ~28.1 | 0.81 | 410.0 | *Pending...* |
-| **GW170729** | Massive early event | ~35.7 | 0.68 | 2840.0 | *Pending...* |
-| **GW170104** | Intermediate-mass, typical | ~21.1 | 0.62 | 880.0 | *Pending...* |
-| **GW190412** | Highly asymmetric mass ratio | ~13.3 | 0.28 | 740.0 | *Pending...* |
-| **GW190521** | Intermediate-Mass Black Hole (IMBH) | ~64.4 | 0.78 | 5300.0 | *Pending...* |
+| Event | Network SNR | Sampling Time (s) | Samples | Chirp Mass (M⊙) | Mass Ratio (q) | Distance (Mpc) |
+|---|---|---|---|---|---|---|
+| **GW150914** | 142.0 | 10426.6 | 4,000,000 (raw) | 30.3 (28.1) | 0.81 (0.81) | 300 (410) |
+| **GW170729** | 18.1 | 2504.1 | 600 (thinned) | 38.7 (35.7) | 0.88 (0.68) | 3479 (2840) |
+| **GW170104** | 29.4 | 2411.0 | 500 (thinned) | 24.7 (21.1) | 0.70 (0.62) | 708 (880) |
+| **GW190412** | 18.6 | 2209.7 | 600 (thinned) | 13.1 (13.3) | 0.72 (0.28) | 1386 (740) |
+| **GW190521** | 9.4 | 2204.7 | 700 (thinned) | 64.0 (64.4) | 0.79 (0.78) | 8142 (5300) |
 
-## Execution Profiling
+*(Values in parentheses denote the true injected values)*
 
-*The following profiling data will be populated as each event completes its MCMC phase.*
+---
 
-| Event | `best_of_prior_init` | `Sampler.run` (incl. JIT) | Total Production Samples |
-| :--- | :--- | :--- | :--- |
-| GW150914 | - | - | - |
-| GW170729 | - | - | - |
-| GW170104 | - | - | - |
-| GW190412 | - | - | - |
-| GW190521 | - | - | - |
+### Posterior Corner Plots
 
-## Results & Corner Plots
+#### GW150914 (Raw)
+![GW150914 (Raw) Posterior Corner Plot](/home/prayush/.gemini/antigravity-ide/brain/9b5855a2-5f93-4c50-81cc-aa4c5155177f/GW150914_corner.png)
 
-*(Corner plots and 1D marginal credible intervals will be embedded below as the background task finishes generating the `output/production_events` artifacts).*
+#### GW170729 (Thinned)
+![GW170729 (Thinned) Posterior Corner Plot](/home/prayush/.gemini/antigravity-ide/brain/9b5855a2-5f93-4c50-81cc-aa4c5155177f/GW170729_corner_thinned.png)
+
+#### GW170104 (Thinned)
+![GW170104 (Thinned) Posterior Corner Plot](/home/prayush/.gemini/antigravity-ide/brain/9b5855a2-5f93-4c50-81cc-aa4c5155177f/GW170104_corner_thinned.png)
+
+#### GW190412 (Thinned)
+![GW190412 (Thinned) Posterior Corner Plot](/home/prayush/.gemini/antigravity-ide/brain/9b5855a2-5f93-4c50-81cc-aa4c5155177f/GW190412_corner_thinned.png)
+
+#### GW190521 (Thinned)
+![GW190521 (Thinned) Posterior Corner Plot](/home/prayush/.gemini/antigravity-ide/brain/9b5855a2-5f93-4c50-81cc-aa4c5155177f/GW190521_corner_thinned.png)
+
