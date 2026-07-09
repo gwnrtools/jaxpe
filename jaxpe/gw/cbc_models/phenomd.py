@@ -1,6 +1,36 @@
+r"""IMRPhenomD waveform model: Frequency-domain phenomenological model for aligned-spin BBHs.
+
+Motivation & Math
+-----------------
+IMRPhenomD is a highly accurate, frequency-domain phenomenological waveform model
+designed for the inspiral, merger, and ringdown (IMR) of aligned-spin binary black holes.
+The model decomposes the gravitational-wave strain into amplitude $A(f)$ and phase $\Phi(f)$:
+$$ \tilde{h}(f) = A(f) e^{i \Phi(f)} $$
+
+The parameter space is parameterized by the component masses $m_1, m_2$ and the
+dimensionless aligned spins $\chi_1, \chi_2$. The frequency domain is partitioned into
+three distinct regions:
+1. **Inspiral**: Uses Post-Newtonian (PN) approximants augmented with higher-order
+   pseudo-PN coefficients calibrated to Numerical Relativity (NR).
+2. **Intermediate**: A phenomenological polynomial bridging the inspiral and the merger.
+3. **Merger-Ringdown**: Modeled using a Lorentzian matched to the quasi-normal modes (QNM)
+   of the remnant black hole.
+
+The model strictly includes the dominant $(2,2)$ mode (and its symmetric $(2,-2)$ counterpart).
+This native JAX implementation is meticulously rebuilt from LALSimulation's C implementation
+to be fully end-to-end auto-differentiable. By replacing control-flow and discontinuous
+transitions with smooth windowing/JAX primitives, it allows rapid, exact gradient evaluation
+for Hamiltonian Monte Carlo (HMC) and variational inference.
+
+Implementation details:
+  1. Pure JAX implementation of the frequency-domain amplitude and phase.
+  2. Phenomenological coefficients are interpolated using standard algebraic fits to NR.
+  3. Differentiable transitions between Inspiral, Intermediate, and Ringdown regimes.
+"""
+
 import jax
 import jax.numpy as jnp
-from .waveform import MTSUN_SI as MTSUN, MPC_SI as MPC, C_SI as C
+from ..waveform import MTSUN_SI as MTSUN, MPC_SI as MPC, C_SI as C
 
 PI = jnp.pi
 EULERGAMMA = 0.577215664901532860606512090082402431
@@ -16,7 +46,10 @@ def Mc_eta_to_ms(params):
     return m1, m2
 
 
-class IMRPhenomD:
+from .base import FrequencyDomainModel
+
+
+class IMRPhenomD(FrequencyDomainModel):
     is_fd = True
 
     def __init__(self, f_ref: float = 20.0):

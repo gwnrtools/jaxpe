@@ -16,13 +16,8 @@ from .harmonics import spin_weighted_ylm
 from .likelihood import FDNetworkLikelihood, TDNetworkLikelihood, project_to_detector
 from .priors import bbh_priors, ebbh_priors
 from .psd import aligo_zdhp_psd, psd_from_file, welch_psd
-from .phenomd import IMRPhenomD
-from .waveform import ToyChirp, WaveformModel, mismatch_f32_f64
-
-try:  # requires the optional esigmapy dependency
-    from .esigma import ESIGMAInspiral
-except ImportError:  # pragma: no cover
-    ESIGMAInspiral = None
+from .cbc_models import IMRPhenomD, ESIGMAInspiral, NRSur7dq4, WaveformModel
+from .waveform import ToyChirp, mismatch_f32_f64
 
 __all__ = [
     "ToyChirp",
@@ -52,4 +47,5 @@ __all__ = [
     "spin_weighted_ylm",
     "ESIGMAInspiral",
     "IMRPhenomD",
+    "NRSur7dq4",
 ]

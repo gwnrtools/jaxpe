@@ -33,10 +33,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from .waveform import MTSUN_SI
+from .base import TimeDomainModel
+from ..waveform import MTSUN_SI
 
 
-class ESIGMAInspiral:
+class ESIGMAInspiral(TimeDomainModel):
     """End-to-end traceable ESIGMA inspiral polarizations. See module docstring.
 
     Parameters
@@ -331,7 +332,7 @@ class ESIGMAInspiral:
             else:
                 raise ValueError(f"Unknown adjoint_mode: {self.adjoint_mode}")
 
-            from .harmonics import spin_weighted_ylm
+            from ..harmonics import spin_weighted_ylm
 
             h = jnp.zeros(times.shape, dtype=jnp.complex128)
             for i, (l, m) in enumerate(self.modes):
