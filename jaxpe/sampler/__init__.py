@@ -4,5 +4,6 @@ from .global_local import (
     SamplerResults,
     best_of_prior_init,
 )
+from .postprocessing import PostProcessor
 
-__all__ = ["Sampler", "GlobalLocalConfig", "SamplerResults", "best_of_prior_init"]
+__all__ = ["Sampler", "GlobalLocalConfig", "SamplerResults", "best_of_prior_init", "PostProcessor"]
