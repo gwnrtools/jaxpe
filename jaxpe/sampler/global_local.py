@@ -66,6 +66,61 @@ class GlobalLocalConfig:
 
     Controls the number of chains, looping structure (training vs production),
     neural network architecture for the Normalizing Flow, and kernel adaptation.
+
+    Attributes
+    ----------
+    n_chains : int
+        Number of parallel MCMC chains to run.
+    n_prelim_loops : int
+        Number of initial local-only warmup loops. Samples generated here are discarded
+        and not added to the training buffer.
+    n_training_loops : int
+        Number of training loops. Each loop consists of local MCMC steps, followed by
+        flow training on the accumulated buffer, and finally a global proposal block.
+    n_production_loops : int
+        Number of production loops where the flow is frozen and no adaptation occurs.
+    n_local_steps : int
+        Number of local kernel (e.g., MALA) steps to take per chain per loop.
+    n_global_steps : int
+        Number of global independence Metropolis-Hastings steps to take using the
+        trained normalizing flow per loop.
+    local_thin : int
+        Thinning factor for local steps. Only every k-th sample is added to the
+        buffer (during training) or kept (during production).
+    buffer_size : int
+        Maximum number of samples to keep in the replay buffer for training the flow.
+    flow_layers : int
+        Number of neural spline coupling layers in the normalizing flow.
+    knots : int
+        Number of knots/bins for the rational quadratic splines in the flow.
+    interval : float
+        The bounded domain [-interval, interval] over which the splines are defined.
+    nn_width : int
+        Width (number of hidden units) of the neural network conditioner in each flow layer.
+    nn_depth : int
+        Depth (number of hidden layers) of the neural network conditioner in each flow layer.
+    n_epochs : int
+        Number of training epochs to run the flow optimizer over the buffer per training loop.
+    batch_size : int
+        Batch size for training the normalizing flow.
+    learning_rate : float
+        Learning rate for the Adam optimizer used to train the normalizing flow.
+    adapt_step_size : bool
+        If True, the local kernel's step size is adapted during the training phase
+        to achieve the target acceptance rate.
+    adapt_scale : bool
+        If True, the local kernel's preconditioner (covariance/scale) is adapted
+        during the training phase using the sample buffer.
+    target_acceptance : float | None
+        Target acceptance rate for step size adaptation. If None, it defaults to a
+        kernel-specific optimal value (e.g., 0.574 for MALA).
+    use_global : bool
+        If True, executes global flow-based proposals. If False, the sampler acts
+        as a purely local MCMC sampler (flow is still trained if not disabled).
+    checkpoint_every_n_training : int
+        Frequency (in loops) to save the sampler state to disk during the training phase.
+    checkpoint_every_n_production : int
+        Frequency (in loops) to save the sampler state to disk during the production phase.
     """
 
     n_chains: int = 128
@@ -91,19 +146,52 @@ class GlobalLocalConfig:
     adapt_scale: bool = True
     target_acceptance: float | None = None  # default looked up per kernel type
     use_global: bool = True
+    # checkpointing
+    checkpoint_every_n_training: int = 1
+    checkpoint_every_n_production: int = 50
 
 
 @dataclass
 class SamplerResults:
-    """Production samples in unconstrained space plus run history."""
+    """
+    Results from the Global-Local Sampler run.
 
-    samples: np.ndarray  # (n_kept, n_chains, n_dim), unconstrained
-    log_prob: np.ndarray  # (n_kept, n_chains)
-    local_acceptance: list  # per training/production loop means
+    Contains the final production samples in the unconstrained space,
+    evaluations of the log-posterior, sampler diagnostics tracking acceptance
+    rates and flow training losses, and the final state of the flow and kernel.
+
+    Attributes
+    ----------
+    samples : np.ndarray
+        The unconstrained samples collected during the production phase.
+        Shape: (n_kept, n_chains, n_dim)
+    log_prob : np.ndarray
+        The evaluated log-posterior for each collected sample.
+        Shape: (n_kept, n_chains)
+    local_acceptance : list
+        The average acceptance probability of the local kernel (e.g. MALA)
+        recorded at each loop during both training and production phases.
+    global_acceptance : list
+        The average acceptance probability of the global Normalizing Flow
+        proposal recorded at each loop.
+    flow_losses : list
+        The final loss (negative log-likelihood) of the flow optimizer
+        recorded at the end of each training loop.
+    flow : object
+        The fully trained Normalizing Flow (an Equinox module) mapping the
+        posterior to a base Gaussian.
+    kernel : object
+        The final state of the local MCMC kernel containing the adapted
+        step size and dense mass matrix (covariance/scale).
+    """
+
+    samples: np.ndarray
+    log_prob: np.ndarray
+    local_acceptance: list
     global_acceptance: list
-    flow_losses: list  # per training loop mean losses
-    flow: object  # trained FlowProposal
-    kernel: object  # kernel with final adapted hyperparameters
+    flow_losses: list
+    flow: object
+    kernel: object
 
     def flat(self):
         return self.samples.reshape(-1, self.samples.shape[-1])
@@ -212,7 +300,10 @@ class Sampler:
             return self.config.target_acceptance
         return TARGET_ACCEPTANCE.get(type(self.kernel).__name__, 0.574)
 
-    def run(self, key, x0=None) -> SamplerResults:
+    def run(self, key, x0=None, checkpoint_file=None) -> SamplerResults:
+        import pickle
+        from pathlib import Path
+
         cfg = self.config
         key, k_flow, k_init = jax.random.split(key, 3)
 
@@ -236,80 +327,160 @@ class Sampler:
 
         buffer = None
         local_acc, global_acc, flow_losses = [], [], []
+        kept_x, kept_logp = [], []
+
+        phase = "training"
+        loop_idx = 0
+
+        def save_ckpt(current_phase, current_loop, current_x0, current_logp0):
+            if checkpoint_file is None:
+                return
+            with open(checkpoint_file, "wb") as f:
+                pickle.dump(
+                    {
+                        "phase": current_phase,
+                        "loop_idx": current_loop,
+                        "x0": np.asarray(current_x0),
+                        "logp0": np.asarray(current_logp0),
+                        "buffer": np.asarray(buffer) if buffer is not None else None,
+                        "kept_x": [np.asarray(a) for a in kept_x],
+                        "kept_logp": [np.asarray(a) for a in kept_logp],
+                        "local_acc": local_acc,
+                        "global_acc": global_acc,
+                        "flow_losses": flow_losses,
+                    },
+                    f,
+                )
+            import equinox as eqx
+
+            eqx.tree_serialise_leaves(str(checkpoint_file) + ".flow", flow)
+            eqx.tree_serialise_leaves(str(checkpoint_file) + ".kernel", kernel)
+
+        if checkpoint_file is not None and Path(checkpoint_file).exists():
+            print(f"Loading checkpoint from {checkpoint_file}...")
+            with open(checkpoint_file, "rb") as f:
+                state = pickle.load(f)
+            phase = state["phase"]
+            loop_idx = state["loop_idx"]
+            x0 = jnp.asarray(state["x0"])
+            logp0 = jnp.asarray(state["logp0"])
+            buffer = (
+                jnp.asarray(state["buffer"]) if state["buffer"] is not None else None
+            )
+            kept_x = state["kept_x"]
+            kept_logp = state["kept_logp"]
+            local_acc = state["local_acc"]
+            global_acc = state["global_acc"]
+            flow_losses = state["flow_losses"]
+            import equinox as eqx
+
+            flow = eqx.tree_deserialise_leaves(str(checkpoint_file) + ".flow", flow)
+            kernel = eqx.tree_deserialise_leaves(
+                str(checkpoint_file) + ".kernel", kernel
+            )
+        else:
+            logp0 = jax.vmap(self.logp_fn)(x0)
 
         # ---- training phase (first n_prelim_loops are local-only warmup) ----
-        for loop in range(cfg.n_prelim_loops + cfg.n_training_loops):
-            warmup = loop < cfg.n_prelim_loops
-            key, k_loc, k_fit, k_glob = jax.random.split(key, 4)
-            states, xs, logps, infos = run_chains(
-                k_loc, kernel, self.logp_fn, x0, cfg.n_local_steps, thin=cfg.local_thin
-            )
-            x0, logp0 = states.x, states.log_prob
-            acc = float(jnp.mean(infos.accepted))
-            local_acc.append(acc)
-
-            new_samples = xs.reshape(-1, self.n_dim)
-            if not warmup:
-                buffer = (
-                    new_samples
-                    if buffer is None
-                    else jnp.concatenate([buffer, new_samples])
+        if phase == "training":
+            for loop in range(loop_idx, cfg.n_prelim_loops + cfg.n_training_loops):
+                warmup = loop < cfg.n_prelim_loops
+                key, k_loc, k_fit, k_glob = jax.random.split(key, 4)
+                states, xs, logps, infos = run_chains(
+                    k_loc,
+                    kernel,
+                    self.logp_fn,
+                    x0,
+                    cfg.n_local_steps,
+                    thin=cfg.local_thin,
                 )
-                buffer = buffer[-cfg.buffer_size :]
+                x0, logp0 = states.x, states.log_prob
+                acc = float(jnp.mean(infos.accepted))
+                local_acc.append(acc)
 
-            # Unadjusted kernels (ULD) always report acceptance 1: skip step-size targeting.
-            if cfg.adapt_step_size and type(kernel).has_accept_prob:
-                kernel = with_updates(
-                    kernel, step_size=adapted_step_size(kernel.step_size, acc, target)
+                new_samples = xs.reshape(-1, self.n_dim)
+                if not warmup:
+                    buffer = (
+                        new_samples
+                        if buffer is None
+                        else jnp.concatenate([buffer, new_samples])
+                    )
+                    buffer = buffer[-cfg.buffer_size :]
+
+                # Unadjusted kernels (ULD) always report acceptance 1: skip step-size targeting.
+                if cfg.adapt_step_size and type(kernel).has_accept_prob:
+                    kernel = with_updates(
+                        kernel,
+                        step_size=adapted_step_size(kernel.step_size, acc, target),
+                    )
+                if cfg.adapt_scale:
+                    scale_src = new_samples if buffer is None else buffer
+                    if hasattr(kernel, "scale"):
+                        kernel = with_updates(kernel, scale=ensemble_scale(scale_src))
+                    elif (
+                        hasattr(kernel, "cov")
+                        and getattr(kernel, "metric_fn", None) is None
+                    ):
+                        kernel = with_updates(kernel, cov=ensemble_cov(scale_src))
+
+                if warmup:
+                    continue
+
+                flow, losses = fit_flow(
+                    k_fit,
+                    flow,
+                    buffer,
+                    n_epochs=cfg.n_epochs,
+                    batch_size=cfg.batch_size,
+                    learning_rate=cfg.learning_rate,
                 )
-            if cfg.adapt_scale:
-                scale_src = new_samples if buffer is None else buffer
-                if hasattr(kernel, "scale"):
-                    kernel = with_updates(kernel, scale=ensemble_scale(scale_src))
-                elif (
-                    hasattr(kernel, "cov")
-                    and getattr(kernel, "metric_fn", None) is None
+                flow_losses.append(losses[-1])
+
+                if cfg.use_global:
+                    x0, logp0, _, _, g_acc = _global_block(
+                        flow, k_glob, x0, logp0, self.logp_fn, cfg.n_global_steps
+                    )
+                    global_acc.append(float(g_acc))
+
+                if (loop + 1) % cfg.checkpoint_every_n_training == 0 or (loop + 1) == (
+                    cfg.n_prelim_loops + cfg.n_training_loops
                 ):
-                    kernel = with_updates(kernel, cov=ensemble_cov(scale_src))
+                    save_ckpt("training", loop + 1, x0, logp0)
 
-            if warmup:
-                continue
-
-            flow, losses = fit_flow(
-                k_fit,
-                flow,
-                buffer,
-                n_epochs=cfg.n_epochs,
-                batch_size=cfg.batch_size,
-                learning_rate=cfg.learning_rate,
-            )
-            flow_losses.append(losses[-1])
-
-            if cfg.use_global:
-                x0, logp0, _, _, g_acc = _global_block(
-                    flow, k_glob, x0, logp0, self.logp_fn, cfg.n_global_steps
-                )
-                global_acc.append(float(g_acc))
+        if phase == "training":
+            phase = "production"
+            loop_idx = 0
+            save_ckpt(phase, loop_idx, x0, logp0)
 
         # ---- production phase: adaptation off, flow frozen ----
-        kept_x, kept_logp = [], []
-        for _ in range(cfg.n_production_loops):
-            key, k_loc, k_glob = jax.random.split(key, 3)
-            states, xs, logps, infos = run_chains(
-                k_loc, kernel, self.logp_fn, x0, cfg.n_local_steps, thin=cfg.local_thin
-            )
-            x0, logp0 = states.x, states.log_prob
-            local_acc.append(float(jnp.mean(infos.accepted)))
-            kept_x.append(xs)
-            kept_logp.append(logps)
-
-            if cfg.use_global:
-                x0, logp0, ys, ylogps, g_acc = _global_block(
-                    flow, k_glob, x0, logp0, self.logp_fn, cfg.n_global_steps
+        if phase == "production":
+            for loop in range(loop_idx, cfg.n_production_loops):
+                key, k_loc, k_glob = jax.random.split(key, 3)
+                states, xs, logps, infos = run_chains(
+                    k_loc,
+                    kernel,
+                    self.logp_fn,
+                    x0,
+                    cfg.n_local_steps,
+                    thin=cfg.local_thin,
                 )
-                global_acc.append(float(g_acc))
-                kept_x.append(ys[:: cfg.local_thin])
-                kept_logp.append(ylogps[:: cfg.local_thin])
+                x0, logp0 = states.x, states.log_prob
+                local_acc.append(float(jnp.mean(infos.accepted)))
+                kept_x.append(xs)
+                kept_logp.append(logps)
+
+                if cfg.use_global:
+                    x0, logp0, ys, ylogps, g_acc = _global_block(
+                        flow, k_glob, x0, logp0, self.logp_fn, cfg.n_global_steps
+                    )
+                    global_acc.append(float(g_acc))
+                    kept_x.append(ys[:: cfg.local_thin])
+                    kept_logp.append(ylogps[:: cfg.local_thin])
+
+                if (loop + 1) % cfg.checkpoint_every_n_production == 0 or (
+                    loop + 1
+                ) == cfg.n_production_loops:
+                    save_ckpt("production", loop + 1, x0, logp0)
 
         return SamplerResults(
             samples=np.concatenate([np.asarray(a) for a in kept_x]),
@@ -326,5 +497,13 @@ class Sampler:
         if self.problem is None:
             raise ValueError("no InferenceProblem attached")
         flat = jnp.asarray(samples).reshape(-1, self.n_dim)
-        phys = jax.vmap(self.problem.prior.to_physical)(flat)
-        return np.asarray(phys).reshape(samples.shape)
+
+        # Batch to prevent OOM on large sample sets (e.g., 4M samples)
+        batch_size = 100_000
+        phys_list = []
+        _map_fn = jax.jit(jax.vmap(self.problem.prior.to_physical))
+        for i in range(0, flat.shape[0], batch_size):
+            phys_list.append(np.asarray(_map_fn(flat[i : i + batch_size])))
+
+        phys = np.concatenate(phys_list, axis=0)
+        return phys.reshape(samples.shape)
