@@ -154,18 +154,18 @@ def test_tukey_window_matches_scipy():
 
 
 def test_imrphenomd_matches_ripple():
-    ripple = pytest.importorskip("ripplegw")
+    pytest.importorskip("ripplegw")
     from ripplegw.waveforms.IMRPhenomD import gen_IMRPhenomD_hphc as ripple_phenomd
     from jaxpe.gw import IMRPhenomD
-    
+
     # Setup parameters
     q = 1.5
     mtot = 70.0
-    m1 = mtot / (1 + 1/q)
+    m1 = mtot / (1 + 1 / q)
     m2 = mtot / (1 + q)
     eta = (m1 * m2) / mtot**2
-    mc = mtot * eta**(3.0/5.0)
-    
+    mc = mtot * eta ** (3.0 / 5.0)
+
     s1z = 0.5
     s2z = -0.3
     dist = 800.0
@@ -173,7 +173,7 @@ def test_imrphenomd_matches_ripple():
     phic = 1.2
     iota = 0.6
     f_ref = 20.0
-    
+
     params = dict(
         chirp_mass=mc,
         mass_ratio=q,
@@ -184,16 +184,71 @@ def test_imrphenomd_matches_ripple():
         spin1z=s1z,
         spin2z=s2z,
     )
-    
+
     freqs = jnp.linspace(20.0, 1024.0, 1000)
-    
+
     # jaxpe evaluation
     model = IMRPhenomD(f_ref=f_ref)
     hp_jaxpe, hc_jaxpe = model(params, freqs)
-    
+
     # ripple evaluation
     theta_ripple = jnp.array([mc, eta, s1z, s2z, dist, tc, phic, iota])
     hp_ripple, hc_ripple = ripple_phenomd(freqs, theta_ripple, f_ref)
-    
+
     np.testing.assert_allclose(hp_jaxpe, hp_ripple, rtol=1e-6, atol=1e-10)
     np.testing.assert_allclose(hc_jaxpe, hc_ripple, rtol=1e-6, atol=1e-10)
+
+
+def test_unified_waveform_generator_interface():
+    from jaxpe.gw.cbc_models.base import (
+        WaveformModel,
+        TimeDomainModel,
+        FrequencyDomainModel,
+    )
+    from jaxpe.gw import IMRPhenomD
+
+    # Check inheritance
+    assert issubclass(IMRPhenomD, WaveformModel)
+    assert issubclass(IMRPhenomD, FrequencyDomainModel)
+
+    model = IMRPhenomD()
+    assert getattr(model, "is_fd", False)
+
+    # Test __call__ signature
+    params = {
+        "chirp_mass": 30.0,
+        "mass_ratio": 0.5,
+        "luminosity_distance": 400.0,
+        "inclination": 0.6,
+        "phase": 1.2,
+        "geocent_time": 0.0,
+        "spin1z": 0.0,
+        "spin2z": 0.0,
+    }
+    grid = jnp.linspace(20.0, 1024.0, 100)
+    hp, hc = model(params, grid)
+    assert hp.shape == grid.shape
+    assert hc.shape == grid.shape
+
+    # Check ESIGMAInspiral
+    try:
+        from jaxpe.gw import ESIGMAInspiral
+
+        if ESIGMAInspiral is not None:
+            assert issubclass(ESIGMAInspiral, WaveformModel)
+            assert issubclass(ESIGMAInspiral, TimeDomainModel)
+            emodel = ESIGMAInspiral()
+            assert not getattr(emodel, "is_fd", True)
+            egrid = jnp.linspace(-2.0, 0.0, 100)
+            ehp, ehc = emodel(params, egrid)
+            assert ehp.shape == egrid.shape
+            assert ehc.shape == egrid.shape
+    except ImportError:
+        pass
+
+    # Check NRSur7dq4
+    from jaxpe.gw import NRSur7dq4
+
+    assert issubclass(NRSur7dq4, WaveformModel)
+    assert issubclass(NRSur7dq4, TimeDomainModel)
+    # We do not instantiate it here as it requires a data file path.

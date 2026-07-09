@@ -6,7 +6,7 @@ import pytest
 # Ensure esigmapy is installed before running these tests
 pytest.importorskip("esigmapy")
 
-from jaxpe.gw.esigma import ESIGMAInspiral
+from jaxpe.gw import ESIGMAInspiral
 from jaxpe.gw.harmonics import spin_weighted_ylm
 
 
