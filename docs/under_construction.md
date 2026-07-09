@@ -142,7 +142,7 @@ Before tackling the memory and stiffness challenges of the highly complex ESIGMA
 ### 13.1 GW Injection (`03_gw_injection.py`)
 This experiment successfully recovered the parameters of a simulated non-eccentric gravitational wave injection embedded in Gaussian noise.
 
-![GW Injection Posterior Corner Plot](../examples/output/gw_injection_seed42_corner.png)
+![GW Injection Posterior Corner Plot](assets/gw_injection_seed42_corner.png)
 
 ### 13.2 Validation vs Dynesty (`validate_injection_vs_dynesty.py`)
 To prove the accuracy of `jaxpe`, this experiment overlaid our posterior contours against those produced by the industry-standard `dynesty` nested sampler. The near-perfect agreement confirms the mathematical correctness of our likelihood and sampling algorithms.
@@ -152,7 +152,7 @@ To prove the accuracy of `jaxpe`, this experiment overlaid our posterior contour
 - **`jaxpe` sampling time**: 2891.5 seconds (~48.2 minutes)*
 *(Measured by executing from the JAX persistent compilation cache to strictly isolate runtime sampling performance from XLA JIT lowering time)*
 
-![Validation Overlay vs Dynesty](../examples/output/validate_overlay_corner.png)
+![Validation Overlay vs Dynesty](assets/validate_overlay_corner.png)
 
 ## 14. Root-Cause Correction: What Actually Drives the Compile OOM (and What Doesn't)
 
@@ -289,7 +289,7 @@ For each configuration I lowered-and-compiled both the forward-only solve and it
 reverse-mode gradient (`jax.grad`, exactly what the MALA kernel requests), under the
 same `RecursiveCheckpointAdjoint(checkpoints=16)` used in production.
 
-![XLA compile-graph size is set by the RHS expression size, not by max_ode_steps](../examples/compile_scaling.png)
+![XLA compile-graph size is set by the RHS expression size, not by max_ode_steps](assets/compile_scaling.png)
 
 ### 14.2 Results
 
