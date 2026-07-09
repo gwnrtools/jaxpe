@@ -19,6 +19,9 @@ dependencies = [
     "scipy",
     "matplotlib",
     "corner",
+    "ripplegw",
+    "JaxNRSur",
+    "emcee",
 ]
 
 [project.optional-dependencies]

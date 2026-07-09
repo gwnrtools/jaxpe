@@ -151,3 +151,49 @@ def test_tukey_window_matches_scipy():
 
     for n, a in [(256, 0.1), (1024, 0.5)]:
         np.testing.assert_allclose(tukey_window(n, a), tukey(n, a), atol=1e-12)
+
+
+def test_imrphenomd_matches_ripple():
+    ripple = pytest.importorskip("ripplegw")
+    from ripplegw.waveforms.IMRPhenomD import gen_IMRPhenomD_hphc as ripple_phenomd
+    from jaxpe.gw import IMRPhenomD
+    
+    # Setup parameters
+    q = 1.5
+    mtot = 70.0
+    m1 = mtot / (1 + 1/q)
+    m2 = mtot / (1 + q)
+    eta = (m1 * m2) / mtot**2
+    mc = mtot * eta**(3.0/5.0)
+    
+    s1z = 0.5
+    s2z = -0.3
+    dist = 800.0
+    tc = 1126259462.4
+    phic = 1.2
+    iota = 0.6
+    f_ref = 20.0
+    
+    params = dict(
+        chirp_mass=mc,
+        mass_ratio=q,
+        luminosity_distance=dist,
+        inclination=iota,
+        phase=phic,
+        geocent_time=tc,
+        spin1z=s1z,
+        spin2z=s2z,
+    )
+    
+    freqs = jnp.linspace(20.0, 1024.0, 1000)
+    
+    # jaxpe evaluation
+    model = IMRPhenomD(f_ref=f_ref)
+    hp_jaxpe, hc_jaxpe = model(params, freqs)
+    
+    # ripple evaluation
+    theta_ripple = jnp.array([mc, eta, s1z, s2z, dist, tc, phic, iota])
+    hp_ripple, hc_ripple = ripple_phenomd(freqs, theta_ripple, f_ref)
+    
+    np.testing.assert_allclose(hp_jaxpe, hp_ripple, rtol=1e-6, atol=1e-10)
+    np.testing.assert_allclose(hc_jaxpe, hc_ripple, rtol=1e-6, atol=1e-10)
