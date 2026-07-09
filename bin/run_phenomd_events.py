@@ -121,8 +121,12 @@ def main(n_chains=100, n_epochs=100, n_production=1000):
 
     for name, spec in EVENTS.items():
         print("\n=============================================")
-        print(f"Running event: {name}")
-        print("=============================================")
+        event_out = OUT / name
+        event_out.mkdir(parents=True, exist_ok=True)
+
+        if (event_out / "samples.npy").exists():
+            print(f"Skipping {name}, samples.npy already exists (fully complete)")
+            continue
 
         params = spec["params"]
         mc_prior = spec["mc_prior"]
@@ -170,20 +174,56 @@ def main(n_chains=100, n_epochs=100, n_production=1000):
 
         sampler = Sampler(MALA(step_size=0.05), problem=problem, config=cfg)
 
-        print("Starting best-of-prior init...")
-        t0 = time.time()
-        key = jax.random.PRNGKey(42)
-        x0 = best_of_prior_init(key, problem, cfg.n_chains, n_draws=20_000)
-        dt_init = time.time() - t0
-        print(f"Init finished in {dt_init:.1f} s")
+        raw_file = event_out / "raw_samples.npz"
+        ckpt_file = event_out / "checkpoint.eqx"
 
-        print(
-            f"Starting MCMC run with {n_chains} chains, {n_epochs} epochs, {n_production} production loops..."
-        )
-        t0 = time.time()
-        res = sampler.run(key, x0=x0)
-        dt_run = time.time() - t0
-        print("Sampling complete!")
+        if raw_file.exists():
+            print(
+                f"Found {raw_file}, skipping MCMC sampling and jumping to post-processing."
+            )
+            raw_data = np.load(raw_file)
+            samples = raw_data["samples"]
+            dt_init = float(raw_data["dt_init"])
+            dt_run = float(raw_data["dt_run"])
+
+            # Construct a dummy SamplerResults-like object for to_physical
+            class DummyRes:
+                pass
+
+            res = DummyRes()
+            res.samples = samples
+        else:
+            print("Starting best-of-prior init...")
+            t0 = time.time()
+            key = jax.random.PRNGKey(42)
+            x0 = best_of_prior_init(key, problem, cfg.n_chains, n_draws=20_000)
+            dt_init = time.time() - t0
+            print(f"Init finished in {dt_init:.1f} s")
+
+            print(
+                f"Starting MCMC run with {n_chains} chains, {n_epochs} epochs, {n_production} production loops..."
+            )
+            t0 = time.time()
+            res = sampler.run(key, x0=x0, checkpoint_file=ckpt_file)
+            dt_run = time.time() - t0
+            print("Sampling complete!")
+
+            # Save raw samples in case post-processing fails
+            np.savez(
+                raw_file,
+                samples=res.samples,
+                log_prob=res.log_prob,
+                dt_init=dt_init,
+                dt_run=dt_run,
+            )
+
+            # Cleanup checkpoint
+            if ckpt_file.exists():
+                ckpt_file.unlink()
+            if Path(str(ckpt_file) + ".flow").exists():
+                Path(str(ckpt_file) + ".flow").unlink()
+            if Path(str(ckpt_file) + ".kernel").exists():
+                Path(str(ckpt_file) + ".kernel").unlink()
 
         phys = sampler.to_physical(res.samples)
         flat = phys.reshape(-1, problem.n_dim)
@@ -216,8 +256,6 @@ def main(n_chains=100, n_epochs=100, n_production=1000):
         }
 
         # Save artifacts
-        event_out = OUT / name
-        event_out.mkdir(parents=True, exist_ok=True)
 
         np.save(event_out / "samples.npy", flat)
         fig = corner_plot(flat, names=pnames, truths=truths)
