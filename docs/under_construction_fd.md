@@ -35,4 +35,3 @@ The inference pipeline utilized a zero-noise realization with advanced LIGO Zero
 
 #### GW190521 (Thinned)
 ![GW190521 (Thinned) Posterior Corner Plot](/home/prayush/.gemini/antigravity-ide/brain/9b5855a2-5f93-4c50-81cc-aa4c5155177f/GW190521_corner_thinned.png)
-
