@@ -18,9 +18,26 @@ nav_order: 2
 - [flowjax](https://github.com/danielward27/flowjax) — Rational-quadratic-spline coupling flows
 - standard scientific stack: `numpy`, `scipy`, `matplotlib`
 
-## Installing from source
+## Installing via Conda (Recommended)
 
-The package is available on GitHub and can be installed via `pip`:
+For the most robust installation—especially when dealing with complex dependencies like `lalsuite` and GPU acceleration—we recommend using the provided Conda environment files. These will automatically configure `lalsuite` through `conda-forge` and install `jaxpe` with its optional dependencies (`dev`, `gwdata`, and `surrogate`) using `pip`.
+
+**For CPU:**
+```bash
+conda env create -f conda.yml
+conda activate jaxpe
+```
+
+**For GPU (NVIDIA):**
+This environment specifically prioritizes the official `jax[cuda12]` binaries to ensure hardware acceleration is properly linked before installing `jaxpe`.
+```bash
+conda env create -f conda-gpu.yml
+conda activate jaxpe-gpu
+```
+
+## Installing from source (pip only)
+
+Alternatively, the package can be installed manually via `pip`:
 
 ```bash
 git clone https://github.com/jaxpe/jaxpe.git

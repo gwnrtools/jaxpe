@@ -26,6 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 gwdata = ["gwpy", "gwosc"]
+surrogate = ["gpry>=4.0,<5"]
 dev = ["pytest", "ruff", "black==24.10.0"]
 
 [tool.setuptools.packages.find]
@@ -35,6 +36,10 @@ include = ["jaxpe*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    "ignore:Seeded runs are not supported for UltraNest:UserWarning",
+    "ignore:.*Importing the default NS PolyChord failed.*:UserWarning"
+]
 
 [tool.ruff]
 line-length = 100

@@ -1,0 +1,10 @@
+name: jaxpe-gpu
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - pip
+  - lalsuite
+  - pip:
+      - "jax[cuda12]"
+      - -e .[dev,gwdata,surrogate]
