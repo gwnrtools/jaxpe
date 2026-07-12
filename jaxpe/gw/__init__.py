@@ -12,8 +12,10 @@ from .detectors import (
     gmst_from_gps,
     time_delay_from_geocenter,
 )
+from .external_models import ExternalModeModel, ModeCache, ModesData, reflect_modes
 from .harmonics import spin_weighted_ylm
 from .likelihood import FDNetworkLikelihood, TDNetworkLikelihood, project_to_detector
+from .marginalized import ModesNetworkLikelihood
 from .priors import bbh_priors, ebbh_priors
 from .psd import aligo_zdhp_psd, psd_from_file, welch_psd
 from .cbc_models import IMRPhenomD, ESIGMAInspiral, NRSur7dq4, WaveformModel
@@ -48,4 +50,9 @@ __all__ = [
     "ESIGMAInspiral",
     "IMRPhenomD",
     "NRSur7dq4",
+    "ExternalModeModel",
+    "ModeCache",
+    "ModesData",
+    "ModesNetworkLikelihood",
+    "reflect_modes",
 ]
