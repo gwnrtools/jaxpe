@@ -203,9 +203,11 @@ def test_extrinsic_gradients_finite(likelihood_pair):
     lp = float(like_modes.log_likelihood(_params(geocent_time=T_C + eps)))
     lm = float(like_modes.log_likelihood(_params(geocent_time=T_C - eps)))
     fd = (lp - lm) / (2 * eps)
-    ad = float(jax.grad(lambda t: like_modes.log_likelihood(_params(geocent_time=t)))(
-        jnp.asarray(T_C)
-    ))
+    ad = float(
+        jax.grad(lambda t: like_modes.log_likelihood(_params(geocent_time=t)))(
+            jnp.asarray(T_C)
+        )
+    )
     assert abs(ad - fd) < 1e-4 * max(1.0, abs(fd))
 
 
@@ -224,9 +226,7 @@ def _erf_log_dist_integral(z, s, u_lo, u_hi, log_prior_norm):
     a, b = (u_lo - z / s) * sq, (u_hi - z / s) * sq
     with np.errstate(divide="ignore"):  # log1p(-1) = -inf for zero-mass tails is fine
         log_phi_diff = log_ndtr(b) + np.log1p(-np.exp(log_ndtr(a) - log_ndtr(b)))
-    return (
-        log_prior_norm + z**2 / (2 * s) + 0.5 * np.log(2 * np.pi / s) + log_phi_diff
-    )
+    return log_prior_norm + z**2 / (2 * s) + 0.5 * np.log(2 * np.pi / s) + log_phi_diff
 
 
 D_MIN, D_MAX = 100.0, 5000.0
@@ -295,7 +295,6 @@ def test_log_marginal_vs_semi_brute_force(likelihood_pair):
     lpn = _log_prior_norm_flat_u()
     u_lo, u_hi = D_REF / D_MAX, D_REF / D_MIN
 
-    base = dict(INJ)
     u_probe = np.array([1.0, 2.0, 4.0])
     coef = np.stack([u_probe, -0.5 * u_probe**2, -np.ones(3)], axis=1)
 
@@ -317,9 +316,7 @@ def test_log_marginal_vs_semi_brute_force(likelihood_pair):
                 ]
             )
             z, s, half_dd = np.linalg.solve(coef, lnl)
-            log_terms.append(
-                _erf_log_dist_integral(z, s, u_lo, u_hi, lpn) - half_dd
-            )
+            log_terms.append(_erf_log_dist_integral(z, s, u_lo, u_hi, lpn) - half_dd)
     from scipy.special import logsumexp as np_logsumexp
 
     lbf = np_logsumexp(log_terms) - np.log(n_phi) - np.log(2 * m_tc + 1)
@@ -359,9 +356,7 @@ def test_log_marginal_quadrature_convergence(likelihood_pair):
 def test_log_marginal_gradients(likelihood_pair):
     """The marginal must be differentiable in the remaining extrinsic parameters."""
     _, like_modes = likelihood_pair
-    kw = dict(
-        n_phi=8, n_dist=64, tc_half_samples=5, dist_min=D_MIN, dist_max=D_MAX
-    )
+    kw = dict(n_phi=8, n_dist=64, tc_half_samples=5, dist_min=D_MIN, dist_max=D_MAX)
 
     def f(iota, ra):
         p = _params(inclination=iota, ra=ra)
@@ -412,9 +407,15 @@ def test_mixture_density_normalized():
     for d in range(4):
         for c in centers[:, d]:
             h = widths[d]
-            imgs = [x - c - 1, x - c, x - c + 1] if _EXT_PERIODIC[d] else [
-                x - c, x + c, x + c - 2,
-            ]
+            imgs = (
+                [x - c - 1, x - c, x - c + 1]
+                if _EXT_PERIODIC[d]
+                else [
+                    x - c,
+                    x + c,
+                    x + c - 2,
+                ]
+            )
             dens = sum(
                 np.exp(-0.5 * (im / h) ** 2) / (np.sqrt(2 * np.pi) * h) for im in imgs
             )
@@ -427,7 +428,7 @@ def test_mixture_density_normalized():
     assert abs(inv_q.mean() - 1.0) < 0.02, f"E_q[1/q] = {inv_q.mean():.4f}"
 
 
-def test_full_marginal_adaptive_is(likelihood_pair):
+def test_full_marginal_adaptive_importance_sampling(likelihood_pair):
     """Adaptive-IS extrinsic marginal: independent runs agree within their MC error.
 
     Plain QMC measurably fails here (ESS 1.5/8192; seed spread ~7 in log), which is
@@ -436,17 +437,27 @@ def test_full_marginal_adaptive_is(likelihood_pair):
     """
     _, like_modes = likelihood_pair
     la, da = like_modes.log_marginal_likelihood_full(
-        _params(), n_pilot=2048, n_final=2048, qmc_seed=7,
-        return_diagnostics=True, **INNER,
+        _params(),
+        n_pilot=2048,
+        n_final=2048,
+        qmc_seed=7,
+        return_diagnostics=True,
+        **INNER,
     )
     lb, db = like_modes.log_marginal_likelihood_full(
-        _params(), n_pilot=1024, n_final=4096, qmc_seed=123,
-        return_diagnostics=True, **INNER,
+        _params(),
+        n_pilot=1024,
+        n_final=4096,
+        qmc_seed=123,
+        return_diagnostics=True,
+        **INNER,
     )
-    assert da["ess"] > 100.0, f"run A unconverged: {da}"
-    assert db["ess"] > 100.0, f"run B unconverged: {db}"
-    tol = max(0.15, 5.0 / np.sqrt(min(da["ess"], db["ess"])))
-    assert abs(la - lb) < tol, f"{la} (ESS {da['ess']:.0f}) vs {lb} (ESS {db['ess']:.0f})"
+    assert da["effective_sample_size"] > 100.0, f"run A unconverged: {da}"
+    assert db["effective_sample_size"] > 100.0, f"run B unconverged: {db}"
+    tol = max(0.15, 5.0 / np.sqrt(min(da["effective_sample_size"], db["effective_sample_size"])))
+    assert (
+        abs(la - lb) < tol
+    ), f"{la} (ESS {da['effective_sample_size']:.0f}) vs {lb} (ESS {db['effective_sample_size']:.0f})"
     # the marginal must sit below the extrinsic-optimum lnL (Occam volume factor)
     assert la < da["lnl_max"]
 
@@ -488,7 +499,9 @@ def test_extrinsic_conditional_mala(likelihood_pair):
     y_prior = problem.sample_unconstrained(k_init, n_chains)
     logp = jax.vmap(jax.value_and_grad(problem.log_posterior))
     lp_p, g_p = logp(y_prior)
-    assert np.all(np.isfinite(np.asarray(lp_p))) and np.all(np.isfinite(np.asarray(g_p)))
+    assert np.all(np.isfinite(np.asarray(lp_p))) and np.all(
+        np.isfinite(np.asarray(g_p))
+    )
 
     # production workflow (design note section 5): chains start NEAR high-likelihood
     # extrinsics located by the adaptive-IS layer -- the local kernel then explores the
@@ -543,4 +556,107 @@ def test_mode_cache_roundtrip(tmp_path):
     for lm in modes:
         np.testing.assert_array_equal(back.modes[lm], modes[lm])
     # key stability: insertion order must not matter
-    assert cache.key({"mass_ratio": 0.8, "chirp_mass": 30.0, "eccentricity": 0.1}) == cache.key(theta)
+    assert cache.key(
+        {"mass_ratio": 0.8, "chirp_mass": 30.0, "eccentricity": 0.1}
+    ) == cache.key(theta)
+
+
+# ---------------------------------- balance-heuristic recycling (unit level)
+
+
+def test_balance_heuristic_accumulator_analytic():
+    """The recycled estimator must reproduce a known integral on the unit 4-cube,
+    from batches drawn from DIFFERENT proposals, with every batch contributing.
+
+    Target: an unnormalized Gaussian bump; its integral over the cube has a
+    closed form via error functions. Batch 1 is uniform (the pilot's role);
+    batch 2 comes from a defensive kernel-density mixture centered near the bump
+    (the adaptive rounds' role).
+    """
+    from scipy.special import log_ndtr
+
+    from jaxpe.gw.marginalized import (
+        BalanceHeuristicAccumulator,
+        _mixture_log_density,
+        _mixture_sample,
+    )
+
+    rng = np.random.default_rng(7)
+    center = np.array([0.4, 0.6, 0.3, 0.7])
+    width = 0.05
+
+    def log_target(u):
+        return -0.5 * np.sum(((u - center) / width) ** 2, axis=1)
+
+    # exact: prod_d integral of exp(-(x-c)^2 / 2w^2) over [0,1]
+    def log_exact_1d(c):
+        a, b = (0.0 - c) / width, (1.0 - c) / width
+        return (
+            np.log(width)
+            + 0.5 * np.log(2 * np.pi)
+            + log_ndtr(b)
+            + np.log1p(-np.exp(log_ndtr(a) - log_ndtr(b)))
+        )
+
+    log_exact = sum(log_exact_1d(c) for c in center)
+
+    accumulator = BalanceHeuristicAccumulator()
+
+    # batch 1: uniform proposal (log-density identically zero on the cube)
+    u1 = rng.uniform(size=(4096, 4))
+    accumulator.add_batch(u1, log_target(u1), lambda pts: np.zeros(len(pts)))
+    estimate_uniform_only = accumulator.log_normalization()
+    size_uniform_only = accumulator.effective_sample_size()
+
+    # batch 2: defensive mixture concentrated near (but deliberately offset from)
+    # the bump, as the adaptive rounds would build
+    centers = center[None, :] + 0.02
+    widths = np.full(4, 0.08)
+    component_weights = np.array([1.0])
+    u2 = _mixture_sample(rng, 4096, centers, widths, component_weights, defense=0.2)
+    accumulator.add_batch(
+        u2,
+        log_target(u2),
+        lambda pts: _mixture_log_density(
+            pts, centers, widths, component_weights, defense=0.2
+        ),
+    )
+
+    estimate_recycled = accumulator.log_normalization()
+    size_recycled = accumulator.effective_sample_size()
+
+    # correctness: within Monte-Carlo error of the closed form
+    assert abs(estimate_recycled - log_exact) < 5.0 / np.sqrt(size_recycled), (
+        estimate_recycled,
+        log_exact,
+    )
+    # recycling must IMPROVE the quality measure: the focused second batch adds
+    # information, and the uniform batch is retained rather than discarded
+    assert size_recycled > size_uniform_only
+    # the uniform-only estimate is also consistent (sanity of the harness itself)
+    assert abs(estimate_uniform_only - log_exact) < 5.0 / np.sqrt(size_uniform_only)
+
+
+def test_balance_heuristic_matrix_bookkeeping():
+    """Every proposal must be evaluated at every point, including points that
+    arrived BEFORE the proposal existed (the recycling invariant)."""
+    from jaxpe.gw.marginalized import BalanceHeuristicAccumulator
+
+    calls = []
+
+    def make_density(tag, value):
+        def log_density(pts):
+            calls.append((tag, len(pts)))
+            return np.full(len(pts), value)
+
+        return log_density
+
+    accumulator = BalanceHeuristicAccumulator()
+    accumulator.add_batch(np.zeros((3, 4)), np.zeros(3), make_density("a", 0.0))
+    accumulator.add_batch(np.ones((2, 4)) * 0.5, np.zeros(2), make_density("b", 0.1))
+    # proposal a: evaluated on its own batch (3), then extended to b's batch (2);
+    # proposal b: evaluated on ALL 5 accumulated points at registration
+    assert ("a", 3) in calls and ("a", 2) in calls and ("b", 5) in calls
+    assert accumulator.n_points == 5 and accumulator.batch_sizes == [3, 2]
+    log_weights = accumulator.log_balance_weights()
+    assert log_weights.shape == (5,) and np.all(np.isfinite(log_weights))

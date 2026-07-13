@@ -100,6 +100,94 @@ def _mixture_sample(rng, n, centers, widths, comp_w, defense):
     return out
 
 
+class BalanceHeuristicAccumulator:
+    """Recycles importance-sampling batches drawn from *different* proposals.
+
+    Motivation: the adaptive extrinsic marginalization draws a pilot batch from
+    the uniform prior and further batches from successively refined defensive
+    kernel-density proposals. Estimating the integral from the last batch alone
+    (the original implementation) discards every earlier evaluation. The balance
+    heuristic (Veach & Guibas 1995) instead weights EVERY point as if it had been
+    drawn from the sample-count-weighted mixture of all proposals actually used:
+
+        log w_i = log_likelihood_i - log q_bar(u_i),
+        q_bar(u) = sum_j (n_j / N) q_j(u),   N = sum_j n_j,
+
+    which is a valid importance-sampling estimator for the whole collection and
+    provably close to the best possible combination for fixed proposals. All
+    evaluations then contribute to both the integral estimate and the effective
+    sample size, so a quality target is reached with roughly half the evaluations
+    the discard-and-double retry strategy needed.
+
+    Honest caveat: our proposals are built adaptively from earlier batches, so
+    later proposals are not independent of earlier points (the adaptive multiple
+    importance sampling regime). Strict unbiasedness is lost; consistency holds,
+    and the finite-sample bias is far below the variance of discarding batches.
+
+    The accumulator stores each proposal's log-density function and maintains the
+    (n_batches, n_points) matrix of every proposal evaluated at every point,
+    extended incrementally as batches arrive -- pure Gaussian algebra, negligible
+    next to the likelihood evaluations being recycled.
+    """
+
+    def __init__(self):
+        self.points: np.ndarray | None = None  # (N, d) accumulated positions
+        self.log_likelihoods: np.ndarray | None = None  # (N,)
+        self.batch_sizes: list[int] = []
+        self._log_density_functions: list = []
+        # row j = proposal j's log-density at ALL accumulated points
+        self._log_density_rows: list[np.ndarray] = []
+
+    @property
+    def n_points(self) -> int:
+        return 0 if self.points is None else len(self.points)
+
+    def add_batch(self, points, log_likelihood_values, log_density_function):
+        """Add one batch: positions, their log-likelihoods, and the log-density
+        of the proposal they were drawn from (callable ``(n, d) -> (n,)``)."""
+        points = np.atleast_2d(np.asarray(points, dtype=float))
+        log_likelihood_values = np.asarray(log_likelihood_values, dtype=float)
+        # extend every EXISTING proposal's row with its density at the NEW points
+        for j, density_fn in enumerate(self._log_density_functions):
+            self._log_density_rows[j] = np.concatenate(
+                [self._log_density_rows[j], density_fn(points)]
+            )
+        if self.points is None:
+            self.points = points
+            self.log_likelihoods = log_likelihood_values
+        else:
+            self.points = np.concatenate([self.points, points])
+            self.log_likelihoods = np.concatenate(
+                [self.log_likelihoods, log_likelihood_values]
+            )
+        # ... and the NEW proposal's row over ALL points (old + new)
+        self._log_density_functions.append(log_density_function)
+        self._log_density_rows.append(log_density_function(self.points))
+        self.batch_sizes.append(len(points))
+
+    def log_balance_weights(self) -> np.ndarray:
+        """log w_i = log_likelihood_i - log q_bar(u_i) for every accumulated point."""
+        counts = np.asarray(self.batch_sizes, dtype=float)
+        log_batch_fractions = np.log(counts / counts.sum())
+        # mixture density: logsumexp over proposals of log(n_j/N) + log q_j(u_i)
+        log_mixture = logsumexp_np(
+            log_batch_fractions[:, None] + np.stack(self._log_density_rows), axis=0
+        )
+        return self.log_likelihoods - log_mixture
+
+    def log_normalization(self) -> float:
+        """The recycled estimate of log integral(likelihood x prior)."""
+        log_weights = self.log_balance_weights()
+        return float(logsumexp_np(log_weights) - np.log(self.n_points))
+
+    def effective_sample_size(self) -> float:
+        """(sum w)^2 / sum w^2 over ALL accumulated points."""
+        log_weights = self.log_balance_weights()
+        return float(
+            np.exp(2.0 * logsumexp_np(log_weights) - logsumexp_np(2.0 * log_weights))
+        )
+
+
 @functools.lru_cache(maxsize=8)
 def _leggauss(n: int):
     # host-side numpy ONLY: this may first be hit inside a trace, and caching jnp
@@ -460,6 +548,8 @@ class ModesNetworkLikelihood(TDNetworkLikelihood):
         n_pilot: int = 4096,
         n_final: int = 4096,
         rounds: int = 2,
+        effective_sample_size_target: float | None = None,
+        max_extra_rounds: int = 0,
         defense: float = 0.2,
         max_centers: int = 256,
         qmc_seed: int = 7,
@@ -488,10 +578,16 @@ class ModesNetworkLikelihood(TDNetworkLikelihood):
            importance-weighted high-lnL nodes, mixed with a ``defense`` fraction of
            the uniform prior -- so a mode the KDE missed is still sampled and the
            estimator stays consistent; repeat ``rounds`` times.
-        3. Estimate from the last batch: logsumexp(lnL - log q) - log n, with the
-           effective sample size ESS = (sum w)^2 / sum w^2 as the built-in
-           diagnostic; **treat the result as unconverged if ESS is low** (the IS
-           log-estimate is biased low by ~ var/2, i.e. ~ 1/(2 ESS)).
+        3. Estimate by **recycling every batch** (pilot included) under the
+           balance heuristic -- see :class:`BalanceHeuristicAccumulator` -- so all
+           evaluations contribute to both the integral and its effective sample
+           size; treat the result as unconverged if the effective sample size is
+           low (the importance-sampling log-estimate is biased low by
+           ~ 1/(2 x effective sample size)).
+        4. If ``effective_sample_size_target`` is set and unmet after the base
+           ``rounds``, up to ``max_extra_rounds`` additional rounds run, each with
+           twice the previous round's batch size (replacing the old
+           discard-and-restart retry escalation at roughly half its cost).
 
         This runs host-side by construction (data-dependent sampling cannot live
         inside a trace); each evaluation batch is a compiled ``lax.map``. It is the
@@ -500,7 +596,7 @@ class ModesNetworkLikelihood(TDNetworkLikelihood):
 
         ``params`` supplies only ``geocent_time`` (the t_c prior-window center).
         With ``return_diagnostics=True`` also returns
-        dict(ess, n_eval, lnl_max, logz_rounds).
+        dict(effective_sample_size, n_eval, lnl_max, logz_rounds, extra_rounds_used).
         """
         from scipy.stats import qmc
 
@@ -530,41 +626,82 @@ class ModesNetworkLikelihood(TDNetworkLikelihood):
             return np.asarray(eval_nodes(mode_a, mode_b, nodes, t_center))
 
         rng = np.random.default_rng(qmc_seed)
-        u_all = qmc.Sobol(d=4, scramble=True, seed=qmc_seed).random(n_pilot)
-        lnl_all = evaluate(u_all)
-        logq_all = np.zeros(n_pilot)  # pilot proposal: the uniform prior measure
+        accumulator = BalanceHeuristicAccumulator()
 
-        logz_rounds, lw_last, n_last = [], None, n_pilot
-        for _ in range(rounds):
-            # centers: importance-corrected top nodes within 15 e-folds of the peak
-            lw = lnl_all - logq_all
-            keep = np.flatnonzero(lnl_all > lnl_all.max() - 15.0)
-            keep = keep[np.argsort(lnl_all[keep])[-max_centers:]]
-            centers = u_all[keep]
-            comp_w = np.exp(lw[keep] - logsumexp_np(lw[keep]))
-            k_eff = float(np.exp(-np.sum(comp_w * np.log(comp_w + 1e-300))))
-            mu = comp_w @ centers
-            var = comp_w @ (centers - mu) ** 2
-            widths = np.clip(1.5 * np.sqrt(var) * k_eff ** (-1.0 / 6.0), 0.01, 0.25)
+        # pilot batch: scrambled-Sobol nodes on the flat-measure unit cube, i.e.
+        # drawn from the uniform prior whose log-density is identically zero
+        pilot_points = qmc.Sobol(d=4, scramble=True, seed=qmc_seed).random(n_pilot)
+        accumulator.add_batch(
+            pilot_points, evaluate(pilot_points), lambda pts: np.zeros(len(pts))
+        )
 
-            u_new = _mixture_sample(rng, n_final, centers, widths, comp_w, defense)
-            logq_new = _mixture_log_density(u_new, centers, widths, comp_w, defense)
-            lnl_new = evaluate(u_new)
+        logz_rounds: list[float] = []
+        round_size = n_final
+        rounds_executed = 0
+        while True:
+            in_base_rounds = rounds_executed < rounds
+            if not in_base_rounds:
+                # extra (recycled) rounds: only while the quality target is unmet,
+                # each twice the size of the previous round -- the escalation the
+                # old discard-and-restart retry did, minus the discarding
+                target_met = (
+                    effective_sample_size_target is None
+                    or accumulator.effective_sample_size()
+                    >= effective_sample_size_target
+                )
+                if target_met or rounds_executed >= rounds + max_extra_rounds:
+                    break
+                round_size *= 2
 
-            lw_last, n_last = lnl_new - logq_new, n_final
-            logz_rounds.append(logsumexp_np(lw_last) - np.log(n_final))
-            u_all = np.concatenate([u_all, u_new])
-            lnl_all = np.concatenate([lnl_all, lnl_new])
-            logq_all = np.concatenate([logq_all, logq_new])
+            # proposal centers: top accumulated points within 15 e-folds of the
+            # peak, weighted by their balance-heuristic importance (so points from
+            # every batch are compared on a consistent footing)
+            all_points = accumulator.points
+            all_log_likelihoods = accumulator.log_likelihoods
+            log_weights = accumulator.log_balance_weights()
+            keep = np.flatnonzero(
+                all_log_likelihoods > all_log_likelihoods.max() - 15.0
+            )
+            keep = keep[np.argsort(all_log_likelihoods[keep])[-max_centers:]]
+            centers = all_points[keep]
+            component_weights = np.exp(
+                log_weights[keep] - logsumexp_np(log_weights[keep])
+            )
+            effective_n_centers = float(
+                np.exp(-np.sum(component_weights * np.log(component_weights + 1e-300)))
+            )
+            center_mean = component_weights @ centers
+            center_variance = component_weights @ (centers - center_mean) ** 2
+            widths = np.clip(
+                1.5 * np.sqrt(center_variance) * effective_n_centers ** (-1.0 / 6.0),
+                0.01,
+                0.25,
+            )
 
-        log_z = logsumexp_np(lw_last) - np.log(n_last)
-        ess = float(np.exp(2.0 * logsumexp_np(lw_last) - logsumexp_np(2.0 * lw_last)))
+            new_points = _mixture_sample(
+                rng, round_size, centers, widths, component_weights, defense
+            )
+            accumulator.add_batch(
+                new_points,
+                evaluate(new_points),
+                # bind the proposal parameters at definition time (late-binding
+                # closures over loop variables would all see the LAST round's)
+                lambda pts, c=centers, w=widths, cw=component_weights: (
+                    _mixture_log_density(pts, c, w, cw, defense)
+                ),
+            )
+            rounds_executed += 1
+            # progression of the recycled estimate, one entry per round
+            logz_rounds.append(accumulator.log_normalization())
+
+        log_z = accumulator.log_normalization()
         if return_diagnostics:
             return log_z, dict(
-                ess=ess,
-                n_eval=len(lnl_all),
-                lnl_max=float(lnl_all.max()),
+                effective_sample_size=accumulator.effective_sample_size(),
+                n_eval=accumulator.n_points,
+                lnl_max=float(accumulator.log_likelihoods.max()),
                 logz_rounds=logz_rounds,
+                extra_rounds_used=max(0, rounds_executed - rounds),
             )
         return log_z
 
@@ -604,6 +741,25 @@ class ModesNetworkLikelihood(TDNetworkLikelihood):
         )
 
 
+class LowEffectiveSampleSizeError(RuntimeError):
+    """An inner extrinsic marginal stayed below the effective-sample-size floor.
+
+    Raised only in strict mode (``on_low_effective_sample_size="raise"``) after all
+    escalating extra rounds were exhausted. Carries the offending intrinsic point
+    so a checkpointed pipeline can resume with a larger budget.
+    """
+
+    def __init__(self, theta, effective_sample_size, floor, extra_rounds):
+        self.theta = theta
+        self.effective_sample_size = effective_sample_size
+        self.floor = floor
+        self.extra_rounds = extra_rounds
+        super().__init__(
+            f"effective sample size {effective_sample_size:.1f} < floor {floor:.1f} "
+            f"at theta={theta} after {extra_rounds} escalating extra rounds"
+        )
+
+
 class MarginalizedIntrinsicLikelihood:
     """The GPry-facing scalar likelihood: theta_int -> extrinsic-marginalized lnL.
 
@@ -633,6 +789,18 @@ class MarginalizedIntrinsicLikelihood:
         in ``fixed_extrinsic`` -- cheaper; used by validation tests.
     settings
         Keyword options forwarded to the marginal-likelihood methods.
+
+    Attributes
+    ----------
+    importance_sampling_history
+        In full-marginal mode, one record per ``__call__`` with the
+        importance-sampling diagnostics of that evaluation: ``theta``, ``logz``,
+        ``effective_sample_size``, ``extra_rounds_used``, ``failed``, ``n_eval``,
+        ``lnl_max``, ``logz_rounds``. A converged-looking GPry run cannot certify
+        the *inner* extrinsic marginals -- inspect the minimum effective sample
+        size over this history (``importance_sampling_summary()``); a call with a
+        low effective sample size means that theta's L(theta_int) is biased low
+        (by ~ 1/(2 x effective sample size) in the log) and locally noisy.
     """
 
     def __init__(
@@ -645,6 +813,9 @@ class MarginalizedIntrinsicLikelihood:
         fixed_extrinsic: dict | None = None,
         cache=None,
         settings: dict | None = None,
+        effective_sample_size_floor: float = 0.0,
+        max_extra_importance_sampling_rounds: int = 1,
+        on_low_effective_sample_size: str = "accept",
     ):
         self.mode_model = mode_model
         self.like = like
@@ -653,6 +824,30 @@ class MarginalizedIntrinsicLikelihood:
         self.marginalize_sky = marginalize_sky
         self.cache = cache
         self.settings = dict(settings or {})
+        # kwargs owned by __call__ / the healing mechanism, not user settings
+        for owned in ("return_diagnostics", "effective_sample_size_target", "max_extra_rounds"):
+            self.settings.pop(owned, None)
+        # self-healing: if a call's inner-marginal effective sample size is below
+        # the floor after the base rounds, up to max_extra_importance_sampling_rounds
+        # escalating rounds are added, with every batch recycled into the estimate
+        # (BalanceHeuristicAccumulator) -- measured: low-effective-sample-size calls
+        # occur *in the posterior peak region*, where their
+        # ~1/sqrt(effective sample size) log-likelihood scatter directly perturbs
+        # the Gaussian-process fit
+        self.effective_sample_size_floor = float(effective_sample_size_floor)
+        self.max_extra_importance_sampling_rounds = int(
+            max_extra_importance_sampling_rounds
+        )
+        if on_low_effective_sample_size not in ("accept", "raise"):
+            raise ValueError(
+                "on_low_effective_sample_size must be 'accept' or 'raise', got "
+                f"{on_low_effective_sample_size!r}"
+            )
+        # "accept": after the retries, take the last estimate regardless (record it);
+        # "raise": raise LowEffectiveSampleSizeError instead -- pairs with GPry
+        # checkpointing, since it aborts the acquisition loop mid-run
+        self.on_low_effective_sample_size = on_low_effective_sample_size
+        self.importance_sampling_history: list[dict] = []
         if not marginalize_sky:
             if fixed_extrinsic is None:
                 raise ValueError("fixed_extrinsic required when marginalize_sky=False")
@@ -672,12 +867,72 @@ class MarginalizedIntrinsicLikelihood:
         theta = dict(zip(self.names, np.asarray(x, dtype=float).ravel()))
         a, b = self._modes_ab(theta)
         if self.marginalize_sky:
-            return float(
-                self.like.log_marginal_likelihood_full(
-                    {"geocent_time": self.t_center}, modes_ab=(a, b), **self.settings
-                )
+            # the marginalization itself escalates while below the quality floor,
+            # recycling every batch into the estimate; no discard-and-restart
+            log_z, diag = self.like.log_marginal_likelihood_full(
+                {"geocent_time": self.t_center},
+                modes_ab=(a, b),
+                return_diagnostics=True,
+                effective_sample_size_target=(
+                    self.effective_sample_size_floor
+                    if self.effective_sample_size_floor > 0
+                    else None
+                ),
+                max_extra_rounds=self.max_extra_importance_sampling_rounds,
+                **self.settings,
             )
+            failed = diag["effective_sample_size"] < self.effective_sample_size_floor
+            self.importance_sampling_history.append(
+                dict(theta=theta, logz=float(log_z), failed=bool(failed), **diag)
+            )
+            if failed and self.on_low_effective_sample_size == "raise":
+                raise LowEffectiveSampleSizeError(
+                    theta,
+                    diag["effective_sample_size"],
+                    self.effective_sample_size_floor,
+                    diag["extra_rounds_used"],
+                )
+            return float(log_z)
         ext_batch = self.settings.get("ext_batch", 1)
         inner = {k: v for k, v in self.settings.items() if k != "ext_batch"}
         eval_nodes = self.like.marginal_eval_fn(ext_batch=ext_batch, **inner)
         return float(eval_nodes(a, b, jnp.asarray(self._node), self.t_center)[0])
+
+    def importance_sampling_summary(
+        self,
+        effective_sample_size_floor: float = 100.0,
+        peak_efolds: float | None = None,
+    ) -> dict:
+        """Aggregate the per-call importance-sampling diagnostics of a full-marginal run.
+
+        Returns min/median effective sample size over all L(theta_int) evaluations
+        and the list of thetas whose inner marginal fell below
+        ``effective_sample_size_floor`` -- those values are biased low by
+        ~1/(2 x effective sample size) and noisy, and can silently distort the
+        Gaussian-process fit even when GPry itself reports convergence.
+
+        With ``peak_efolds`` set, additionally reports
+        ``n_below_floor_near_peak``: unhealthy calls whose log-marginal lies within
+        that many e-folds of the best call. Measured on the demo problems, low
+        effective sample sizes in the *tails* are harmless (exponentially small
+        posterior weight) while those *near the peak* directly perturb the
+        surrogate -- this count is the reliability-gate quantity.
+        """
+        if not self.importance_sampling_history:
+            return dict(n_calls=0)
+        history = self.importance_sampling_history
+        sizes = np.array([h["effective_sample_size"] for h in history])
+        low = [h for h in history if h["effective_sample_size"] < effective_sample_size_floor]
+        out = dict(
+            n_calls=len(sizes),
+            effective_sample_size_min=float(sizes.min()),
+            effective_sample_size_median=float(np.median(sizes)),
+            n_below_floor=len(low),
+            thetas_below_floor=[h["theta"] for h in low],
+        )
+        if peak_efolds is not None:
+            logz_max = max(h["logz"] for h in history)
+            near = [h for h in low if logz_max - h["logz"] < peak_efolds]
+            out["n_below_floor_near_peak"] = len(near)
+            out["thetas_below_floor_near_peak"] = [h["theta"] for h in near]
+        return out

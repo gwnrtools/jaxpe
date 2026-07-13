@@ -82,10 +82,12 @@ def test_engine_surrogate_logp_accuracy(gaussian_engine):
     # same arbitrary normalization on both sides: compare *differences* across points
     gp = engine.surrogate_logp(x)
     truth = engine.true_logp(x)
-    np.testing.assert_allclose(truth - truth[0], rv.logpdf(x) - rv.logpdf(x[0]),
-                               atol=1e-10)
+    np.testing.assert_allclose(
+        truth - truth[0], rv.logpdf(x) - rv.logpdf(x[0]), atol=1e-10
+    )
     err = (gp - gp[0]) - (truth - truth[0])
     assert np.max(np.abs(err)) < 0.1, f"GP-truth mismatch near mode: {err}"
+
 
 # ------------------------------------------------- 1.3 pseudo-black-box (gate G1)
 
@@ -94,8 +96,13 @@ DURATION, SR, POST_TRIGGER, D_REF = 8.0, 2048.0, 2.0, 500.0
 TRUTH = dict(f0=37.0, span=55.0)  # injected intrinsic point
 BOUNDS = {"f0": (30.0, 45.0), "span": (40.0, 80.0)}
 EXTRINSIC = dict(
-    inclination=0.6, phase=1.2, luminosity_distance=D_REF,
-    ra=1.95, dec=-1.27, psi=0.82, geocent_time=T_C,
+    inclination=0.6,
+    phase=1.2,
+    luminosity_distance=D_REF,
+    ra=1.95,
+    dec=-1.27,
+    psi=0.82,
+    geocent_time=T_C,
 )
 # identical inner settings on the truth and surrogate sides: only GPry is under test
 INNER = dict(n_phi=64, n_dist=48, tc_half_samples=3, dist_min=100.0, dist_max=5000.0)
@@ -109,8 +116,10 @@ def _chirp_modes(times, theta):
     u = np.clip((t - t_on) / (t_off - t_on), 0.0, 1.0)
     env = np.where((t > t_on) & (t < t_off), np.sin(np.pi * u) ** 2, 0.0)
     tau = t - t_on
-    phase = 2.0 * np.pi * (
-        theta["f0"] * tau + 0.5 * theta["span"] / (t_off - t_on) * tau**2
+    phase = (
+        2.0
+        * np.pi
+        * (theta["f0"] * tau + 0.5 * theta["span"] / (t_off - t_on) * tau**2)
     )
     h22 = 1e-22 * env * np.exp(-1j * phase)
     h33 = 0.4e-22 * env * np.exp(-1j * 1.5 * phase)
@@ -132,7 +141,9 @@ class _FixedModesWaveform:
     def __call__(self, params, times):
         h = jnp.zeros((self.n,), dtype=jnp.complex128)
         for (l, m), hlm in self.modes.items():
-            h = h + hlm * spin_weighted_ylm(params["inclination"], params["phase"], l, m)
+            h = h + hlm * spin_weighted_ylm(
+                params["inclination"], params["phase"], l, m
+            )
         h = h * (self.d_ref / params["luminosity_distance"])
         return h.real, -h.imag
 
@@ -211,8 +222,11 @@ def test_g1_pseudo_blackbox_recovery(pseudo_blackbox):
     var_gp = np.average((s.x - mean_gp) ** 2, weights=s.weights, axis=0)
 
     cell = np.array([f0g[1] - f0g[0], spg[1] - spg[0]])
-    assert np.all(np.abs(mean_gp - mean_grid) < np.maximum(cell, 0.5 * np.sqrt(var_grid))), (
-        mean_gp, mean_grid,
+    assert np.all(
+        np.abs(mean_gp - mean_grid) < np.maximum(cell, 0.5 * np.sqrt(var_grid))
+    ), (
+        mean_gp,
+        mean_grid,
     )
     # width tolerance: GPry's convergence criterion targets few-percent lnL accuracy
     # near the mode (~10-15 percent width error), plus NS sampling noise of the
@@ -366,15 +380,114 @@ def test_g1_esigma_blackbox_with_is_reweighting(esigma_blackbox):
     lw = lnl_true - lnl_gp
     lw -= lw.max()
     w = np.exp(lw)
-    ess = w.sum() ** 2 / np.sum(w**2)
+    effective_sample_size = w.sum() ** 2 / np.sum(w**2)
     # measured ~0.25 N on this multi-lobed e-surface at GPry's default convergence:
     # the surrogate carries O(1)-e-fold residuals that reweighting corrects (that is
     # the D3 mechanism's job). A catastrophically biased GP gives ESS/N < ~0.05;
     # the acceptance line sits between the two regimes.
-    assert ess > 0.15 * len(w), f"IS ESS {ess:.0f}/{len(w)}: surrogate biased in bulk"
+    assert effective_sample_size > 0.15 * len(w), f"IS ESS {effective_sample_size:.0f}/{len(w)}: surrogate biased in bulk"
 
     mean_rw = np.average(x_sub, weights=w, axis=0)
     mean_un = x_sub.mean(axis=0)
-    assert np.all(np.abs(mean_rw - mean_un) < 0.5 * sd_gp), (
-        "reweighting moved the posterior mean by >0.5 sigma: surrogate not converged"
+    assert np.all(
+        np.abs(mean_rw - mean_un) < 0.5 * sd_gp
+    ), "reweighting moved the posterior mean by >0.5 sigma: surrogate not converged"
+
+
+def test_full_marginal_records_importance_sampling_history(pseudo_blackbox):
+    """Per-call adaptive-IS diagnostics must be recorded in full-marginal mode:
+    a bad inner extrinsic marginal at some theta must be detectable (via importance_sampling_summary)
+    rather than hiding inside a converged-looking GPry run."""
+    lik_fixed, like_modes = pseudo_blackbox
+    lik = MarginalizedIntrinsicLikelihood(
+        lik_fixed.mode_model,
+        like_modes,
+        names=tuple(BOUNDS),
+        t_center=T_C,
+        marginalize_sky=True,
+        settings=dict(INNER, n_pilot=256, n_final=256),
     )
+    v1 = lik([37.0, 55.0])
+    v2 = lik([38.0, 60.0])
+    assert np.isfinite(v1) and np.isfinite(v2)
+    assert len(lik.importance_sampling_history) == 2
+    for h in lik.importance_sampling_history:
+        assert set(h) >= {"theta", "logz", "effective_sample_size", "n_eval", "lnl_max", "logz_rounds"}
+        assert np.isfinite(h["logz"]) and h["effective_sample_size"] > 1.0
+        assert set(h["theta"]) == set(BOUNDS)
+    s = lik.importance_sampling_summary(effective_sample_size_floor=np.inf)
+    assert s["n_calls"] == 2 and s["n_below_floor"] == 2  # everything below inf floor
+    assert s["effective_sample_size_min"] <= s["effective_sample_size_median"]
+
+
+def test_full_marginal_effective_sample_size_extra_rounds(pseudo_blackbox):
+    """With an unreachable quality floor, escalating extra rounds must run, every
+    batch recycled cumulatively (no discard-and-restart): total evaluations are
+    pilot + base rounds + doubled extra rounds, all counted in n_eval."""
+    lik_fixed, like_modes = pseudo_blackbox
+    lik = MarginalizedIntrinsicLikelihood(
+        lik_fixed.mode_model,
+        like_modes,
+        names=tuple(BOUNDS),
+        t_center=T_C,
+        marginalize_sky=True,
+        settings=dict(INNER, n_pilot=256, n_final=256),
+        effective_sample_size_floor=np.inf,  # unreachable: forces the escalation
+        max_extra_importance_sampling_rounds=2,
+    )
+    lik([37.0, 55.0])
+    (h,) = lik.importance_sampling_history
+    assert h["extra_rounds_used"] == 2 and h["failed"] is True
+    # pilot 256 + base rounds 2 x 256 + extra rounds 512 + 1024, all recycled
+    assert h["n_eval"] == 256 + 256 + 256 + 512 + 1024, h["n_eval"]
+    # the recycled estimate progression has one entry per executed round
+    assert len(h["logz_rounds"]) == 4
+
+
+def test_full_marginal_strict_mode_raises(pseudo_blackbox):
+    """Strict mode: an unhealable call must raise LowEffectiveSampleSizeError,
+    with the failure recorded in the history first (post-mortem evidence)."""
+    from jaxpe.gw.marginalized import LowEffectiveSampleSizeError
+
+    lik_fixed, like_modes = pseudo_blackbox
+    lik = MarginalizedIntrinsicLikelihood(
+        lik_fixed.mode_model,
+        like_modes,
+        names=tuple(BOUNDS),
+        t_center=T_C,
+        marginalize_sky=True,
+        settings=dict(INNER, n_pilot=256, n_final=256),
+        effective_sample_size_floor=np.inf,  # unreachable: forces the strict path
+        max_extra_importance_sampling_rounds=0,
+        on_low_effective_sample_size="raise",
+    )
+    with pytest.raises(LowEffectiveSampleSizeError) as excinfo:
+        lik([37.0, 55.0])
+    assert excinfo.value.extra_rounds == 0
+    assert np.isfinite(excinfo.value.effective_sample_size)
+    (h,) = lik.importance_sampling_history
+    assert h["failed"] is True
+
+
+def test_importance_sampling_summary_peak_window():
+    """The reliability-gate quantity: unhealthy calls are counted near the peak
+    (within peak_efolds of the best log-marginal), not in the harmless tails."""
+    lik = MarginalizedIntrinsicLikelihood.__new__(MarginalizedIntrinsicLikelihood)
+    lik.importance_sampling_history = [
+        # (logz, effective_sample_size): peak call, healthy
+        dict(theta={"a": 1.0}, logz=0.0, effective_sample_size=500.0),
+        # near peak, UNHEALTHY -> must be gated
+        dict(theta={"a": 2.0}, logz=-2.0, effective_sample_size=20.0),
+        # deep tail, unhealthy but harmless -> counted below floor, NOT near peak
+        dict(theta={"a": 3.0}, logz=-50.0, effective_sample_size=5.0),
+    ]
+    s = lik.importance_sampling_summary(
+        effective_sample_size_floor=100.0, peak_efolds=5.0
+    )
+    assert s["n_calls"] == 3
+    assert s["n_below_floor"] == 2
+    assert s["n_below_floor_near_peak"] == 1
+    assert s["thetas_below_floor_near_peak"] == [{"a": 2.0}]
+    # without the window argument, the near-peak keys are absent
+    s2 = lik.importance_sampling_summary(effective_sample_size_floor=100.0)
+    assert "n_below_floor_near_peak" not in s2
