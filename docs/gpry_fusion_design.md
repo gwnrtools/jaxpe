@@ -367,6 +367,28 @@ by zero-padded upsampling if posterior structure demands).
 **Gate G1:** surrogate posterior statistically indistinguishable from truth on two case-(1)
 models; profiling report produced; **decision point on any JAX component port**.
 
+**Phase 1 outcome (2026-07-13, done except 1.4).** Landed: `jaxpe/surrogate/`
+(`SurrogateEngine` protocol + `SurrogateSamples`; `GPryEngine` wrapping `gpry.Runner`
+— GPry 4.0 pinned via the `surrogate` extra, installed editable from `~/src/GPry`),
+`MarginalizedIntrinsicLikelihood` + `ModesNetworkLikelihood.marginal_eval_fn` /
+`modes_fd_arrays` (mode arrays as *traced arguments* to one per-event jit-compiled
+evaluator — a fresh instance per intrinsic point would re-trace at ~1.6 s/eval, which
+would have dominated every surrogate run), `bin/run_gpry_pe.py` (driver + profiling
+harness), `tests/test_surrogate.py`. **Gate G1 (CI form) passed:** a 2D-intrinsic
+pseudo-black-box (synthetic chirp modes -> 3D-marginal lnL) active-learned by GPry
+matches the dense two-stage-grid posterior of the same callable in mean (< 1 cell),
+width (< 30%), and lnL shape near the peak (< 0.5), converging in ~80-160 truth
+evaluations. Demo-driver profile (2D, ms-scale waveform): acquisition (NORA/UltraNest)
+dominates at ~83% of 271 s; **extrapolated to a 2 min/call production waveform the
+non-truth share is ~3% — far below the 30% D4 port trigger** (measured, not assumed;
+re-check at 6-10D where NORA cost grows). Notes: jaxpe requires `jax_enable_x64`
+(float32 GPS times silently NaN — the driver sets it; scripts must too);
+GPry's `logp_truth` is single-point (wrapped with a loop); strict-editable installs
+need `pip install -e . --no-deps` re-run when a new subpackage is added.
+**Remaining for G1-full:** task 1.4 (ESIGMA as pseudo-black-box — needs a mode-level
+adapter since `ESIGMAInspiral` exposes only polarizations) and a full-marginal
+(adaptive-IS) end-to-end run vs direct sampling; then the G2 multifidelity work.
+
 ### Phase 2 — Multifidelity mean (~4–6 d)
 
 | # | task | deliverable / test |
