@@ -389,6 +389,34 @@ need `pip install -e . --no-deps` re-run when a new subpackage is added.
 adapter since `ESIGMAInspiral` exposes only polarizations) and a full-marginal
 (adaptive-IS) end-to-end run vs direct sampling; then the G2 multifidelity work.
 
+**Task 1.4 + full-marginal outcome (2026-07-13, done).**
+`ESIGMAInspiral.mode_dict` now exposes tapered modes at 1 Mpc (pure refactor of the
+heavy math into `_hlms_window`/`_hlms_with_adjoint`; ESIGMA regression suite 4/4
+unchanged, including gradient-vs-FD). The full-marginal (adaptive-IS) end-to-end run
+converged in 58 truth evaluations with f0/span recovered within 1σ, consistent with
+the fixed-sky run — at ~12 s per ℒ(θᵢ) call the non-truth share was 0.16
+(posterior overlay: [`examples/output/gpry_full_vs_fixed_corner.png`](../examples/output/gpry_full_vs_fixed_corner.png)).
+The ESIGMA pseudo-black-box test passes with the D3 IS-reweighting exactness check
+(ESS/N ≈ 0.25 on its multi-lobed surface; catastrophic-failure line at 0.05).
+
+**Two measured findings that shape Phases 2–3:**
+1. **Intrinsic GW likelihood surfaces are brutally anisotropic and multi-lobed.** At
+   network SNR 50 (ESIGMA 0PN, (Mc, e) space): σ_e ≈ 6×10⁻⁴ with *physical* lobes
+   every ~0.005–0.01 in e (e–phasing degeneracy; converged in the φ_c quadrature,
+   so not an artifact) and ~60-e-fold lobe contrast. GPry over naive wide bounds
+   (Mc 28–32, e 0–0.2): 197 evaluations, no convergence, then an UltraNest MLFriends
+   degeneracy. At SNR ~ 12 the same structure has few-e-fold contrast and is
+   learnable (converged, truth recovered). **Consequence: cheap-model (case-1)
+   posteriors must set the surrogate prior/ref bounds — the Phase-2
+   multifidelity/ref-bounds step is not an optimization, it is a requirement for
+   loud events;** expect the required evaluation count to grow with SNR² unless the
+   e-ripple is absorbed (e.g., marginalizing mean anomaly ℓ into the fast stage the
+   way φ_c was — a candidate Phase-3 refinement).
+2. **The t_c window must be wide enough to absorb timing degeneracies:** with a
+   ±3-sample window, integer-sample t_c quantization imprints ~2-e-fold ripples on
+   the Mc marginal that the GP then chases; ±20 samples suffices in the tests
+   (production: the full ±0.1 s prior window).
+
 ### Phase 2 — Multifidelity mean (~4–6 d)
 
 | # | task | deliverable / test |
