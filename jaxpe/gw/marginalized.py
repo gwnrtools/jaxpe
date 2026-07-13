@@ -145,13 +145,17 @@ class ModesNetworkLikelihood(TDNetworkLikelihood):
             lms = tuple(sorted(self.modes_data.modes))
             mode_a = jnp.stack(
                 [
-                    td_to_fd(jnp.asarray(np.real(self.modes_data.modes[lm])), dt, window)
+                    td_to_fd(
+                        jnp.asarray(np.real(self.modes_data.modes[lm])), dt, window
+                    )
                     for lm in lms
                 ]
             )
             mode_b = jnp.stack(
                 [
-                    td_to_fd(jnp.asarray(np.imag(self.modes_data.modes[lm])), dt, window)
+                    td_to_fd(
+                        jnp.asarray(np.imag(self.modes_data.modes[lm])), dt, window
+                    )
                     for lm in lms
                 ]
             )
@@ -175,9 +179,7 @@ class ModesNetworkLikelihood(TDNetworkLikelihood):
     def _reference_polarizations_fd(self, iota, phi):
         """(h+, hx)(f) at the reference distance and coalescence time of the modes."""
         st = self._static()
-        c = jnp.stack(
-            [spin_weighted_ylm(iota, phi, l, m) for (l, m) in st["mode_lms"]]
-        )
+        c = jnp.stack([spin_weighted_ylm(iota, phi, l, m) for (l, m) in st["mode_lms"]])
         cr, ci = jnp.real(c)[:, None], jnp.imag(c)[:, None]
         hp_fd = jnp.sum(cr * st["mode_a"] - ci * st["mode_b"], axis=0)
         hc_fd = -jnp.sum(cr * st["mode_b"] + ci * st["mode_a"], axis=0)
@@ -231,14 +233,43 @@ class ModesNetworkLikelihood(TDNetworkLikelihood):
         u = lo + 0.5 * (hi - lo) * (x + 1.0)
         log_w = jnp.log(0.5 * (hi - lo) * w)
         log_f = (
-            u * z
-            - 0.5 * u**2 * sig2
-            + log_prior_norm
-            - (dist_power + 2.0) * jnp.log(u)
+            u * z - 0.5 * u**2 * sig2 + log_prior_norm - (dist_power + 2.0) * jnp.log(u)
         )
         return logsumexp(log_f + log_w)
 
-    def _phase_decomposition(self, iota, ra, dec, psi, gmst):
+    def modes_fd_arrays(self, modes_data: ModesData):
+        """Windowed per-mode FD arrays (mode_a, mode_b) for ANY ModesData on this grid.
+
+        The returned pair can be passed as ``modes_ab`` to the marginal-likelihood
+        methods, which lets **one** likelihood instance (and its jit-compiled
+        evaluator, see ``marginal_eval_fn``) serve every intrinsic point of a
+        surrogate run -- constructing a fresh instance per point would re-trace the
+        inner ``lax.map`` at ~seconds per evaluation.
+        """
+        st = self._static()
+        lms = tuple(sorted(modes_data.modes))
+        if lms != st["mode_lms"]:
+            raise ValueError(f"mode set {lms} != template {st['mode_lms']}")
+        if modes_data.d_ref_mpc != self.modes_data.d_ref_mpc or (
+            modes_data.t_ref != self.modes_data.t_ref
+        ):
+            raise ValueError("d_ref_mpc/t_ref must match the template ModesData")
+        dt, window = st["dt"], st["window"]
+        a = jnp.stack(
+            [
+                td_to_fd(jnp.asarray(np.real(modes_data.modes[lm])), dt, window)
+                for lm in lms
+            ]
+        )
+        b = jnp.stack(
+            [
+                td_to_fd(jnp.asarray(np.imag(modes_data.modes[lm])), dt, window)
+                for lm in lms
+            ]
+        )
+        return a, b
+
+    def _phase_decomposition(self, iota, ra, dec, psi, gmst, modes_ab=None):
         r"""Exact phi_c decomposition of the network filter.
 
         The detector strain is a trig polynomial in phi_c: with
@@ -262,6 +293,14 @@ class ModesNetworkLikelihood(TDNetworkLikelihood):
         n = len(self.times)
         n_f = len(self.freqs)
         lms = st["mode_lms"]
+        mode_a, mode_b = (
+            modes_ab
+            if modes_ab is not None
+            else (
+                st["mode_a"],
+                st["mode_b"],
+            )
+        )
         m_values = tuple(sorted({m for (_, m) in lms}))
         m_index = {m: i for i, m in enumerate(m_values)}
 
@@ -278,23 +317,21 @@ class ModesNetworkLikelihood(TDNetworkLikelihood):
             for i, (l, m) in enumerate(lms):
                 # strain response to mode i: cr*P + ci*Q with c = y e^{i m phi};
                 # regroup into e^{+-i m phi} coefficients
-                p_i = (f_plus * st["mode_a"][i] - f_cross * st["mode_b"][i]) * phasor
-                q_i = (-f_plus * st["mode_b"][i] - f_cross * st["mode_a"][i]) * phasor
+                p_i = (f_plus * mode_a[i] - f_cross * mode_b[i]) * phasor
+                q_i = (-f_plus * mode_b[i] - f_cross * mode_a[i]) * phasor
                 g = g.at[m_index[m]].add(0.5 * y[i] * (p_i - 1j * q_i))
                 g = g.at[m_index[-m]].add(0.5 * jnp.conj(y[i]) * (p_i + 1j * q_i))
             inv_psd = st["inv_psd_banded"][det.name]
-            z_kernel = z_kernel + 4.0 * st["df"] * st["data"][det.name] * jnp.conj(
-                g
-            ) * inv_psd
+            z_kernel = (
+                z_kernel + 4.0 * st["df"] * st["data"][det.name] * jnp.conj(g) * inv_psd
+            )
             gamma = gamma + 4.0 * st["df"] * jnp.einsum(
                 "af,bf,f->ab", g, jnp.conj(g), inv_psd
             )
 
         # one-sided complex sum over f>0 at every integer-sample shift k: n * ifft of
         # the zero-padded kernel (banding has already zeroed DC and Nyquist)
-        z_series = n * jnp.fft.ifft(
-            jnp.pad(z_kernel, ((0, 0), (0, n - n_f))), axis=-1
-        )
+        z_series = n * jnp.fft.ifft(jnp.pad(z_kernel, ((0, 0), (0, n - n_f))), axis=-1)
         return jnp.asarray(m_values), z_series, gamma
 
     def log_marginal_likelihood(
@@ -308,6 +345,7 @@ class ModesNetworkLikelihood(TDNetworkLikelihood):
         dist_max: float = 5000.0,
         dist_power: float = 2.0,
         phi_batch: int = 32,
+        modes_ab=None,
     ):
         r"""lnL marginalized over (phi_c, t_c, D_L) at fixed (ra, dec, psi, inclination).
 
@@ -350,7 +388,12 @@ class ModesNetworkLikelihood(TDNetworkLikelihood):
         log_prior_norm = log_c + (p + 1.0) * np.log(d_ref)
 
         m_values, z_series, gamma = self._phase_decomposition(
-            params["inclination"], params["ra"], params["dec"], params["psi"], gmst
+            params["inclination"],
+            params["ra"],
+            params["dec"],
+            params["psi"],
+            gmst,
+            modes_ab=modes_ab,
         )
 
         dt = st["dt"]
@@ -380,6 +423,36 @@ class ModesNetworkLikelihood(TDNetworkLikelihood):
             - st["half_dd"]
         )
 
+    def marginal_eval_fn(self, *, ext_batch: int = 8, **inner):
+        """One jit-compiled batch evaluator of the 3D marginal over extrinsic nodes.
+
+        Returns ``f(mode_a, mode_b, nodes, t_center) -> (n,) lnL`` with ``nodes``
+        (n, 4) columns (ra, dec, psi, iota). Compiled once per (instance, settings)
+        and cached, with the per-mode FD arrays as *traced arguments* -- so a
+        surrogate run evaluating thousands of intrinsic points pays tracing once
+        per node-batch shape, not once per point.
+        """
+        key = ("marginal_eval", ext_batch, tuple(sorted(inner.items())))
+        if key not in self._static():
+
+            def eval_nodes(mode_a, mode_b, nodes, t_center):
+                def per_node(node):
+                    p = {
+                        "ra": node[0],
+                        "dec": node[1],
+                        "psi": node[2],
+                        "inclination": node[3],
+                        "geocent_time": t_center,
+                    }
+                    return self.log_marginal_likelihood(
+                        p, modes_ab=(mode_a, mode_b), **inner
+                    )
+
+                return jax.lax.map(per_node, nodes, batch_size=ext_batch)
+
+            self._cache[key] = jax.jit(eval_nodes)
+        return self._cache[key]
+
     def log_marginal_likelihood_full(
         self,
         params: dict,
@@ -399,6 +472,7 @@ class ModesNetworkLikelihood(TDNetworkLikelihood):
         dist_power: float = 2.0,
         phi_batch: int = 32,
         ext_batch: int = 8,
+        modes_ab=None,
     ):
         r"""The fully extrinsic-marginalized intrinsic likelihood L(theta_int).
 
@@ -440,21 +514,20 @@ class ModesNetworkLikelihood(TDNetworkLikelihood):
             phi_batch=phi_batch,
         )
         t_center = params["geocent_time"]
+        st = self._static()
+        mode_a, mode_b = (
+            modes_ab
+            if modes_ab is not None
+            else (
+                st["mode_a"],
+                st["mode_b"],
+            )
+        )
+        eval_nodes = self.marginal_eval_fn(ext_batch=ext_batch, **inner)
 
         def evaluate(u):
             nodes = jnp.asarray(_ext_cube_to_angles(u))
-
-            def per_node(node):
-                p = {
-                    "ra": node[0],
-                    "dec": node[1],
-                    "psi": node[2],
-                    "inclination": node[3],
-                    "geocent_time": t_center,
-                }
-                return self.log_marginal_likelihood(p, **inner)
-
-            return np.asarray(jax.lax.map(per_node, nodes, batch_size=ext_batch))
+            return np.asarray(eval_nodes(mode_a, mode_b, nodes, t_center))
 
         rng = np.random.default_rng(qmc_seed)
         u_all = qmc.Sobol(d=4, scramble=True, seed=qmc_seed).random(n_pilot)
@@ -504,18 +577,9 @@ class ModesNetworkLikelihood(TDNetworkLikelihood):
         weights of a normalized measure. Shared by the QMC path and by independent
         product-quadrature cross-checks in the tests.
         """
-
-        def per_node(node):
-            p = {
-                "ra": node[0],
-                "dec": node[1],
-                "psi": node[2],
-                "inclination": node[3],
-                "geocent_time": t_center,
-            }
-            return self.log_marginal_likelihood(p, **inner)
-
-        log_l = jax.lax.map(per_node, nodes, batch_size=ext_batch)
+        st = self._static()
+        eval_nodes = self.marginal_eval_fn(ext_batch=ext_batch, **inner)
+        log_l = eval_nodes(st["mode_a"], st["mode_b"], nodes, t_center)
         return logsumexp(log_l + log_w)
 
     @classmethod
@@ -538,3 +602,82 @@ class ModesNetworkLikelihood(TDNetworkLikelihood):
             accumulate_f64=like.accumulate_f64,
             modes_data=modes_data,
         )
+
+
+class MarginalizedIntrinsicLikelihood:
+    """The GPry-facing scalar likelihood: theta_int -> extrinsic-marginalized lnL.
+
+    Composes an external mode model (``theta_int dict -> ModesData``; one expensive,
+    host-side call per point) with a shared :class:`ModesNetworkLikelihood` data
+    context whose jit-compiled marginal evaluator is reused across every intrinsic
+    point (``marginal_eval_fn``; the modes enter as traced arguments). Optionally
+    caches every generated ModesData to disk (``ModeCache``) -- the cache feeds the
+    IS-reweighting/extrinsic-recovery stage and doubles as ROM training data
+    (design note, D2/D3).
+
+    Parameters
+    ----------
+    mode_model
+        ``theta_int dict -> ModesData``, all at the template's d_ref/t_ref/grid.
+        NEVER traced; may take minutes per call for production models.
+    like
+        The data context (detectors, PSDs, injected/observed data, grids), with a
+        template ModesData fixing the mode set and conventions.
+    names
+        Intrinsic parameter names; defines the vector order of ``__call__``.
+    t_center
+        Center of the coalescence-time prior window (``geocent_time``).
+    marginalize_sky
+        True: full (phi_c, t_c, D_L, ra, dec, psi, iota) marginal via adaptive IS
+        (production). False: (phi_c, t_c, D_L) only, at the fixed extrinsic angles
+        in ``fixed_extrinsic`` -- cheaper; used by validation tests.
+    settings
+        Keyword options forwarded to the marginal-likelihood methods.
+    """
+
+    def __init__(
+        self,
+        mode_model,
+        like: ModesNetworkLikelihood,
+        names,
+        t_center: float,
+        marginalize_sky: bool = True,
+        fixed_extrinsic: dict | None = None,
+        cache=None,
+        settings: dict | None = None,
+    ):
+        self.mode_model = mode_model
+        self.like = like
+        self.names = tuple(names)
+        self.t_center = float(t_center)
+        self.marginalize_sky = marginalize_sky
+        self.cache = cache
+        self.settings = dict(settings or {})
+        if not marginalize_sky:
+            if fixed_extrinsic is None:
+                raise ValueError("fixed_extrinsic required when marginalize_sky=False")
+            self._node = np.asarray(
+                [[fixed_extrinsic[k] for k in ("ra", "dec", "psi", "inclination")]]
+            )
+
+    def _modes_ab(self, theta: dict):
+        md = self.cache.load(theta) if self.cache is not None else None
+        if md is None:
+            md = self.mode_model(theta)
+            if self.cache is not None:
+                self.cache.save(theta, md)
+        return self.like.modes_fd_arrays(md)
+
+    def __call__(self, x) -> float:
+        theta = dict(zip(self.names, np.asarray(x, dtype=float).ravel()))
+        a, b = self._modes_ab(theta)
+        if self.marginalize_sky:
+            return float(
+                self.like.log_marginal_likelihood_full(
+                    {"geocent_time": self.t_center}, modes_ab=(a, b), **self.settings
+                )
+            )
+        ext_batch = self.settings.get("ext_batch", 1)
+        inner = {k: v for k, v in self.settings.items() if k != "ext_batch"}
+        eval_nodes = self.like.marginal_eval_fn(ext_batch=ext_batch, **inner)
+        return float(eval_nodes(a, b, jnp.asarray(self._node), self.t_center)[0])
