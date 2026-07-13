@@ -417,6 +417,66 @@ The ESIGMA pseudo-black-box test passes with the D3 IS-reweighting exactness che
    the Mc marginal that the GP then chases; ±20 samples suffices in the tests
    (production: the full ±0.1 s prior window).
 
+**Reliability of the inner extrinsic marginal — the diagnostics/gate/recycling
+package (2026-07-14).** The full-marginal `L(θ_int)` is itself an adaptive
+importance-sampling estimate whose quality (effective sample size) varies with θ.
+GPry's convergence criterion treats every value it is given as exact — it was built
+for deterministic likelihoods — so a run can converge on *systematically biased*
+training values with no visible symptom. This is a genuine silent-failure channel; we
+closed it in three layers, all in `MarginalizedIntrinsicLikelihood` /
+`BalanceHeuristicAccumulator` / `bin/run_gpry_pe.py`:
+
+- **Record** every call's importance-sampling diagnostics (`importance_sampling_history`
+  in memory + incremental `importance_sampling_history.jsonl` on disk, so an upstream
+  crash — see UltraNest note below — cannot destroy the evidence).
+- **Self-heal**: below an `effective_sample_size_floor`, add escalating extra rounds
+  (each 2× the previous, up to `max_extra_importance_sampling_rounds`) until the floor
+  is met — replacing the naive discard-and-restart retry.
+- **Recycle** (`BalanceHeuristicAccumulator`): every batch, pilot included, contributes
+  to the estimate and the effective sample size via the balance heuristic
+  `w_i = e^{lnL_i}/q̄(u_i)`, `q̄ = Σ (n_j/N) q_j` (Veach–Guibas; adaptive-MIS caveat —
+  consistent, not strictly unbiased, bias ≪ discarded-batch variance). The old
+  worst-case cost 1×+2×+4× (only the final 4× used) becomes ≤5.75× *all used*, and the
+  quality target is typically reached a round earlier. Validated against a closed-form
+  4-cube integral in `tests/test_marginalized.py`.
+- **Gate**: after the run, `importance_sampling_summary(..., peak_efolds=)` counts
+  unhealthy calls *within a few e-folds of the peak* (measured: tail low-ESS calls are
+  harmless, peak ones perturb the fit); the driver fails the run on any such call —
+  banner, `reliable: false`, `UNRELIABLE` sentinel, exit code 2 — unless `--strict`
+  raises `LowEffectiveSampleSizeError` mid-run instead (pairs with GPry checkpointing).
+
+**Measured on the 2-D chirp demo (noise seed 1234; the caveat this resolves).** The
+inner-marginal quality directly controls the posterior, so bad estimates are not
+cosmetic:
+
+| noisy run | f0 | span | ESS median | calls < floor | gate |
+|---|---|---|---|---|---|
+| zero-noise reference | 37.00 ± **1.12** | 55.27 ± **2.65** | — | — | — |
+| lean, unhealed | 36.60 ± **0.60** | 55.47 ± **0.89** | 77 | **45/70** | — |
+| 4× budget (brute) | 36.62 ± 0.84 | 55.61 ± 1.81 | 252 | 12/88 | — |
+| lean + targeted healing | 36.38 ± 0.87 | 55.72 ± 1.17 | 175 | **1/120** | **failed → exit 2** |
+
+The unhealed posterior is ~2× too *narrow* — an artifact of noisy inner estimates, not
+physics: both cures relax the widths back toward the zero-noise reference. Targeted
+healing reached 1 unhealthy call from a lean base budget (retrying only the ~75 calls
+that needed it) versus 12 for uniform 4× budget; effective sample size is strongly
+θ-dependent, so uniform budget increases waste effort. The gate then correctly refused
+to certify the one near-peak call it could not heal in two rounds. (Caveat: the healed
+run used GPry seed 12 vs seed 11 elsewhere, so the *width* numbers are not
+seed-controlled; the 45→1 inner-health result is.)
+
+**UltraNest fragility (robustness item).** GPry's NORA acquisition explores the
+surrogate with UltraNest, which is unseeded ("Seeded runs are not supported") and
+intermittently raises `numpy.linalg.LinAlgError: Distances are not positive`
+(`ultranest.mlfriends`) when the surrogate surface is momentarily degenerate — observed
+both on the ESIGMA wide-bounds surface and once mid-run on the noisy demo. It is
+stochastic (the identical config succeeded on other seeds). Mitigations: GPry
+checkpoint/resume for long production runs; `BatchOptimizer` as an acquisition fallback
+that avoids nested sampling; and the on-disk diagnostics so a crash costs no evidence.
+Open interaction to fix in Phase 2: GPry checkpoint-resume reuses cached evaluations
+without re-calling our wrapper, so `importance_sampling_history` does not survive a
+resume — the `.jsonl` persistence is the first half of the fix.
+
 ### Phase 2 — Multifidelity mean (~4–6 d)
 
 | # | task | deliverable / test |
