@@ -206,133 +206,170 @@ class ESIGMAInspiral(TimeDomainModel):
 
     # ------------------------------------------------------------------ waveform
 
+    def _hlms_window(self, theta, times):
+        """Complex modes (strain at 1 Mpc) and taper window on ``times``.
+
+        ``theta = (chirp_mass, mass_ratio, eccentricity, mean_anomaly, spin1z,
+        spin2z, geocent_time)``. Returns ``(hlms, w)`` with ``hlms`` of shape
+        (n_modes, n) ordered as ``self.modes`` and ``w`` the (n,) taper window.
+        """
+        mc, q, e0, l0, s1z, s2z, t_c = theta
+        eta = q / (1.0 + q) ** 2
+        m_total = mc / eta**0.6
+        m1 = m_total / (1.0 + q)
+        m2 = m_total * q / (1.0 + q)
+
+        m_sec = m_total * MTSUN_SI
+        x_init = (m_sec * jnp.pi * self.f_lower) ** (2.0 / 3.0)
+
+        ts, ys = self._integrate(x_init, e0, l0, eta, m1, m2, s1z, s2z)
+        x_a, e_a, l_a, phi_a = ys[:, 0], ys[:, 1], ys[:, 2], ys[:, 3]
+        t_isco = self._isco_time(ts, x_a, self.x_final, ts[-1])
+
+        t_geo = (times - t_c) / m_sec + t_isco
+        valid = (t_geo >= 0.0) & (t_geo <= t_isco)
+        tq = jnp.clip(t_geo, 0.0, t_isco)
+
+        x_t = jnp.interp(tq, ts, x_a)
+        e_t = jnp.interp(tq, ts, e_a)
+        l_t = jnp.interp(tq, ts, l_a)
+        phi_t = jnp.interp(tq, ts, phi_a)
+
+        u_t = jax.vmap(self._kepler, in_axes=(0, 0))(l_t, e_t)
+        r_t = jax.vmap(
+            lambda u, x, e: self._separation(u, eta, x, e, m1, m2, s1z, s2z)
+        )(u_t, x_t, e_t)
+        phidot_t = jax.vmap(
+            lambda u, x, e: self._dphi_dt(
+                u, eta, m1, m2, s1z, s2z, x, e, self.mode_pn_order
+            )
+        )(u_t, x_t, e_t)
+        dt_geo = (times[1] - times[0]) / m_sec
+        rdot_t = jnp.gradient(r_t) / dt_geo
+
+        hlm_batch = jax.vmap(
+            self._hlm,
+            in_axes=(
+                None,
+                None,
+                None,
+                None,
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+                0,
+            ),
+        )
+
+        hlms = []
+        for l, m in self.modes:
+            hlm = (
+                hlm_batch(
+                    l,
+                    m,
+                    m_total,
+                    eta,
+                    r_t * m_total,
+                    rdot_t,
+                    phi_t,
+                    phidot_t / m_total,
+                    self._mpc_m,
+                    self.mode_pn_order,
+                    s1z,
+                    s2z,
+                    x_t,
+                )
+                * self._mrsun
+            )
+            hlms.append(hlm)
+        hlms = jnp.stack(hlms)
+
+        on_geo = jnp.maximum(self.taper_on_seconds / m_sec, 1e-12)
+        off_geo = jnp.maximum(self.taper_off_seconds / m_sec, 1e-12)
+        w_on = 0.5 - 0.5 * jnp.cos(jnp.pi * jnp.clip(t_geo / on_geo, 0.0, 1.0))
+        w_off = 0.5 - 0.5 * jnp.cos(
+            jnp.pi * jnp.clip((t_isco - t_geo) / off_geo, 0.0, 1.0)
+        )
+        w = jnp.where(valid, w_on * w_off, 0.0)
+        return hlms, w
+
+    def _hlms_with_adjoint(self, theta, times):
+        """``_hlms_window`` under the configured adjoint strategy (see __init__).
+
+        ``forward_sensitivity`` (default) computes the parameter Jacobian with
+        forward-mode inside a custom_vjp, so reverse-mode never differentiates
+        through the ODE solver (docs/under_construction.md sections 14-16).
+        """
+        if self.adjoint_mode == "recursive_checkpoint":
+            return self._hlms_window(theta, times)
+        if self.adjoint_mode == "forward_sensitivity":
+            heavy_math = jax.custom_vjp(lambda th, tms: self._hlms_window(th, tms))
+
+            def heavy_fwd(th, tms):
+                out = self._hlms_window(th, tms)
+                jac = jax.jacfwd(lambda t: self._hlms_window(t, tms))(th)
+                return out, jac
+
+            def heavy_bwd(jac, g):
+                j_hlms, j_w = jac
+                g_hlms, g_w = g
+                term1 = jnp.real(
+                    jnp.tensordot(g_hlms, j_hlms, axes=([0, 1], [0, 1]))
+                )
+                term2 = jnp.tensordot(g_w, j_w, axes=([0], [0]))
+                return (term1 + term2, None)
+
+            heavy_math.defvjp(heavy_fwd, heavy_bwd)
+            return heavy_math(theta, times)
+        raise ValueError(f"Unknown adjoint_mode: {self.adjoint_mode}")
+
+    @staticmethod
+    def _theta_from_params(params: dict):
+        return jnp.stack(
+            [
+                params["chirp_mass"],
+                params["mass_ratio"],
+                params.get("eccentricity", jnp.zeros(())),
+                params.get("mean_anomaly", jnp.zeros(())),
+                params.get("spin1z", jnp.zeros(())),
+                params.get("spin2z", jnp.zeros(())),
+                params["geocent_time"],
+            ]
+        )
+
+    def mode_dict(self, params: dict, times: jax.Array) -> dict:
+        """Tapered spherical-harmonic modes ``{(l, +-m): h_lm(t)}``, strain at 1 Mpc.
+
+        The mode-level interface consumed by the marginalized-likelihood pipeline
+        (``jaxpe.gw.external_models.ModesData`` with ``d_ref_mpc=1.0`` and ``t_ref =
+        params['geocent_time']``). Negative-m modes follow the non-precessing
+        reflection ``h_{l,-m} = (-1)^l conj(h_lm)`` -- exactly the sum ``__call__``
+        assembles. The taper window is folded into the modes (it belongs to the
+        waveform model, not the likelihood).
+        """
+        hlms, w = self._hlms_with_adjoint(self._theta_from_params(params), times)
+        out = {}
+        for i, (l, m) in enumerate(self.modes):
+            h = w * hlms[i]
+            out[(l, m)] = h
+            out[(l, -m)] = (-1.0) ** l * jnp.conj(h)
+        return out
+
     def __call__(self, params: dict, times: jax.Array):
         @jax.remat
         def _compute(params, times):
-            def _heavy_math(theta, times):
-                mc, q, e0, l0, s1z, s2z, t_c = theta
-                eta = q / (1.0 + q) ** 2
-                m_total = mc / eta**0.6
-                m1 = m_total / (1.0 + q)
-                m2 = m_total * q / (1.0 + q)
-
-                m_sec = m_total * MTSUN_SI
-                x_init = (m_sec * jnp.pi * self.f_lower) ** (2.0 / 3.0)
-
-                ts, ys = self._integrate(x_init, e0, l0, eta, m1, m2, s1z, s2z)
-                x_a, e_a, l_a, phi_a = ys[:, 0], ys[:, 1], ys[:, 2], ys[:, 3]
-                t_isco = self._isco_time(ts, x_a, self.x_final, ts[-1])
-
-                t_geo = (times - t_c) / m_sec + t_isco
-                valid = (t_geo >= 0.0) & (t_geo <= t_isco)
-                tq = jnp.clip(t_geo, 0.0, t_isco)
-
-                x_t = jnp.interp(tq, ts, x_a)
-                e_t = jnp.interp(tq, ts, e_a)
-                l_t = jnp.interp(tq, ts, l_a)
-                phi_t = jnp.interp(tq, ts, phi_a)
-
-                u_t = jax.vmap(self._kepler, in_axes=(0, 0))(l_t, e_t)
-                r_t = jax.vmap(
-                    lambda u, x, e: self._separation(u, eta, x, e, m1, m2, s1z, s2z)
-                )(u_t, x_t, e_t)
-                phidot_t = jax.vmap(
-                    lambda u, x, e: self._dphi_dt(
-                        u, eta, m1, m2, s1z, s2z, x, e, self.mode_pn_order
-                    )
-                )(u_t, x_t, e_t)
-                dt_geo = (times[1] - times[0]) / m_sec
-                rdot_t = jnp.gradient(r_t) / dt_geo
-
-                hlm_batch = jax.vmap(
-                    self._hlm,
-                    in_axes=(
-                        None,
-                        None,
-                        None,
-                        None,
-                        0,
-                        0,
-                        0,
-                        0,
-                        None,
-                        None,
-                        None,
-                        None,
-                        0,
-                    ),
-                )
-
-                hlms = []
-                for l, m in self.modes:
-                    hlm = (
-                        hlm_batch(
-                            l,
-                            m,
-                            m_total,
-                            eta,
-                            r_t * m_total,
-                            rdot_t,
-                            phi_t,
-                            phidot_t / m_total,
-                            self._mpc_m,
-                            self.mode_pn_order,
-                            s1z,
-                            s2z,
-                            x_t,
-                        )
-                        * self._mrsun
-                    )
-                    hlms.append(hlm)
-                hlms = jnp.stack(hlms)
-
-                on_geo = jnp.maximum(self.taper_on_seconds / m_sec, 1e-12)
-                off_geo = jnp.maximum(self.taper_off_seconds / m_sec, 1e-12)
-                w_on = 0.5 - 0.5 * jnp.cos(jnp.pi * jnp.clip(t_geo / on_geo, 0.0, 1.0))
-                w_off = 0.5 - 0.5 * jnp.cos(
-                    jnp.pi * jnp.clip((t_isco - t_geo) / off_geo, 0.0, 1.0)
-                )
-                w = jnp.where(valid, w_on * w_off, 0.0)
-                return hlms, w
-
-            mc = params["chirp_mass"]
-            q = params["mass_ratio"]
-            s1z = params.get("spin1z", jnp.zeros(()))
-            s2z = params.get("spin2z", jnp.zeros(()))
-            e0 = params.get("eccentricity", jnp.zeros(()))
-            l0 = params.get("mean_anomaly", jnp.zeros(()))
-            iota = params["inclination"]
-            beta = params["phase"]
-            t_c = params["geocent_time"]
-            r_si = params["luminosity_distance"] * self._mpc_m
-
-            theta = jnp.stack([mc, q, e0, l0, s1z, s2z, t_c])
-
-            if self.adjoint_mode == "recursive_checkpoint":
-                hlms, w = _heavy_math(theta, times)
-            elif self.adjoint_mode == "forward_sensitivity":
-                heavy_math = jax.custom_vjp(lambda th, tms: _heavy_math(th, tms))
-
-                def heavy_fwd(th, tms):
-                    out = _heavy_math(th, tms)
-                    jac = jax.jacfwd(lambda t: _heavy_math(t, tms))(th)
-                    return out, jac
-
-                def heavy_bwd(jac, g):
-                    j_hlms, j_w = jac
-                    g_hlms, g_w = g
-                    term1 = jnp.real(
-                        jnp.tensordot(g_hlms, j_hlms, axes=([0, 1], [0, 1]))
-                    )
-                    term2 = jnp.tensordot(g_w, j_w, axes=([0], [0]))
-                    return (term1 + term2, None)
-
-                heavy_math.defvjp(heavy_fwd, heavy_bwd)
-                hlms, w = heavy_math(theta, times)
-            else:
-                raise ValueError(f"Unknown adjoint_mode: {self.adjoint_mode}")
+            hlms, w = self._hlms_with_adjoint(self._theta_from_params(params), times)
 
             from ..harmonics import spin_weighted_ylm
+
+            iota = params["inclination"]
+            beta = params["phase"]
+            r_si = params["luminosity_distance"] * self._mpc_m
 
             h = jnp.zeros(times.shape, dtype=jnp.complex128)
             for i, (l, m) in enumerate(self.modes):
