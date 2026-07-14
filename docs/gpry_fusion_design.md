@@ -477,6 +477,49 @@ Open interaction to fix in Phase 2: GPry checkpoint-resume reuses cached evaluat
 without re-calling our wrapper, so `importance_sampling_history` does not survive a
 resume — the `.jsonl` persistence is the first half of the fix.
 
+**End-to-end cross-validation of the two PE routes (2026-07-15).** Direct gradient
+sampling (Global-Local NF + MALA over the full parameter vector; "Route A") and the
+GPry surrogate over the extrinsic-marginalized intrinsic likelihood ("Route B") were
+run to convergence on the *same* zero-noise ESIGMA injection (0PN, `n_ode_grid=1024`,
+network SNR ≈ 11) and **agree**: the (chirp_mass, eccentricity) marginals match to
+Hellinger distance ≈ 0.10–0.14 with mean offsets < 0.15 σ, and both recover truth. The
+result is backend-reproducible (gradient route on CPU vs GPU: Hellinger ≈ 0.10). Route
+B reaches this in ~24–58 *true* waveform evaluations versus ~10⁴ gradient evaluations
+for Route A — the ratio that motivates the whole surrogate approach for expensive
+case-(2) models. Four findings from getting both routes to converge:
+
+1. **Loud events stall both routes cold over broad priors.** A network-SNR-80 injection
+   (a ~1000:1 needle) failed to be found by either route with wide intrinsic priors —
+   the same anisotropy/multi-lobe pathology as the SNR-50 finding above, now confirmed
+   to hit *gradient* sampling too (chains never locate the mode), not just GPry.
+   Cheap-model-derived bounds (the Phase-2 ref-bounds step) are required for both routes,
+   not a GPry-specific crutch.
+2. **The T2000 GPU was 2.6× *slower* than CPU for full ESIGMA gradient PE** (6924 s GPU
+   vs 2632 s CPU, matched config). This is **not** a data-movement artifact: the MCMC is
+   fully device-resident — `run_chains` compiles the whole step loop into one
+   `jit(vmap(chains) × lax.scan(steps))` block ([`jaxpe/kernels/base.py:126`](../jaxpe/kernels/base.py#L126)),
+   and the global block likewise ([`jaxpe/sampler/global_local.py:227`](../jaxpe/sampler/global_local.py#L227));
+   the only host↔device traffic is a few per-*loop* scalar `float(mean(acc))` syncs and
+   checkpoints, negligible in bandwidth. The slowdown is architectural fit: the per-step
+   cost is dominated by the ESIGMA diffrax ODE solve + forward-sensitivity gradient,
+   which is (i) a *sequential* dependency chain of tiny kernels (latency-bound, the
+   opposite of what a GPU hides), (ii) parallelized only across the few×10 chains of the
+   `vmap` (far too narrow to fill the device), and (iii) mandatory **float64**, which a
+   consumer Turing T2000 runs at ~1/32 of fp32. Sequential × tiny-batch × throttled-fp64
+   means the GPU pays all three weaknesses and collects none of its throughput strength;
+   the CPU wins on serial fp64 latency. (Contrast: the wide vmapped `best_of_prior_init`
+   batch eval, [`jaxpe/sampler/global_local.py:200`](../jaxpe/sampler/global_local.py#L200),
+   *is* GPU-favorable — width, not depth, is the lever.)
+3. **`n_ode_grid=512` biases the log-likelihood by ≈ −1.2 (~1.5 σ) at the peak;**
+   `n_ode_grid=1024` converged. See §"ODE grid" analysis: the effective resolution is
+   `n_ode_grid × t_isco/t_max ≈ 0.66` (the 1.5× time-domain margin plus the frozen
+   post-ISCO plateau are dead weight), and uniform-in-time sampling under-resolves the
+   late chirp — a candidate for non-uniform ODE nodes / cubic-Hermite state
+   reconstruction (differentiability-preserving) as a future efficiency win.
+4. **Route B needs orders of magnitude fewer waveform evaluations** (finding restated
+   from the eval counts above) — the correct axis on which to judge the surrogate for
+   minutes-per-call models, where wall-clock is dominated by waveform generation.
+
 ### Phase 2 — Multifidelity mean (~4–6 d)
 
 | # | task | deliverable / test |
