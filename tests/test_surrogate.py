@@ -385,7 +385,9 @@ def test_g1_esigma_blackbox_with_is_reweighting(esigma_blackbox):
     # the surrogate carries O(1)-e-fold residuals that reweighting corrects (that is
     # the D3 mechanism's job). A catastrophically biased GP gives ESS/N < ~0.05;
     # the acceptance line sits between the two regimes.
-    assert effective_sample_size > 0.15 * len(w), f"IS ESS {effective_sample_size:.0f}/{len(w)}: surrogate biased in bulk"
+    assert effective_sample_size > 0.15 * len(
+        w
+    ), f"IS ESS {effective_sample_size:.0f}/{len(w)}: surrogate biased in bulk"
 
     mean_rw = np.average(x_sub, weights=w, axis=0)
     mean_un = x_sub.mean(axis=0)
@@ -412,7 +414,14 @@ def test_full_marginal_records_importance_sampling_history(pseudo_blackbox):
     assert np.isfinite(v1) and np.isfinite(v2)
     assert len(lik.importance_sampling_history) == 2
     for h in lik.importance_sampling_history:
-        assert set(h) >= {"theta", "logz", "effective_sample_size", "n_eval", "lnl_max", "logz_rounds"}
+        assert set(h) >= {
+            "theta",
+            "logz",
+            "effective_sample_size",
+            "n_eval",
+            "lnl_max",
+            "logz_rounds",
+        }
         assert np.isfinite(h["logz"]) and h["effective_sample_size"] > 1.0
         assert set(h["theta"]) == set(BOUNDS)
     s = lik.importance_sampling_summary(effective_sample_size_floor=np.inf)

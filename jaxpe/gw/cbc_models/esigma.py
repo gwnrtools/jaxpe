@@ -318,9 +318,7 @@ class ESIGMAInspiral(TimeDomainModel):
             def heavy_bwd(jac, g):
                 j_hlms, j_w = jac
                 g_hlms, g_w = g
-                term1 = jnp.real(
-                    jnp.tensordot(g_hlms, j_hlms, axes=([0, 1], [0, 1]))
-                )
+                term1 = jnp.real(jnp.tensordot(g_hlms, j_hlms, axes=([0, 1], [0, 1])))
                 term2 = jnp.tensordot(g_w, j_w, axes=([0], [0]))
                 return (term1 + term2, None)
 

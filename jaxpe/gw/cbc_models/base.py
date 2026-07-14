@@ -1,11 +1,12 @@
 import abc
 import jax
 
+
 class WaveformModel(abc.ABC):
     """
     Abstract base class for all gravitational-wave CBC models.
     """
-    
+
     @abc.abstractmethod
     def __call__(self, params: dict, grid: jax.Array) -> tuple[jax.Array, jax.Array]:
         """
@@ -27,14 +28,18 @@ class WaveformModel(abc.ABC):
         """
         pass
 
+
 class FrequencyDomainModel(WaveformModel):
     """
     Base class for frequency-domain waveform models.
     """
+
     is_fd = True
+
 
 class TimeDomainModel(WaveformModel):
     """
     Base class for time-domain waveform models.
     """
+
     is_fd = False

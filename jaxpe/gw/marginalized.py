@@ -825,7 +825,11 @@ class MarginalizedIntrinsicLikelihood:
         self.cache = cache
         self.settings = dict(settings or {})
         # kwargs owned by __call__ / the healing mechanism, not user settings
-        for owned in ("return_diagnostics", "effective_sample_size_target", "max_extra_rounds"):
+        for owned in (
+            "return_diagnostics",
+            "effective_sample_size_target",
+            "max_extra_rounds",
+        ):
             self.settings.pop(owned, None)
         # self-healing: if a call's inner-marginal effective sample size is below
         # the floor after the base rounds, up to max_extra_importance_sampling_rounds
@@ -922,7 +926,11 @@ class MarginalizedIntrinsicLikelihood:
             return dict(n_calls=0)
         history = self.importance_sampling_history
         sizes = np.array([h["effective_sample_size"] for h in history])
-        low = [h for h in history if h["effective_sample_size"] < effective_sample_size_floor]
+        low = [
+            h
+            for h in history
+            if h["effective_sample_size"] < effective_sample_size_floor
+        ]
         out = dict(
             n_calls=len(sizes),
             effective_sample_size_min=float(sizes.min()),

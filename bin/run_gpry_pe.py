@@ -30,7 +30,9 @@ jax.config.update("jax_enable_x64", True)
 
 
 def build_demo_problem(
-    full_marginal: bool, noise_seed: int | None = None, importance_sampling_budget: int = 1024
+    full_marginal: bool,
+    noise_seed: int | None = None,
+    importance_sampling_budget: int = 1024,
 ):
     """2D synthetic-chirp pseudo-black-box (same construction as tests/test_surrogate.py)."""
     import jax.numpy as jnp
@@ -100,7 +102,9 @@ def build_demo_problem(
     like_modes = ModesNetworkLikelihood.from_likelihood(like_td, md_true)
     settings = dict(n_phi=128, n_dist=64, tc_half_samples=10)
     if full_marginal:
-        settings.update(n_pilot=importance_sampling_budget, n_final=importance_sampling_budget)
+        settings.update(
+            n_pilot=importance_sampling_budget, n_final=importance_sampling_budget
+        )
     lik = MarginalizedIntrinsicLikelihood(
         mode_model,
         like_modes,
@@ -159,31 +163,42 @@ def main():
     ap.add_argument("--output", default="output/gpry_pe", help="output directory")
     ap.add_argument("--seed", type=int, default=11, help="GPry acquisition seed")
     ap.add_argument(
-        "--noise-seed", type=int, default=None,
+        "--noise-seed",
+        type=int,
+        default=None,
         help="Gaussian-noise realization seed for the injection (default: zero noise)",
     )
     ap.add_argument(
-        "--importance-sampling-budget", type=int, default=1024,
+        "--importance-sampling-budget",
+        type=int,
+        default=1024,
         help="importance-sampling nodes per stage (n_pilot = n_final) of each "
         "inner extrinsic marginal",
     )
     ap.add_argument(
-        "--effective-sample-size-floor", type=float, default=100.0,
+        "--effective-sample-size-floor",
+        type=float,
+        default=100.0,
         help="quality floor for each inner extrinsic marginal; calls below it "
         "retry with doubled budget and are gated after the run (0 disables both)",
     )
     ap.add_argument(
-        "--importance-sampling-extra-rounds", type=int, default=2,
+        "--importance-sampling-extra-rounds",
+        type=int,
+        default=2,
         help="escalating (size-doubling, batch-recycling) extra rounds per call "
         "while below the floor, before accepting (or raising)",
     )
     ap.add_argument(
-        "--gate-efolds", type=float, default=5.0,
+        "--gate-efolds",
+        type=float,
+        default=5.0,
         help="reliability gate scope: unhealthy calls within this many e-folds "
         "of the best log-marginal fail the run",
     )
     ap.add_argument(
-        "--strict", action="store_true",
+        "--strict",
+        action="store_true",
         help="halt at the first unhealable call (LowEffectiveSampleSizeError) "
         "instead of gating at the end; pair with GPry checkpointing",
     )
@@ -208,9 +223,7 @@ def main():
         lik.effective_sample_size_floor = args.effective_sample_size_floor
         lik.max_extra_importance_sampling_rounds = args.importance_sampling_extra_rounds
         lik.on_low_effective_sample_size = "raise" if args.strict else "accept"
-    timed = TimedLoglike(
-        lik, history_path=out / "importance_sampling_history.jsonl"
-    )
+    timed = TimedLoglike(lik, history_path=out / "importance_sampling_history.jsonl")
     engine = GPryEngine(
         timed, bounds=bounds, options={"seed": args.seed}, verbose=args.verbose
     )
@@ -325,15 +338,15 @@ def main():
         near = importance_sampling_summary["thetas_below_floor_near_peak"]
         print("\n" + "=" * 72)
         print("RELIABILITY GATE FAILED")
-        print(
-            f"  {len(near)} evaluation(s) within {args.gate_efolds} e-folds of the"
-        )
+        print(f"  {len(near)} evaluation(s) within {args.gate_efolds} e-folds of the")
         print("  peak remain below the effective-sample-size floor after retries;")
         print("  the surrogate was trained on noisy/biased values there:")
         for t in near[:8]:
             print(f"    {t}")
         print("  The posterior has been written but must not be trusted;")
-        print("  raise --importance-sampling-budget or the extra-round count and re-run.")
+        print(
+            "  raise --importance-sampling-budget or the extra-round count and re-run."
+        )
         print("=" * 72)
         (out / "UNRELIABLE").write_text(
             "reliability gate failed; see diagnostics.json\n"

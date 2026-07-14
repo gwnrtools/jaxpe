@@ -454,7 +454,10 @@ def test_full_marginal_adaptive_importance_sampling(likelihood_pair):
     )
     assert da["effective_sample_size"] > 100.0, f"run A unconverged: {da}"
     assert db["effective_sample_size"] > 100.0, f"run B unconverged: {db}"
-    tol = max(0.15, 5.0 / np.sqrt(min(da["effective_sample_size"], db["effective_sample_size"])))
+    tol = max(
+        0.15,
+        5.0 / np.sqrt(min(da["effective_sample_size"], db["effective_sample_size"])),
+    )
     assert (
         abs(la - lb) < tol
     ), f"{la} (ESS {da['effective_sample_size']:.0f}) vs {lb} (ESS {db['effective_sample_size']:.0f})"
