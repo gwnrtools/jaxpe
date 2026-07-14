@@ -1,4 +1,4 @@
-"""Frequency-Domain Network Likelihood.
+r"""Frequency-Domain Network Likelihood.
 
 This module computes the likelihood of observing the gravitational-wave strain data
 given a set of proposed waveform parameters.

@@ -1,4 +1,4 @@
-"""Simplified Riemannian-Manifold MALA (mMALA).
+r"""Simplified Riemannian-Manifold MALA (mMALA).
 
 Standard MALA and HMC use a constant mass matrix (or preconditioner) across the entire
 parameter space. If the posterior has varying curvature (e.g., narrow in one region,

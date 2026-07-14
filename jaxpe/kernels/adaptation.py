@@ -1,4 +1,4 @@
-"""Between-loop Adaptation of Kernel Hyperparameters.
+r"""Between-loop Adaptation of Kernel Hyperparameters.
 
 MCMC kernels require careful tuning of hyperparameters (e.g., step size, mass matrix).
 If the step size is too large, most proposals are rejected. If too small, the chain
@@ -38,7 +38,7 @@ def adapted_step_size(
     lo: float = 1e-8,
     hi: float = 1e3,
 ):
-    """
+    r"""
     Robbins-Monro update of the step size toward a target acceptance rate.
 
     Parameters

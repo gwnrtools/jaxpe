@@ -1,4 +1,4 @@
-"""Power Spectral Density (PSD) Estimation and Models.
+r"""Power Spectral Density (PSD) Estimation and Models.
 
 The PSD $S_n(f)$ quantifies how the power of a random noise process is distributed across frequency.
 In Gravitational Wave data analysis, we strictly use the **one-sided** PSD, defined for positive

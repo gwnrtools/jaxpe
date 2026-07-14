@@ -1,4 +1,4 @@
-"""Data handling: simulated noise, injections, and (optional) GWOSC strain.
+r"""Data handling: simulated noise, injections, and (optional) GWOSC strain.
 
 Gravitational Wave Data Analysis fundamentally relies on comparing theoretical waveforms
 to observed strain data, which contains both a potential signal and instrumental noise.
@@ -30,7 +30,7 @@ from .waveform import WaveformModel
 
 
 def simulate_noise_fd(rng: np.random.Generator, psd, duration: float):
-    """
+    r"""
     Simulate stationary Gaussian colored noise in the frequency domain.
 
     Motivation & Math

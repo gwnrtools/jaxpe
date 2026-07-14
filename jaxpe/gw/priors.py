@@ -1,4 +1,4 @@
-"""Standard Priors for Compact-Binary Parameter Estimation.
+r"""Standard Priors for Compact-Binary Parameter Estimation.
 
 In Bayesian inference, the prior $P(\theta)$ encodes our knowledge or beliefs about
 the parameters before seeing the data. The choice of prior can significantly affect

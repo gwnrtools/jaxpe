@@ -1,4 +1,4 @@
-"""Kernel protocol and the vmapped multi-chain runner.
+r"""Kernel protocol and the vmapped multi-chain runner.
 
 This module defines the foundational abstractions for Markov Chain Monte Carlo (MCMC)
 sampling in `jaxpe`. It establishes what a 'Kernel' is, how the state of a Markov Chain
