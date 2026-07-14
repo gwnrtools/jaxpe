@@ -23,12 +23,12 @@ from jaxpe.kernels import (
 )
 
 N_DIM = 3
-MEAN = jnp.array([1.0, -2.0, 0.5])
+MEAN = np.array([1.0, -2.0, 0.5])
 # Correlated covariance with strongly unequal scales (stds ~ 0.5, 1.0, 3.0)
-L = jnp.array([[0.5, 0.0, 0.0], [0.6, 0.8, 0.0], [-0.3, 0.4, 3.0]])
+L = np.array([[0.5, 0.0, 0.0], [0.6, 0.8, 0.0], [-0.3, 0.4, 3.0]])
 COV = L @ L.T
-COV_INV = jnp.linalg.inv(COV)
-STD = jnp.sqrt(jnp.diag(COV))
+COV_INV = np.linalg.inv(COV)
+STD = np.sqrt(np.diag(COV))
 
 
 def logp(x):
