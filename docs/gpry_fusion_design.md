@@ -12,7 +12,57 @@ nav_order: 101
 
 ---
 
+## How to read this note
+
+*This note is written to be read by section: each section restates the terms it
+needs, so you can jump straight to the one you care about without having read the
+others. Some repetition between sections is deliberate. The shared vocabulary —
+defined once here and reintroduced where it is used — is:*
+
+- **PE (parameter estimation)** — Bayesian inference of a compact binary's
+  parameters from gravitational-wave detector strain data.
+- **jaxpe** — this library: JAX-based, GPU-capable, gradient-based GW PE.
+- **GPry** — an external, published active-learning package (local checkout at
+  `~/src/GPry`) that builds a **Gaussian-process (GP) surrogate** of a likelihood
+  and uses an acquisition rule (its "NORA" strategy) to decide where to evaluate
+  the likelihood next. Because it spends evaluations only where they matter, it
+  converges in far fewer likelihood calls than MCMC or nested sampling. We
+  **interface** with GPry as a dependency; we do not reimplement it (decision D4).
+- **Case (1) vs case (2) waveform models** — **(1)** models implemented in JAX
+  (`IMRPhenomD`, `ESIGMA`, `NRSur7dq4`): cheap (~milliseconds), differentiable,
+  GPU-batchable, and sampled directly. **(2)** external non-JAX models
+  (**TEOBResumS**, **SEOBNRv6EHM**): **0.5–10 minutes per call**, non-differentiable
+  black boxes, but carrying leading-edge physics we want. **Case (2) is the entire
+  reason this note exists.**
+- **Intrinsic (θ_int) vs extrinsic (θ_ext) parameters** — **intrinsic**: what the
+  expensive waveform actually depends on (chirp mass 𝓜, mass ratio q, spins χ,
+  eccentricity e, mean anomaly ℓ). **extrinsic**: the comparatively cheap geometry
+  (luminosity distance D_L, sky position α/δ, inclination ι, polarization ψ,
+  coalescence phase φ_c and time t_c) — 7 parameters jaxpe can handle analytically.
+- **Marginalized intrinsic likelihood 𝓛(θ_int)** — the likelihood with *all seven*
+  extrinsic parameters integrated out, leaving a scalar function of θ_int only.
+  This is the function the GP surrogate learns; computing it cheaply and correctly
+  (§3) is the technical core of the whole design.
+- **Importance sampling (IS) / effective sample size (ESS)** — a reweighting scheme
+  that corrects an estimate to be asymptotically exact, together with its built-in
+  quality gauge ESS = (Σw)²/Σw². Low ESS means the estimate is unreliable — so
+  failure is **visible**, never silent.
+- **Multifidelity mean** — giving the GP a head start by using a cheap case-(1)
+  model's 𝓛(θ_int) as its prior mean, so the GP only has to learn the (hopefully
+  small, smooth) residual δ = 𝓛_expensive − 𝓛_cheap (§4).
+- **Route A vs Route B** — the two end-to-end PE methods now cross-validated against
+  each other on case-(1) models: **Route A** samples the full likelihood directly
+  with jaxpe's gradient sampler; **Route B** is the GPry surrogate over 𝓛(θ_int).
+
+---
+
 ## 1. Problem statement
+
+*In one line: some waveform models are so slow (minutes per call) that ordinary
+sampling — which needs millions of calls — is infeasible; for those models we learn
+a cheap surrogate of the likelihood instead of calling the model directly millions
+of times. This section states the two model classes jaxpe must serve and quantifies
+what "infeasible" means.*
 
 jaxpe must support PE with two classes of waveform models:
 
@@ -30,6 +80,12 @@ with **exact-posterior guarantees** and minimal new code.
 
 ### 1.1 Why not brute force, quantitatively
 
+*Context: "brute force" = just running a standard sampler (nested sampling or
+parallel MCMC) that calls the expensive waveform model directly for every
+likelihood evaluation. The arithmetic below is why that is off the table for
+case-(2) models except at the very cheap end — and why it still serves as our
+gold-standard validation baseline (§7).*
+
 A nested-sampling / parallel-MCMC run needs ~10⁶–10⁷ likelihood calls. At 0.5–10 min/call:
 
 | per-call | 10⁶ calls, serial | on 500 cores |
@@ -45,10 +101,21 @@ multi-event studies affordable.
 
 ### 1.2 Why not amortized NPE (DINGO-style)
 
+*Context: amortized neural posterior estimation (NPE) — e.g. DINGO — trains a neural
+network once so that inference on any future event is near-instant. The catch for
+case-(2) models is that the one-time training itself needs the same impossible
+number of expensive waveform evaluations, just paid up front.*
+
 Needs 10⁶–10⁷ *training* waveforms up front — the same infeasible budget, paid before the first
 event. Rejected for case (2). (It remains attractive for case (1), orthogonal to this note.)
 
 ### 1.3 Prior art: this architecture is RIFT-shaped
+
+*Context: we are not proposing a new paradigm. RIFT is an established GW PE method
+that already marginalizes the likelihood over the extrinsic parameters at each
+intrinsic point and interpolates the result over intrinsic space. This section
+names what we reuse from that skeleton and the four things we do differently — the
+four differences are the actual novelty surface of this work.*
 
 RIFT (Lange, O'Shaughnessy et al.) computes an extrinsic-**marginalized** likelihood per
 intrinsic point and interpolates it (GP/rbf) over intrinsic space with iterative refinement.
@@ -67,7 +134,20 @@ publishing comparisons; run one RIFT baseline on a golden event if practical.
 
 ## 2. The four design decisions (D1–D4), as debated
 
+*Context: four decisions fix the shape of the whole design, and everything later in
+the note follows from them. **D1** — which function the Gaussian-process (GP)
+surrogate should represent. **D2** — whether to surrogate the likelihood or the
+waveform. **D3** — how the surrogate stays exact and gives back the extrinsic
+parameters. **D4** — whether to interface with the existing GPry package or rewrite
+its loop in JAX. Each is presented with the options that were weighed and the reason
+for the choice.*
+
 ### D1. What function does the GP learn?
+
+*Context: recall θ_int = the intrinsic parameters the expensive waveform depends on
+(masses, spins, eccentricity, mean anomaly); θ_ext = the cheap extrinsic geometry
+(distance, sky, inclination, polarization, coalescence phase and time). The question
+here is which function of these the GP should model.*
 
 Options considered:
 
@@ -99,6 +179,12 @@ contribute.
 
 ### D2. Surrogate the likelihood, or the waveform (ROM)?
 
+*Context: there are two things one could approximate to avoid calling the expensive
+model. A **reduced-order model (ROM)** approximates the waveform itself and is
+reusable across all future events; a **likelihood surrogate** approximates only
+*this* event's likelihood. This decides between them — and keeps a cheap option open
+by caching waveform modes regardless.*
+
 - A **waveform ROM** amortizes across events but demands a prior-wide offline training
   campaign against a still-evolving leading-edge model — the wrong trade for per-event use of
   frontier physics.
@@ -111,6 +197,15 @@ contribute.
   cost.
 
 ### D3. Exactness and extrinsic recovery — one mechanism for both
+
+*Context: two problems share one solution here. A GP surrogate is only an
+*approximation* of the likelihood, and by construction 𝓛(θ_int) has already
+integrated the extrinsic parameters away, so the surrogate alone yields neither an
+exact posterior nor any extrinsic estimates. Both are recovered in a single
+post-processing pass: spend a fixed budget of genuine expensive-model calls at
+surrogate-drawn points, use them as importance-sampling (IS) weights to restore
+exactness, and reuse the same calls' waveform modes to sample the extrinsics. The IS
+effective sample size (ESS) doubles as the convergence diagnostic.*
 
 The GP posterior is an *estimate*; we restore exactness and recover $\theta_{\rm ext}$ with a
 single post-processing budget of exact calls:
@@ -132,6 +227,12 @@ single post-processing budget of exact calls:
 sampling loop; IS-reweighting keeps it embarrassingly parallel and post-hoc.
 
 ### D4. Interface with GPry, or rewrite it in JAX inside jaxpe?
+
+*Context: GPry is an existing ~16k-line Python package. The tempting alternative is
+to reimplement its GP + acquisition loop natively in JAX for speed and integration.
+This decision weighs where wall-clock actually goes (the expensive waveform, not the
+GP) and the risk of re-validating a from-scratch loop, and comes down on interfacing
+— with one measured escape hatch.*
 
 **Decision: interface (pin GPry as an optional dependency behind a thin engine protocol); do
 not rewrite.** The debate, condensed:
@@ -155,6 +256,13 @@ not rewrite.** The debate, condensed:
 
 ### Verified GPry integration seams (code read, 2026-07; GPry checkout at `~/src/GPry`)
 
+*Context: the "interface, don't rewrite" decision (D4) is only safe if the exact
+entry points we need actually exist and behave as assumed. These were verified by
+reading GPry's source directly. The final row is the single place where a plain
+interface is insufficient — the multifidelity mean (§4) requires subclassing GPry's
+GP regressor, because its preprocessing hook is y-only and cannot carry an
+X-dependent mean.*
+
 | seam | location | note |
 |---|---|---|
 | Plain-callable entry | `gpry/run.py::Runner(loglike=<callable>, bounds=<dict>)` | Cobaya fully optional |
@@ -173,6 +281,16 @@ and high-$\delta$ ≠ high-posterior. The mean-function subclass is the correct 
 ---
 
 ## 3. The marginalized intrinsic likelihood (Phase 0 core)
+
+*Context: this is the technical heart of the whole design. Everything upstream
+decided that the GP should learn 𝓛(θ_int), the likelihood with all seven extrinsic
+parameters (distance D_L, sky α/δ, inclination ι, polarization ψ, coalescence phase
+φ_c and time t_c) integrated out. This section is how that integral is actually
+computed — cheaply, in float64, reusing jaxpe's existing detector-projection, PSD,
+and Whittle-inner-product code. Each extrinsic parameter is integrated by the method
+its structure rewards (closed form, FFT, low-D quadrature, or importance sampling);
+two of them — φ_c and the sky angles — turned out to need methods stronger than
+naive quadrature, a Phase-0 discovery flagged inline below.*
 
 New module `jaxpe/gw/marginalized.py`, sibling of
 [`jaxpe/gw/likelihood.py`](../jaxpe/gw/likelihood.py) and reusing its detector projection
@@ -223,6 +341,15 @@ cheap mean model must be checked explicitly (§4).
 
 ## 4. Multifidelity mean (Phase 2)
 
+*Context: "multifidelity" here means giving the GP a running start. Instead of
+learning 𝓛(θ_int) from zero, the GP's prior mean is set to a cheap case-(1) model's
+own marginalized likelihood 𝓛_cheap(θ_int), so the GP only has to learn the residual
+δ = 𝓛_expensive − 𝓛_cheap. If δ is small and smooth, this cuts the number of
+expensive calls sharply. The honest complication, stated below, is that no current
+cheap (case-1) model covers eccentricity **and** precession at once — so
+multifidelity is a per-target opt-in, gated by an explicit check that δ is actually
+easier to learn than 𝓛_expensive itself.*
+
 Subclass `gpry.gpr.GaussianProcessRegressor` with prior mean
 $m(\theta_{\rm int}) = \mathcal{L}_{\rm cheap}(\theta_{\rm int})$ (a case-(1) jaxpe model run
 through the *same* §3 marginalization): fit GP on residuals $y - m(X)$, add $m(X)$ back in
@@ -248,6 +375,13 @@ $(t_c,\phi_c)$ marginalization already removes alignment-convention roughness fr
 
 ## 5. Exactness, extrinsic recovery, and diagnostics
 
+*Context: this turns decision D3 into concrete deliverables. Recall the two jobs it
+does at once — restore exactness (the GP is only an approximation) and recover the
+extrinsic parameters (𝓛(θ_int) integrated them away) — both from one budget of exact
+expensive-model calls via importance-sampling (IS) reweighting. This section also
+fixes what a production run's report must always contain, so that reliability is
+auditable rather than assumed.*
+
 As decided in D3. Deliverables: an IS-reweighting post-processor with ESS reporting, and the
 hierarchical extrinsic-conditional sampler (jaxpe gradient kernel over 7D with cached modes).
 Acceptance rule for a production run: report is incomplete without (ESS/N, number of
@@ -256,6 +390,12 @@ acquisition rounds, δ-diagnostics if multifidelity, and the convergence-criteri
 ---
 
 ## 6. Architecture / new code layout
+
+*Context: where the new code lives, and the one boundary that must never be crossed.
+The expensive case-(2) models are non-JAX black boxes; the discipline below keeps
+them strictly in plain Python (with MPI for parallel evaluation) and keeps JAX for
+everything differentiable (marginalization, the mean model, extrinsic sampling,
+diagnostics). The black box must never enter a `jit`/`grad` trace.*
 
 ```
 jaxpe/
@@ -288,6 +428,14 @@ bin/
 
 ## 7. Validation ladder (cheap → expensive)
 
+*Context: how we convince ourselves the system is correct, cheapest test first.
+Because surrogate-PE failures are silent (they produce a wrong posterior, not a
+crash), validation is not optional. The decisive rung is step 2: run the *complete*
+GPry loop on a cheap case-(1) model that we can *also* sample directly, so exact
+ground truth is available at zero expensive-model cost. The final rung is the one
+brute-force run on the real model (the very thing §1.1 said we cannot afford
+routinely), done once per model family and kept as the reference.*
+
 1. **Marginalization correctness** (Phase 0): $\mathcal{L}(\theta_{\rm int})$ vs direct
    high-resolution numerical integration over θ_ext on a case-(1) model; and joint-posterior
    consistency vs jaxpe direct gradient sampling. Exact ground truth, minutes.
@@ -303,6 +451,12 @@ bin/
 ---
 
 ## 8. Budget estimate (to be measured, not trusted)
+
+*Context: order-of-magnitude wall-clock estimates for the expensive part of a run,
+under stated assumptions. The title is the point — these are feasibility figures to
+be replaced by Phase-1 measurements, not commitments. "NORA batch = worker count"
+means GPry proposes one batch of points per round and we evaluate them in parallel
+across that many waveform workers.*
 
 Assumptions: NORA batch = worker count; single-fidelity 10D needs ~1–3k acquisitions
 (GPry's published low-D counts are hundreds; 10D is extrapolation — *measure in Phase 1*);
@@ -321,6 +475,14 @@ per round on CPU — the §D4 profiling checkpoint guards this assumption.
 ---
 
 ## 9. Work plan
+
+*Context: the phased implementation plan. Phases are ordered by dependency and each
+ends in an acceptance gate (G0–G3) that must pass before the next begins.
+Interleaved with the plan are dated **"outcome" blocks** recording what actually
+happened when each phase was built, including measured findings and course
+corrections — this is the project's audit trail and is kept verbatim. If you only
+want the current status, read the outcome blocks; if you want the intended path,
+read the task tables and gates.*
 
 Phases are strictly ordered by dependency; each has an acceptance gate. Estimates are
 working-days of focused effort and are guesses, not commitments.
@@ -399,6 +561,10 @@ the fixed-sky run — at ~12 s per ℒ(θᵢ) call the non-truth share was 0.16
 The ESIGMA pseudo-black-box test passes with the D3 IS-reweighting exactness check
 (ESS/N ≈ 0.25 on its multi-lobed surface; catastrophic-failure line at 0.05).
 
+*The two findings below emerged from the Phase-1 pseudo-black-box runs (running the
+full GPry loop on a cheap model as if it were opaque) and directly shape the later
+phases. Both are recorded as measured, not predicted.*
+
 **Two measured findings that shape Phases 2–3:**
 1. **Intrinsic GW likelihood surfaces are brutally anisotropic and multi-lobed.** At
    network SNR 50 (ESIGMA 0PN, (Mc, e) space): σ_e ≈ 6×10⁻⁴ with *physical* lobes
@@ -416,6 +582,13 @@ The ESIGMA pseudo-black-box test passes with the D3 IS-reweighting exactness che
    ±3-sample window, integer-sample t_c quantization imprints ~2-e-fold ripples on
    the Mc marginal that the GP then chases; ±20 samples suffices in the tests
    (production: the full ±0.1 s prior window).
+
+*Context for this block: 𝓛(θ_int) is not computed exactly — its inner extrinsic
+integral is an importance-sampling estimate whose quality (ESS) varies from one
+intrinsic point to the next. GPry, built for deterministic likelihoods, treats every
+value it is handed as exact. That mismatch is a silent-failure channel. The
+four-part package below (record → self-heal → recycle → gate) closes it, and is the
+reliability contract of §5 made concrete and measured.*
 
 **Reliability of the inner extrinsic marginal — the diagnostics/gate/recycling
 package (2026-07-14).** The full-marginal `L(θ_int)` is itself an adaptive
@@ -476,6 +649,13 @@ that avoids nested sampling; and the on-disk diagnostics so a crash costs no evi
 Open interaction to fix in Phase 2: GPry checkpoint-resume reuses cached evaluations
 without re-calling our wrapper, so `importance_sampling_history` does not survive a
 resume — the `.jsonl` persistence is the first half of the fix.
+
+*Context for this block: the first apples-to-apples test that the surrogate approach
+actually reproduces a known answer. On a case-(1) model we can run both PE methods —
+**Route A** (direct gradient sampling of the full likelihood) and **Route B** (the
+GPry surrogate over 𝓛(θ_int)) — and check they agree. Agreement here is the
+empirical backing for the whole fusion; the four findings that follow came out of
+getting both methods to converge.*
 
 **End-to-end cross-validation of the two PE routes (2026-07-15).** Direct gradient
 sampling (Global-Local NF + MALA over the full parameter vector; "Route A") and the
@@ -554,6 +734,12 @@ checkpoint; RIFT head-to-head paper comparison.
 ---
 
 ## 10. Risks
+
+*Context: the things most likely to go wrong, each paired with its mitigation. The
+recurring theme is the one that makes this whole project delicate — surrogate-PE
+failures are silent (a wrong posterior, not an error) — so every risk here is paired
+with a *visible* check (an ESS floor, a convention test suite, a compatibility test,
+the infinities classifier) that converts a silent failure into a loud one.*
 
 - **10D precessing is the GP stress case** — mitigations: extrinsic marginalization (done by
   design), multifidelity where a sane pair exists, seeding the initial proposer from a cheap
