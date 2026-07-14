@@ -140,3 +140,8 @@ cython_debug/
 # LLM Agent directives
 CLAUDE.md
 AGENTS.md
+.claude/
+
+# Local run outputs and scratch (not for version control)
+/output/
+/test_runs/
