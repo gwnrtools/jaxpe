@@ -13,6 +13,7 @@ from .detectors import (
     time_delay_from_geocenter,
 )
 from .external_models import ExternalModeModel, ModeCache, ModesData, reflect_modes
+from .fd_marginal import PhaseDistanceMarginalLikelihood
 from .harmonics import spin_weighted_ylm
 from .likelihood import FDNetworkLikelihood, TDNetworkLikelihood, project_to_detector
 from .marginalized import ModesNetworkLikelihood
@@ -54,5 +55,6 @@ __all__ = [
     "ModeCache",
     "ModesData",
     "ModesNetworkLikelihood",
+    "PhaseDistanceMarginalLikelihood",
     "reflect_modes",
 ]
