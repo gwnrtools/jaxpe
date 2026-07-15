@@ -36,11 +36,8 @@ exclude:
   - CLAUDE.md
 
 # ── kramdown ────────────────────────────────────────────────────────────────
-# math_engine mathjax: kramdown extracts $$...$$ spans/blocks and emits
-# \(...\) / \[...\] wrappers for client-side MathJax (loaded in
-# _includes/head_custom.html).
+# kramdown syntax highlighting options
 kramdown:
-  math_engine: mathjax
   syntax_highlighter_opts:
     block:
       line_numbers: false
