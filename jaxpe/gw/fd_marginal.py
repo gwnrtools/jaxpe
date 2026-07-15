@@ -35,7 +35,7 @@ constructor MEASURES the deviation on a representative parameter point
 than silently biasing the posterior. Use the mode-based marginalizer in that case.
 
 See ``docs/gpry_fusion_design.md`` for how this fits into the surrogate route, and
-``examples/08_phenomd_route_comparison.py`` for an end-to-end cross-validation
+``examples/08_fd_dominant_mode_route_comparison.py`` for an end-to-end cross-validation
 against gradient-based direct sampling.
 """
 

@@ -47,9 +47,9 @@ Choices that matter (each learned the hard way; see docs/gpry_fusion_design.md)
 
 Examples
 --------
-    JAX_PLATFORMS=cpu python examples/07_esigma_route_comparison.py            # both methods
-    JAX_PLATFORMS=cpu python examples/07_esigma_route_comparison.py --method surrogate
-    python examples/07_esigma_route_comparison.py --check-ode-grid             # grid study only
+    JAX_PLATFORMS=cpu python examples/07_td_higher_mode_route_comparison.py            # both methods
+    JAX_PLATFORMS=cpu python examples/07_td_higher_mode_route_comparison.py --method surrogate
+    python examples/07_td_higher_mode_route_comparison.py --check-ode-grid             # grid study only
 
 Requires esigmapy (the waveform). The surrogate method also needs the ``surrogate``
 extra (``pip install jaxpe[surrogate]``, which provides GPry).

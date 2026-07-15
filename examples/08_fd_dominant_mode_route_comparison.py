@@ -1,7 +1,7 @@
 """Cross-validation of two parameter-estimation methods on a PhenomD injection.
 
 This is the frequency-domain, aligned-spin counterpart of
-``examples/07_esigma_route_comparison.py``. It injects one IMRPhenomD signal and recovers its
+``examples/07_td_higher_mode_route_comparison.py``. It injects one IMRPhenomD signal and recovers its
 intrinsic parameters two different ways, checking that the posteriors agree. Agreement
 is a strong end-to-end test: the two methods share almost no code, so a match validates
 both the differentiable likelihood and the marginalized likelihood at once.
@@ -57,11 +57,11 @@ upgrades it to three curves.
 Examples
 --------
     # gradient (whatever JAX sees) + surrogate, both stages, then overlay:
-    JAX_PLATFORMS=cpu python examples/08_phenomd_route_comparison.py
+    JAX_PLATFORMS=cpu python examples/08_fd_dominant_mode_route_comparison.py
     # add the GPU gradient curve to the same figures:
-    python examples/08_phenomd_route_comparison.py --method gradient
+    python examples/08_fd_dominant_mode_route_comparison.py --method gradient
     # just rebuild the overlays from already-saved runs:
-    python examples/08_phenomd_route_comparison.py --overlay-only
+    python examples/08_fd_dominant_mode_route_comparison.py --overlay-only
 
 Requires jaxpe with the ``surrogate`` extra (GPry) for the surrogate method.
 """
@@ -132,6 +132,8 @@ def _build_model(name, f_ref):
 
 
 MODELS = ("phenomd",)
+# Pretty names for figure titles; falls back to the registry key for unlisted models.
+_MODEL_DISPLAY = {"phenomd": "PhenomD"}
 
 
 def intrinsic_names(stage):
@@ -341,11 +343,13 @@ _RUN_STYLE = {
 }
 
 
-def persist_run(stage, result, max_samples=20000):
-    """Save one run's intrinsic posterior to output/phenomd_<stage>_<method>_<device>.npz.
+def persist_run(model, stage, result, max_samples=20000):
+    """Save one run's intrinsic posterior to output/<model>_<stage>_<method>_<device>.npz.
 
-    Gradient chains are thinned to keep the file small; the surrogate posterior is
-    already compact and is saved with its importance weights.
+    Keyed by ``model`` so a future FD model dropped into ``MODELS`` writes to its own
+    files and never collides with the PhenomD artifacts. Gradient chains are thinned to
+    keep the file small; the surrogate posterior is already compact and is saved with
+    its importance weights.
     """
     OUTPUT_DIR.mkdir(exist_ok=True)
     samples = np.asarray(result["samples"])
@@ -361,7 +365,7 @@ def persist_run(stage, result, max_samples=20000):
         )
         samples, weights = samples[pick], weights[pick]
     truth = [injected_parameters(stage)[n] for n in intrinsic_names(stage)]
-    path = OUTPUT_DIR / f"phenomd_{stage}_{result['method']}_{result['device']}.npz"
+    path = OUTPUT_DIR / f"{model}_{stage}_{result['method']}_{result['device']}.npz"
     np.savez(
         path,
         samples=samples,
@@ -376,10 +380,10 @@ def persist_run(stage, result, max_samples=20000):
     print(f"  saved run to {path}")
 
 
-def load_runs(stage):
-    """Load every persisted run for a stage, keyed by (method, device)."""
+def load_runs(model, stage):
+    """Load every persisted run for a model/stage, keyed by (method, device)."""
     runs = {}
-    for path in sorted(OUTPUT_DIR.glob(f"phenomd_{stage}_*.npz")):
+    for path in sorted(OUTPUT_DIR.glob(f"{model}_{stage}_*.npz")):
         d = np.load(path, allow_pickle=True)
         runs[(str(d["method"]), str(d["device"]))] = dict(
             samples=d["samples"],
@@ -424,15 +428,15 @@ def report(stage, runs):
         )
 
 
-def overlay(stage, network_snr=None):
-    """Overlay every persisted run's intrinsic posterior for a stage on one figure."""
+def overlay(model, stage, network_snr=None):
+    """Overlay every persisted run's intrinsic posterior for a model/stage on one figure."""
     import corner
     import matplotlib
     import matplotlib.lines as mlines
 
     matplotlib.use("Agg")
 
-    runs = load_runs(stage)
+    runs = load_runs(model, stage)
     if not runs:
         print(f"[overlay:{stage}] no saved runs found; nothing to plot")
         return
@@ -472,8 +476,9 @@ def overlay(stage, network_snr=None):
     legend.append(mlines.Line2D([], [], color="k", label="injected truth"))
     figure.legend(handles=legend, loc="upper right", frameon=False, fontsize=10)
     snr = f" (network SNR ~{network_snr:.0f})" if network_snr else ""
-    figure.suptitle(f"PhenomD {stage}: PE routes on one injection{snr}", y=1.02)
-    path = OUTPUT_DIR / f"phenomd_{stage}_route_comparison.png"
+    display = _MODEL_DISPLAY.get(model, model)
+    figure.suptitle(f"{display} {stage}: PE routes on one injection{snr}", y=1.02)
+    path = OUTPUT_DIR / f"{model}_{stage}_route_comparison.png"
     figure.savefig(path, dpi=140, bbox_inches="tight")
     print(f"[overlay:{stage}] saved {path}")
 
@@ -524,14 +529,14 @@ def main():
                     n_production=args.n_production,
                     seed=args.seed,
                 )
-                persist_run(stage, result)
+                persist_run(args.model, stage, result)
             if args.method in ("surrogate", "both"):
                 result = run_surrogate_marginalized_inference(likelihood, stage)
-                persist_run(stage, result)
-        runs = load_runs(stage)
+                persist_run(args.model, stage, result)
+        runs = load_runs(args.model, stage)
         if runs:
             report(stage, runs)
-            overlay(stage, network_snr=network)
+            overlay(args.model, stage, network_snr=network)
 
 
 if __name__ == "__main__":
