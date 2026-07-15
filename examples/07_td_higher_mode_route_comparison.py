@@ -78,13 +78,13 @@ SAMPLING_RATE_HZ = 1024.0
 COALESCENCE_TIME_GPS = 1126259462.4
 
 TRUE_PARAMETERS = dict(
-    chirp_mass=25.0,          # solar masses
+    chirp_mass=25.0,  # solar masses
     mass_ratio=0.8,
     eccentricity=0.05,
     mean_anomaly=1.0,
     spin1z=0.0,
     spin2z=0.0,
-    luminosity_distance=3000.0,   # Mpc -- chosen for network signal-to-noise ~11
+    luminosity_distance=3000.0,  # Mpc -- chosen for network signal-to-noise ~11
     inclination=0.4,
     phase=1.5,
     geocent_time=COALESCENCE_TIME_GPS,
@@ -111,7 +111,7 @@ FIXED_PARAMETERS = dict(
 # parameters the gradient method samples (the surrogate method marginalizes these two
 # with matching priors: phase uniform on [0, 2*pi], distance proportional to
 # distance^2 over the same bounds).
-CHIRP_MASS_PRIOR = (24.5, 25.5)          # solar masses
+CHIRP_MASS_PRIOR = (24.5, 25.5)  # solar masses
 ECCENTRICITY_PRIOR = (0.0, 0.1)
 DISTANCE_PRIOR_MPC = (1000.0, 6000.0)
 
@@ -143,15 +143,22 @@ def build_injection(waveform):
     from jaxpe.gw import make_injection
 
     likelihood = make_injection(
-        waveform, TRUE_PARAMETERS, detector_names=("H1", "L1"),
-        duration=SEGMENT_DURATION_S, sampling_rate=SAMPLING_RATE_HZ,
-        f_min=LOWER_FREQUENCY_HZ, noise_seed=None,
+        waveform,
+        TRUE_PARAMETERS,
+        detector_names=("H1", "L1"),
+        duration=SEGMENT_DURATION_S,
+        sampling_rate=SAMPLING_RATE_HZ,
+        f_min=LOWER_FREQUENCY_HZ,
+        noise_seed=None,
     )
     per_detector = likelihood.optimal_snr(
-        {k: jnp.asarray(v) for k, v in TRUE_PARAMETERS.items()})
+        {k: jnp.asarray(v) for k, v in TRUE_PARAMETERS.items()}
+    )
     network = np.sqrt(sum(s**2 for s in per_detector.values()))
-    print(f"[injection] signal-to-noise per detector {per_detector}, "
-          f"network {network:.1f}")
+    print(
+        f"[injection] signal-to-noise per detector {per_detector}, "
+        f"network {network:.1f}"
+    )
     return likelihood
 
 
@@ -171,13 +178,18 @@ def run_gradient_direct_sampling(likelihood, n_chains=20, seed=0):
     device = jax.devices()[0]
     print(f"\n=== Method 1: gradient-based direct sampling (device: {device}) ===")
 
-    prior = JointPrior({
-        "chirp_mass": Uniform(low=CHIRP_MASS_PRIOR[0], high=CHIRP_MASS_PRIOR[1]),
-        "eccentricity": Uniform(low=ECCENTRICITY_PRIOR[0], high=ECCENTRICITY_PRIOR[1]),
-        "phase": Uniform(low=0.0, high=2 * np.pi),
-        "luminosity_distance": PowerLaw(
-            alpha=2.0, low=DISTANCE_PRIOR_MPC[0], high=DISTANCE_PRIOR_MPC[1]),
-    })
+    prior = JointPrior(
+        {
+            "chirp_mass": Uniform(low=CHIRP_MASS_PRIOR[0], high=CHIRP_MASS_PRIOR[1]),
+            "eccentricity": Uniform(
+                low=ECCENTRICITY_PRIOR[0], high=ECCENTRICITY_PRIOR[1]
+            ),
+            "phase": Uniform(low=0.0, high=2 * np.pi),
+            "luminosity_distance": PowerLaw(
+                alpha=2.0, low=DISTANCE_PRIOR_MPC[0], high=DISTANCE_PRIOR_MPC[1]
+            ),
+        }
+    )
 
     # Supply the held-fixed parameters to every likelihood call; the sampler only
     # varies the four parameters named in the prior.
@@ -190,9 +202,16 @@ def run_gradient_direct_sampling(likelihood, n_chains=20, seed=0):
     buffer = n_chains * 20
     config = GlobalLocalConfig(
         n_chains=n_chains,
-        n_prelim_loops=2, n_training_loops=8, n_production_loops=40,
-        n_local_steps=30, n_global_steps=30, local_thin=3,
-        buffer_size=15 * buffer, flow_layers=6, nn_width=48, n_epochs=30,
+        n_prelim_loops=2,
+        n_training_loops=8,
+        n_production_loops=40,
+        n_local_steps=30,
+        n_global_steps=30,
+        local_thin=3,
+        buffer_size=15 * buffer,
+        flow_layers=6,
+        nn_width=48,
+        n_epochs=30,
         batch_size=min(1024, 15 * buffer),
     )
     sampler = Sampler(MALA(step_size=0.03), problem=problem, config=config)
@@ -206,14 +225,20 @@ def run_gradient_direct_sampling(likelihood, n_chains=20, seed=0):
 
     samples = sampler.to_physical(result.samples).reshape(-1, problem.n_dim)
     order = [list(problem.names).index(n) for n in INTRINSIC_PARAMETER_NAMES]
-    gradient_steps = (config.n_prelim_loops + config.n_training_loops
-                      + config.n_production_loops) * config.n_local_steps
-    print(f"[gradient] {samples.shape[0]} samples, ~{gradient_steps} gradient steps, "
-          f"{wall_seconds:.0f} s on {device}")
+    gradient_steps = (
+        config.n_prelim_loops + config.n_training_loops + config.n_production_loops
+    ) * config.n_local_steps
+    print(
+        f"[gradient] {samples.shape[0]} samples, ~{gradient_steps} gradient steps, "
+        f"{wall_seconds:.0f} s on {device}"
+    )
     return dict(
-        samples=samples[:, order], weights=None,
-        wall_seconds=wall_seconds, likelihood_evaluations=gradient_steps,
-        device=str(device), n_samples=samples.shape[0],
+        samples=samples[:, order],
+        weights=None,
+        wall_seconds=wall_seconds,
+        likelihood_evaluations=gradient_steps,
+        device=str(device),
+        n_samples=samples.shape[0],
     )
 
 
@@ -229,14 +254,18 @@ def run_surrogate_marginalized_inference(waveform, likelihood, seed=11):
     """
     from jaxpe.gw.external_models import ModesData
     from jaxpe.gw.marginalized import (
-        MarginalizedIntrinsicLikelihood, ModesNetworkLikelihood)
+        MarginalizedIntrinsicLikelihood,
+        ModesNetworkLikelihood,
+    )
     from jaxpe.surrogate import GPryEngine
 
     print("\n=== Method 2: surrogate marginalized inference (GPry) ===")
     analysis_times = likelihood.times
     analysis_times_jax = jnp.asarray(analysis_times)
-    fixed_intrinsic = {k: FIXED_PARAMETERS[k]
-                       for k in ("mass_ratio", "mean_anomaly", "spin1z", "spin2z")}
+    fixed_intrinsic = {
+        k: FIXED_PARAMETERS[k]
+        for k in ("mass_ratio", "mean_anomaly", "spin1z", "spin2z")
+    }
 
     def waveform_modes(intrinsic_point):
         """Map (chirp mass, eccentricity) to strain modes at a 1 Mpc reference."""
@@ -249,43 +278,64 @@ def run_surrogate_marginalized_inference(waveform, likelihood, seed=11):
         modes = waveform.mode_dict(params, analysis_times_jax)
         return ModesData(
             modes={lm: np.asarray(h) for lm, h in modes.items()},
-            times=analysis_times, d_ref_mpc=1.0, t_ref=COALESCENCE_TIME_GPS)
+            times=analysis_times,
+            d_ref_mpc=1.0,
+            t_ref=COALESCENCE_TIME_GPS,
+        )
 
-    true_modes = waveform_modes({"chirp_mass": TRUE_PARAMETERS["chirp_mass"],
-                                 "eccentricity": TRUE_PARAMETERS["eccentricity"]})
+    true_modes = waveform_modes(
+        {
+            "chirp_mass": TRUE_PARAMETERS["chirp_mass"],
+            "eccentricity": TRUE_PARAMETERS["eccentricity"],
+        }
+    )
     mode_likelihood = ModesNetworkLikelihood.from_likelihood(likelihood, true_modes)
 
     marginalized_likelihood = MarginalizedIntrinsicLikelihood(
-        waveform_modes, mode_likelihood,
-        names=INTRINSIC_PARAMETER_NAMES, t_center=COALESCENCE_TIME_GPS,
-        marginalize_sky=False,   # sky and inclination are fixed at truth
-        fixed_extrinsic={k: FIXED_PARAMETERS[k]
-                         for k in ("ra", "dec", "psi", "inclination")},
+        waveform_modes,
+        mode_likelihood,
+        names=INTRINSIC_PARAMETER_NAMES,
+        t_center=COALESCENCE_TIME_GPS,
+        marginalize_sky=False,  # sky and inclination are fixed at truth
+        fixed_extrinsic={
+            k: FIXED_PARAMETERS[k] for k in ("ra", "dec", "psi", "inclination")
+        },
         # marginalize phase (n_phi nodes) and distance (n_dist nodes, same
         # distance^2 prior and bounds the gradient method uses); coalescence time is
         # pinned at truth by tc_half_samples=0.
-        settings=dict(n_phi=96, n_dist=64, tc_half_samples=0,
-                      dist_min=DISTANCE_PRIOR_MPC[0], dist_max=DISTANCE_PRIOR_MPC[1],
-                      dist_power=2.0),
+        settings=dict(
+            n_phi=96,
+            n_dist=64,
+            tc_half_samples=0,
+            dist_min=DISTANCE_PRIOR_MPC[0],
+            dist_max=DISTANCE_PRIOR_MPC[1],
+            dist_power=2.0,
+        ),
     )
 
     started = time.time()
     engine = GPryEngine(
         marginalized_likelihood,
         bounds={"chirp_mass": CHIRP_MASS_PRIOR, "eccentricity": ECCENTRICITY_PRIOR},
-        options={"seed": seed}, verbose=0)
+        options={"seed": seed},
+        verbose=0,
+    )
     diagnostics = engine.run()
     posterior = engine.sample()
     wall_seconds = time.time() - started
 
-    print(f"[surrogate] converged={diagnostics['has_converged']}, "
-          f"{diagnostics['n_truth_evals']} waveform evaluations, "
-          f"{wall_seconds:.0f} s, {len(posterior.x)} samples")
+    print(
+        f"[surrogate] converged={diagnostics['has_converged']}, "
+        f"{diagnostics['n_truth_evals']} waveform evaluations, "
+        f"{wall_seconds:.0f} s, {len(posterior.x)} samples"
+    )
     return dict(
-        samples=posterior.x, weights=posterior.weights,
+        samples=posterior.x,
+        weights=posterior.weights,
         wall_seconds=wall_seconds,
         likelihood_evaluations=diagnostics["n_truth_evals"],
-        device="cpu (Gaussian process)", n_samples=len(posterior.x),
+        device="cpu (Gaussian process)",
+        n_samples=len(posterior.x),
     )
 
 
@@ -303,20 +353,34 @@ def check_ode_grid():
 
     print("=== ODE-grid convergence: inject at 1024, score template at truth ===")
     reference = make_injection(
-        build_waveform(1024), TRUE_PARAMETERS, detector_names=("H1", "L1"),
-        duration=SEGMENT_DURATION_S, sampling_rate=SAMPLING_RATE_HZ,
-        f_min=LOWER_FREQUENCY_HZ, noise_seed=None)
+        build_waveform(1024),
+        TRUE_PARAMETERS,
+        detector_names=("H1", "L1"),
+        duration=SEGMENT_DURATION_S,
+        sampling_rate=SAMPLING_RATE_HZ,
+        f_min=LOWER_FREQUENCY_HZ,
+        noise_seed=None,
+    )
     truth = {k: jnp.asarray(v) for k, v in TRUE_PARAMETERS.items()}
     network = np.sqrt(sum(s**2 for s in reference.optimal_snr(truth).values()))
-    print(f"network signal-to-noise {network:.1f}; a perfect template scores 0, "
-          f"the worst possible is {-network**2 / 2:.0f}")
+    print(
+        f"network signal-to-noise {network:.1f}; a perfect template scores 0, "
+        f"the worst possible is {-network**2 / 2:.0f}"
+    )
     for grid in (256, 512, 1024, 2048):
         template = TDNetworkLikelihood(
-            waveform=build_waveform(grid), detectors=reference.detectors,
-            data_fd=reference.data_fd, psds=reference.psds, freqs=reference.freqs,
-            times=reference.times, f_min=reference.f_min, f_max=reference.f_max,
-            gmst_ref=reference.gmst_ref, t_ref=reference.t_ref,
-            tukey_alpha=reference.tukey_alpha)
+            waveform=build_waveform(grid),
+            detectors=reference.detectors,
+            data_fd=reference.data_fd,
+            psds=reference.psds,
+            freqs=reference.freqs,
+            times=reference.times,
+            f_min=reference.f_min,
+            f_max=reference.f_max,
+            gmst_ref=reference.gmst_ref,
+            t_ref=reference.t_ref,
+            tukey_alpha=reference.tukey_alpha,
+        )
         loss = float(template.log_likelihood(truth))
         verdict = "converged" if abs(loss) < 0.2 else "under-resolved (biased)"
         print(f"  {grid:5d} points: log-likelihood at truth = {loss:8.3f}  ({verdict})")
@@ -341,16 +405,22 @@ def report(results):
     for label, r in results.items():
         chirp = credible_interval(r["samples"], r["weights"], 0)
         ecc = credible_interval(r["samples"], r["weights"], 1)
-        print(f"  {label:28s} chirp_mass {chirp[1]:.3f} [{chirp[0]:.3f}, {chirp[2]:.3f}]"
-              f"   eccentricity {ecc[1]:.4f} [{ecc[0]:.4f}, {ecc[2]:.4f}]")
-    print(f"  {'injected truth':28s} chirp_mass {truth[0]:.3f}"
-          f"{'':21s} eccentricity {truth[1]:.4f}")
+        print(
+            f"  {label:28s} chirp_mass {chirp[1]:.3f} [{chirp[0]:.3f}, {chirp[2]:.3f}]"
+            f"   eccentricity {ecc[1]:.4f} [{ecc[0]:.4f}, {ecc[2]:.4f}]"
+        )
+    print(
+        f"  {'injected truth':28s} chirp_mass {truth[0]:.3f}"
+        f"{'':21s} eccentricity {truth[1]:.4f}"
+    )
 
     print("\nCost per method")
     for label, r in results.items():
-        print(f"  {label:28s} {r['likelihood_evaluations']:6d} evaluations   "
-              f"{r['wall_seconds']:7.0f} s   {r['n_samples']:6d} samples   "
-              f"({r['device']})")
+        print(
+            f"  {label:28s} {r['likelihood_evaluations']:6d} evaluations   "
+            f"{r['wall_seconds']:7.0f} s   {r['n_samples']:6d} samples   "
+            f"({r['device']})"
+        )
 
 
 def save_overlay(results, path):
@@ -358,6 +428,7 @@ def save_overlay(results, path):
     import corner
     import matplotlib
     import matplotlib.lines as mlines
+
     matplotlib.use("Agg")
 
     truth = [TRUE_PARAMETERS[n] for n in INTRINSIC_PARAMETER_NAMES]
@@ -366,11 +437,19 @@ def save_overlay(results, path):
     for color, (label, r) in zip(palette, results.items()):
         weights = None if r["weights"] is None else r["weights"] / r["weights"].sum()
         figure = corner.corner(
-            r["samples"], labels=list(INTRINSIC_PARAMETER_NAMES), color=color,
-            weights=weights, fig=figure,
-            truths=truth if figure is None else None, truth_color="k",
-            hist_kwargs=dict(density=True), plot_datapoints=False,
-            smooth=1.0, levels=(0.393, 0.865), bins=35)
+            r["samples"],
+            labels=list(INTRINSIC_PARAMETER_NAMES),
+            color=color,
+            weights=weights,
+            fig=figure,
+            truths=truth if figure is None else None,
+            truth_color="k",
+            hist_kwargs=dict(density=True),
+            plot_datapoints=False,
+            smooth=1.0,
+            levels=(0.393, 0.865),
+            bins=35,
+        )
         legend.append(mlines.Line2D([], [], color=color, label=label))
     legend.append(mlines.Line2D([], [], color="k", label="injected truth"))
     figure.legend(handles=legend, loc="upper right", fontsize=9)
@@ -381,17 +460,32 @@ def save_overlay(results, path):
 
 def main():
     parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument(
-        "--method", choices=["gradient", "surrogate", "both"], default="both",
-        help="which parameter-estimation method(s) to run")
-    parser.add_argument("--n-chains", type=int, default=20,
-                        help="chains for the gradient sampler (20 fits a 4 GB GPU)")
-    parser.add_argument("--n-ode-grid", type=int, default=1024,
-                        help="ODE resolution; 1024 is converged for this signal")
+        "--method",
+        choices=["gradient", "surrogate", "both"],
+        default="both",
+        help="which parameter-estimation method(s) to run",
+    )
+    parser.add_argument(
+        "--n-chains",
+        type=int,
+        default=20,
+        help="chains for the gradient sampler (20 fits a 4 GB GPU)",
+    )
+    parser.add_argument(
+        "--n-ode-grid",
+        type=int,
+        default=1024,
+        help="ODE resolution; 1024 is converged for this signal",
+    )
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--check-ode-grid", action="store_true",
-                        help="run only the ODE-resolution convergence study and exit")
+    parser.add_argument(
+        "--check-ode-grid",
+        action="store_true",
+        help="run only the ODE-resolution convergence study and exit",
+    )
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(exist_ok=True)
@@ -406,10 +500,12 @@ def main():
     if args.method in ("gradient", "both"):
         label = f"gradient direct ({jax.devices()[0].platform})"
         results[label] = run_gradient_direct_sampling(
-            likelihood, n_chains=args.n_chains, seed=args.seed)
+            likelihood, n_chains=args.n_chains, seed=args.seed
+        )
     if args.method in ("surrogate", "both"):
         results["surrogate marginalized"] = run_surrogate_marginalized_inference(
-            waveform, likelihood)
+            waveform, likelihood
+        )
 
     report(results)
     if len(results) > 1:
