@@ -11,17 +11,17 @@ nav_order: 6
 1. TOC
 {:toc}
 
-This section formalizes the geometrical substrate of `jaxpe`. Continuous Hamiltonian integration fundamentally assumes that the parameter space is a smooth differentiable manifold topologically equivalent to $$\mathbb{R}^D$$. Boundaries, sharp truncations, and finite intervals break the continuity of Hamilton's equations, inducing pathological reflection of the conjugate momenta.
+This section formalizes the geometrical substrate of `jaxpe`. Continuous Hamiltonian integration fundamentally assumes that the parameter space is a smooth differentiable manifold topologically equivalent to $\mathbb{R}^D$. Boundaries, sharp truncations, and finite intervals break the continuity of Hamilton's equations, inducing pathological reflection of the conjugate momenta.
 
 ## Boundary Removal via Diffeomorphisms
 
-The physical universe dictates strict boundaries: a black hole mass $$m > 0$$, a dimensionless spin $$a \in [0, 1]$$, an inclination $$\iota \in [0, \pi]$$. The physical parameter manifold $$\mathcal{M}_\theta$$ is therefore a manifold with boundaries.
+The physical universe dictates strict boundaries: a black hole mass $m > 0$, a dimensionless spin $a \in [0, 1]$, an inclination $\iota \in [0, \pi]$. The physical parameter manifold $\mathcal{M}_\theta$ is therefore a manifold with boundaries.
 
-To satisfy the geometrical requirements of the MCMC kernels, we must construct a smooth, bijective, and differentiable mapping—a diffeomorphism $$f: \mathcal{M}_\theta \to \mathcal{X}$$—that maps the bounded physical space onto an unconstrained latent manifold $$\mathcal{X} \cong \mathbb{R}^D$$ [1].
+To satisfy the geometrical requirements of the MCMC kernels, we must construct a smooth, bijective, and differentiable mapping—a diffeomorphism $f: \mathcal{M}_\theta \to \mathcal{X}$—that maps the bounded physical space onto an unconstrained latent manifold $\mathcal{X} \cong \mathbb{R}^D$ [1].
 
 ### The Logarithmic Diffeomorphism
 
-For parameters bounded strictly below by a threshold $$a$$ (e.g., $$d_L \in (0, \infty)$$), we apply the natural logarithm to push the boundary to asymptotic infinity:
+For parameters bounded strictly below by a threshold $a$ (e.g., $d_L \in (0, \infty)$), we apply the natural logarithm to push the boundary to asymptotic infinity:
 
 $$
 x = \ln(\theta - a) \quad \iff \quad \theta = \exp(x) + a
@@ -29,7 +29,7 @@ $$
 
 ### The Scaled Logit Diffeomorphism
 
-For parameters strictly bounded in a finite interval $$\theta \in (a, b)$$ (e.g., cosine inclination $$\cos \iota \in (-1, 1)$$), we utilize the scaled logit function, stretching both boundaries to $$\pm \infty$$:
+For parameters strictly bounded in a finite interval $\theta \in (a, b)$ (e.g., cosine inclination $\cos \iota \in (-1, 1)$), we utilize the scaled logit function, stretching both boundaries to $\pm \infty$:
 
 $$
 x = \ln\left( \frac{\theta - a}{b - \theta} \right) \quad \iff \quad \theta = a + \frac{b - a}{1 + \exp(-x)}
@@ -37,7 +37,7 @@ $$
 
 ## Jacobians and Target Density Adjustments
 
-Upon mapping the posterior measure to the unconstrained manifold $$\mathcal{X}$$, the probability density undergoes geometric distortion. The pushforward of the posterior measure $$\pi_\Theta$$ under the diffeomorphism $$f$$ induces a strict volume correction governed by the Jacobian matrix $$J^\mu_\nu = \partial \theta^\mu / \partial x^\nu$$.
+Upon mapping the posterior measure to the unconstrained manifold $\mathcal{X}$, the probability density undergoes geometric distortion. The pushforward of the posterior measure $\pi_\Theta$ under the diffeomorphism $f$ induces a strict volume correction governed by the Jacobian matrix $J^\mu_\nu = \partial \theta^\mu / \partial x^\nu$.
 
 By the change of variables theorem, the exact unconstrained target density is:
 
@@ -51,7 +51,7 @@ $$
 \frac{\partial \theta^i}{\partial x^i} = \frac{(\theta^i - a)(b - \theta^i)}{b - a}
 $$
 
-The `jaxpe.core` module handles these adjustments automatically, ensuring that the gradient covector $$\partial_\mu U(x)$$ perfectly aligns with the warped geometry of $$\mathcal{X}$$. In code, this geometry is encapsulated by subclasses of [`jaxpe.core.transforms.Bijection`](#bijection), such as `Interval` and `Identity`:
+The `jaxpe.core` module handles these adjustments automatically, ensuring that the gradient covector $\partial_\mu U(x)$ perfectly aligns with the warped geometry of $\mathcal{X}$. In code, this geometry is encapsulated by subclasses of [`jaxpe.core.transforms.Bijection`](#bijection), such as `Interval` and `Identity`:
 
 ```python
 from jaxpe.core.transforms import Interval
@@ -64,11 +64,11 @@ x = bijection.inverse(theta)
 ## `InferenceProblem`
 
 The `InferenceProblem` class acts as the grand geometrical orchestrator. It encapsulates:
-1. The physical log-likelihood function $$\ln \mathcal{L}(d \mid \theta^\mu)$$.
-2. The joint physical prior density $$\pi_{\text{prior}}(\theta^\mu)$$.
-3. The composite diffeomorphism $$x^\mu = f^\mu(\theta^\nu)$$.
+1. The physical log-likelihood function $\ln \mathcal{L}(d \mid \theta^\mu)$.
+2. The joint physical prior density $\pi_{\text{prior}}(\theta^\mu)$.
+3. The composite diffeomorphism $x^\mu = f^\mu(\theta^\nu)$.
 
-By encapsulating the domain transformations, the `InferenceProblem` yields a globally smooth, unconstrained scalar potential $$U(x)$$ that rigorously satisfies the continuity requirements for symplectic integration.
+By encapsulating the domain transformations, the `InferenceProblem` yields a globally smooth, unconstrained scalar potential $U(x)$ that rigorously satisfies the continuity requirements for symplectic integration.
 
 ```python
 from jaxpe.core.problem import InferenceProblem

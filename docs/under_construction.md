@@ -222,7 +222,7 @@ The clean alternative:
 > parameter $j$. Differentiating $\dot y = f(y,\theta)$ with respect to $\theta$ gives the
 > **variational (sensitivity) equation**
 >
-> $$ \dot S \;=\; J\,S \;+\; \frac{\partial f}{\partial\theta}, \qquad J \equiv \frac{\partial f}{\partial y}\in\mathbb{R}^{n\times n}, \quad \frac{\partial f}{\partial\theta}\in\mathbb{R}^{n\times p}, \qquad S(0) = \frac{\partial y(0)}{\partial\theta}, $$
+> $\dot S \;=\; J\,S \;+\; \frac{\partial f}{\partial\theta}, \qquad J \equiv \frac{\partial f}{\partial y}\in\mathbb{R}^{n\times n}, \quad \frac{\partial f}{\partial\theta}\in\mathbb{R}^{n\times p}, \qquad S(0) = \frac{\partial y(0)}{\partial\theta},$
 >
 > where $J=\partial f/\partial y$ is the **state Jacobian** of the vector field,
 > $\partial f/\partial\theta$ is its **explicit parameter Jacobian**, and the initial

@@ -21,31 +21,31 @@ $$
 R_{\mu\nu} - \frac{1}{2}g_{\mu\nu}R = \frac{8\pi G}{c^4} T_{\mu\nu}
 $$
 
-where $$R_{\mu\nu}$$ is the Ricci curvature tensor, $$R$$ is the Ricci scalar, $$g_{\mu\nu}$$ is the metric tensor, and $$T_{\mu\nu}$$ is the stress-energy tensor describing the matter source. To understand the Ricci tensor, we must trace back to the Riemann curvature tensor $$R^\rho{}_{\sigma\mu\nu}$$, which measures the failure of a vector to return to its original orientation when parallel-transported around a closed loop. The Riemann tensor is defined entirely in terms of the Levi-Civita connection (the Christoffel symbols $$\Gamma^\rho_{\mu\nu}$$):
+where $R_{\mu\nu}$ is the Ricci curvature tensor, $R$ is the Ricci scalar, $g_{\mu\nu}$ is the metric tensor, and $T_{\mu\nu}$ is the stress-energy tensor describing the matter source. To understand the Ricci tensor, we must trace back to the Riemann curvature tensor $R^\rho{}_{\sigma\mu\nu}$, which measures the failure of a vector to return to its original orientation when parallel-transported around a closed loop. The Riemann tensor is defined entirely in terms of the Levi-Civita connection (the Christoffel symbols $\Gamma^\rho_{\mu\nu}$):
 
 $$
 R^\rho{}_{\sigma\mu\nu} = \partial_\mu \Gamma^\rho_{\nu\sigma} - \partial_\nu \Gamma^\rho_{\mu\sigma} + \Gamma^\rho_{\mu\lambda}\Gamma^\lambda_{\nu\sigma} - \Gamma^\rho_{\nu\lambda}\Gamma^\lambda_{\mu\sigma}
 $$
 
-The Ricci tensor is simply the contraction $$R_{\mu\nu} = R^\rho{}_{\mu\rho\nu}$$. Far from the coalescing binary, in the weak-field regime, we can decompose the full spacetime metric into a flat Minkowski background $$\eta_{\mu\nu}$$ and a small perturbation $$h_{\mu\nu}$$:
+The Ricci tensor is simply the contraction $R_{\mu\nu} = R^\rho{}_{\mu\rho\nu}$. Far from the coalescing binary, in the weak-field regime, we can decompose the full spacetime metric into a flat Minkowski background $\eta_{\mu\nu}$ and a small perturbation $h_{\mu\nu}$:
 
 $$
 g_{\mu\nu} \approx \eta_{\mu\nu} + h_{\mu\nu} \quad \text{where} \quad |h_{\mu\nu}| \ll 1
 $$
 
-By defining the trace-reversed perturbation $$\bar{h}_{\mu\nu} = h_{\mu\nu} - \frac{1}{2}\eta_{\mu\nu}h^\alpha{}_\alpha$$, and imposing the Lorenz gauge condition $$\partial^\mu \bar{h}_{\mu\nu} = 0$$, the linearized Einstein equations beautifully decouple into a classical inhomogeneous wave equation:
+By defining the trace-reversed perturbation $\bar{h}_{\mu\nu} = h_{\mu\nu} - \frac{1}{2}\eta_{\mu\nu}h^\alpha{}_\alpha$, and imposing the Lorenz gauge condition $\partial^\mu \bar{h}_{\mu\nu} = 0$, the linearized Einstein equations beautifully decouple into a classical inhomogeneous wave equation:
 
 $$
 \square \bar{h}_{\mu\nu} = -\frac{16\pi G}{c^4} T_{\mu\nu}
 $$
 
-where $$\square = \eta^{\alpha\beta} \partial_\alpha \partial_\beta$$ is the d'Alembertian operator.
+where $\square = \eta^{\alpha\beta} \partial_\alpha \partial_\beta$ is the d'Alembertian operator.
 
 ### The Transverse-Traceless (TT) Gauge
 
-In vacuum ($$T_{\mu\nu} = 0$$), the gravitational waves freely propagate. We can further exhaust our gauge freedom to adopt the Transverse-Traceless (TT) gauge. In this coordinate system, the perturbation is purely spatial ($$h_{0\mu}^{TT} = 0$$), transverse to the direction of propagation ($$\partial^j h_{ij}^{TT} = 0$$), and traceless ($$\delta^{ij} h_{ij}^{TT} = 0$$).
+In vacuum ($T_{\mu\nu} = 0$), the gravitational waves freely propagate. We can further exhaust our gauge freedom to adopt the Transverse-Traceless (TT) gauge. In this coordinate system, the perturbation is purely spatial ($h_{0\mu}^{TT} = 0$), transverse to the direction of propagation ($\partial^j h_{ij}^{TT} = 0$), and traceless ($\delta^{ij} h_{ij}^{TT} = 0$).
 
-The two independent degrees of freedom of the metric tensor survive as the physical polarization states of the gravitational wave, which manifest in our interferometers as the metric strain components $$h_+(t)$$ and $$h_\times(t)$$.
+The two independent degrees of freedom of the metric tensor survive as the physical polarization states of the gravitational wave, which manifest in our interferometers as the metric strain components $h_+(t)$ and $h_\times(t)$.
 
 ## Waveform Approximants: From Multipoles to Numerical Relativity
 
@@ -53,33 +53,33 @@ To solve the wave equation for an actual binary system, we rely on a triad of so
 
 ### The Quadrupole Moment and Post-Newtonian (PN) Theory
 
-In the lowest-order (Newtonian) limit, the solution to the wave equation is dominated by the second time derivative of the reduced mass quadrupole moment tensor $$I_{ij}$$:
+In the lowest-order (Newtonian) limit, the solution to the wave equation is dominated by the second time derivative of the reduced mass quadrupole moment tensor $I_{ij}$:
 
 $$
 h_{ij}^{TT}(t, \mathbf{x}) = \frac{2G}{c^4 r} \Lambda_{ij}{}^{kl}(\mathbf{n}) \frac{d^2}{dt^2} I_{kl}(t_r)
 $$
 
-where the quadrupole moment is defined by the volume integral over the source density $$\rho$$:
+where the quadrupole moment is defined by the volume integral over the source density $\rho$:
 
 $$
 I_{ij} = \int \rho(t, \mathbf{x}) \left( x_i x_j - \frac{1}{3} \delta_{ij} r^2 \right) d^3x
 $$
 
-and $$\Lambda_{ij}{}^{kl}(\mathbf{n})$$ is the TT projection operator along the line of sight $$\mathbf{n}$$.
+and $\Lambda_{ij}{}^{kl}(\mathbf{n})$ is the TT projection operator along the line of sight $\mathbf{n}$.
 
-During the early inspiral, where orbital velocities are small ($$v \ll c$$), we expand the two-body dynamics in a perturbative series in powers of the dimensionless velocity $$v/c$$. This is the Post-Newtonian (PN) expansion [1]. The gravitational-wave phase $$\Phi(f)$$ in the frequency domain is expanded as:
+During the early inspiral, where orbital velocities are small ($v \ll c$), we expand the two-body dynamics in a perturbative series in powers of the dimensionless velocity $v/c$. This is the Post-Newtonian (PN) expansion [1]. The gravitational-wave phase $\Phi(f)$ in the frequency domain is expanded as:
 
 $$
 \Phi(f) = 2 \pi f t_c - \phi_c + \frac{3}{128 \eta v^5} \sum_{k=0}^N \left( \alpha_k + \beta_k \ln v \right) v^k
 $$
 
-where $$\eta = m_1 m_2 / (m_1+m_2)^2$$ is the symmetric mass ratio. The coefficients $$\alpha_k$$ and $$\beta_k$$ are derived from increasingly complex loop integrals in the effective field theory of General Relativity.
+where $\eta = m_1 m_2 / (m_1+m_2)^2$ is the symmetric mass ratio. The coefficients $\alpha_k$ and $\beta_k$ are derived from increasingly complex loop integrals in the effective field theory of General Relativity.
 
 ### Self-Force (SF) Formalism
 
-In the Extreme Mass Ratio Inspiral (EMRI) regime, where the mass ratio $$q = m_1 / m_2 \ll 1$$, the Post-Newtonian expansion converges poorly. We treat the smaller body as a mere perturbation on the exact background spacetime of the supermassive primary (such as the Kerr metric).
+In the Extreme Mass Ratio Inspiral (EMRI) regime, where the mass ratio $q = m_1 / m_2 \ll 1$, the Post-Newtonian expansion converges poorly. We treat the smaller body as a mere perturbation on the exact background spacetime of the supermassive primary (such as the Kerr metric).
 
-The small body travels on a geodesic that is gently nudged by a local gravitational self-force $$f^\alpha$$ generated by its own back-scattered field [2]. The forced geodesic equation becomes:
+The small body travels on a geodesic that is gently nudged by a local gravitational self-force $f^\alpha$ generated by its own back-scattered field [2]. The forced geodesic equation becomes:
 
 $$
 u^\beta \nabla_\beta u^\alpha = f^\alpha
@@ -97,13 +97,13 @@ h_plus, h_cross = waveform(params, times)
 
 ### Numerical Relativity (NR)
 
-Finally, in the chaotic final moments of coalescence, the binary enters the highly non-linear, strong-field regime where all perturbative expansions shatter. Here, we must solve the full, unadulterated Einstein field equations. This is typically achieved using the 3+1 ADM decomposition [3]. We slice four-dimensional spacetime into three-dimensional spatial hypersurfaces $$\Sigma_t$$ evolving in time. The line element is cast as:
+Finally, in the chaotic final moments of coalescence, the binary enters the highly non-linear, strong-field regime where all perturbative expansions shatter. Here, we must solve the full, unadulterated Einstein field equations. This is typically achieved using the 3+1 ADM decomposition [3]. We slice four-dimensional spacetime into three-dimensional spatial hypersurfaces $\Sigma_t$ evolving in time. The line element is cast as:
 
 $$
 ds^2 = -\alpha^2 dt^2 + \gamma_{ij} (dx^i + \beta^i dt)(dx^j + \beta^j dt)
 $$
 
-where $$\alpha$$ is the lapse function dictating the rate of proper time flow, $$\beta^i$$ is the shift vector governing coordinate drift, and $$\gamma_{ij}$$ is the induced spatial metric. The evolution of the spacetime is then dictated by the time derivative of the spatial metric and its conjugate momentum, the extrinsic curvature $$K_{ij}$$:
+where $\alpha$ is the lapse function dictating the rate of proper time flow, $\beta^i$ is the shift vector governing coordinate drift, and $\gamma_{ij}$ is the induced spatial metric. The evolution of the spacetime is then dictated by the time derivative of the spatial metric and its conjugate momentum, the extrinsic curvature $K_{ij}$:
 
 $$
 \partial_t \gamma_{ij} = -2\alpha K_{ij} + \nabla_i \beta_j + \nabla_j \beta_i
@@ -119,7 +119,7 @@ $$
 d(t) = F^+(\alpha_s, \delta_s, \psi_s) h_+(t; \boldsymbol{\theta}) + F^\times(\alpha_s, \delta_s, \psi_s) h_\times(t; \boldsymbol{\theta}) + n(t)
 $$
 
-where $$F^{+,\times}$$ are the antenna pattern functions of the detector, dependent on the source right ascension $$\alpha_s$$, declination $$\delta_s$$, and polarization angle $$\psi_s$$. Assuming the detector noise $$n(t)$$ is stationary and Gaussian with a one-sided power spectral density $$S_n(f)$$, the probability of observing data $$d$$ given our source parameters $$\theta^\mu$$ is governed by the Whittle likelihood [4].
+where $F^{+,\times}$ are the antenna pattern functions of the detector, dependent on the source right ascension $\alpha_s$, declination $\delta_s$, and polarization angle $\psi_s$. Assuming the detector noise $n(t)$ is stationary and Gaussian with a one-sided power spectral density $S_n(f)$, the probability of observing data $d$ given our source parameters $\theta^\mu$ is governed by the Whittle likelihood [4].
 
 $$
 \ln \mathcal{L}(d | \theta^\mu) \propto -\frac{1}{2} (d - h(\theta^\mu) | d - h(\theta^\mu))
@@ -150,7 +150,7 @@ The module provides tools to construct mock injections and evaluate standard Bin
 
 ### `ESIGMAInspiral`
 **`jaxpe.gw.esigma.ESIGMAInspiral`**
-Computes Extreme Mass Ratio Inspiral (EMRI) waveforms using the ESIGMA self-force model. Generates the strain components $$h_+$$ and $$h_\times$$ given a dictionary of binary parameters.
+Computes Extreme Mass Ratio Inspiral (EMRI) waveforms using the ESIGMA self-force model. Generates the strain components $h_+$ and $h_\times$ given a dictionary of binary parameters.
 
 ### `Detector`
 **`jaxpe.gw.detectors.Detector(NamedTuple)`**
