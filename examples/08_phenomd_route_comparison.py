@@ -1,7 +1,7 @@
 """Cross-validation of two parameter-estimation methods on a PhenomD injection.
 
 This is the frequency-domain, aligned-spin counterpart of
-``examples/07_route_comparison.py``. It injects one IMRPhenomD signal and recovers its
+``examples/07_esigma_route_comparison.py``. It injects one IMRPhenomD signal and recovers its
 intrinsic parameters two different ways, checking that the posteriors agree. Agreement
 is a strong end-to-end test: the two methods share almost no code, so a match validates
 both the differentiable likelihood and the marginalized likelihood at once.
