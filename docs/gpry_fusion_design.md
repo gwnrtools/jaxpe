@@ -700,6 +700,96 @@ case-(2) models. Four findings from getting both routes to converge:
    from the eval counts above) — the correct axis on which to judge the surrogate for
    minutes-per-call models, where wall-clock is dominated by waveform generation.
 
+*Context for this block: the cross-validation above was on ESIGMA (time-domain,
+eccentric, multi-harmonic). Repeating the Route-A-vs-Route-B check on a frequency-domain
+dominant-$(2,2)$-mode model (IMRPhenomD) yielded a much cheaper Route-B marginalizer and
+let us measure the §D4 profiling checkpoint as a function of **signal duration** — the
+axis the single Phase-1 datum could only extrapolate over.*
+
+**PhenomD Route B via an exact closed-form marginal, and the duration-scaling profiling
+campaign (2026-07-16; marginal + cross-validation done, scaling campaign running).**
+
+*A cheaper Route B for dominant-mode FD models.* For a dominant-$(2,2)$-mode model
+$h_+ = h_0(1+\cos^2\iota)/2$ and $h_\times = -i h_0\cos\iota$ share one complex factor,
+and a coalescence-phase shift acts as $h_{\rm det}(\phi_c) = e^{\pm 2i\phi_c}
+h_{\rm det}(0)$ *exactly*, so the $\phi_c$ integral collapses to $\ln I_0(u|Z|)$ (a
+Bessel function) and only the $D_L$ integral remains (1-D quadrature) — no
+spherical-harmonic-mode decomposition and no FFT, unlike the general
+`ModesNetworkLikelihood`. Landed as `PhaseDistanceMarginalLikelihood`
+(`jaxpe/gw/fd_marginal.py`, exported) with a **dominant-mode self-check** that measures
+the residual of $h_{\rm det}(\phi_c)/h_{\rm det}(0)$ from a pure phase and warns if a
+higher-mode model is plugged in — the closed form is exact only for dominant-mode models.
+Validated (`tests/test_fd_marginal.py`) against an independent brute-force 2-D
+$(\phi_c, D_L)$ quadrature of the *full* likelihood ($<10^{-3}$); residual $\approx 0$ for
+PhenomD, above tolerance (warns) for ESIGMA $(2,2)+(3,3)$. This is now the natural Route B
+for FD dominant-mode models; the mode-based marginalizer stays for genuinely
+multi-harmonic ones (ESIGMA, precessing).
+
+*Three-route cross-validation.* On a zero-noise aligned-spin PhenomD injection (network
+SNR $\approx 13$), Route A (gradient, CPU **and** GPU) and Route B (closed-form marginal +
+GPry) recover the full intrinsic vector $(\mathcal{M}, q, \chi_{1z}, \chi_{2z})$ and agree
+at both a nonspin $(\mathcal{M}, q)$ and an aligned-spin stage
+(`examples/08_fd_dominant_mode_route_comparison.py`; overlays in
+`examples/output/phenomd_*_route_comparison.png`). Route B converges in $\sim 24$ (2-D) /
+$\sim 320$ (4-D) true evaluations vs $\sim 10^4$ gradient steps for Route A.
+
+*Finding #2 reversed on FD models.* On PhenomD the T2000 GPU is $\sim 1.2\times$ **faster**
+than CPU for Route-A gradient PE ($1123$ s GPU vs $1340$ s CPU nonspin; $1073$ vs $1314$
+aligned-spin) — the **opposite** of the ESIGMA result (finding #2: GPU $2.6\times$ slower).
+That slowdown was ODE-architecture-specific: PhenomD's likelihood is a vectorized FD kernel
+with no sequential diffrax ODE and no forward-sensitivity tape, so the GPU's width is usable
+and fp64 throttling is outweighed. The lever is width, not depth.
+
+*Duration-scaling profiling campaign — the §D4 checkpoint across waveform cost.*
+`examples/08` now (i) reads/writes **bilby-convention** injection files (portable inputs:
+component masses, `a_i`/`tilt_i` spins, `theta_jn`), (ii) auto-sizes the analysis segment
+per injection (pycbc signal length; 0PN fallback; next power of two), and (iii) generates a
+**matched-SNR ($\approx 15$) total-mass sweep** $80\to 10\,M_\odot$ at fixed $q=0.8$,
+$\chi=+0.2/-0.1$. Lower total mass $\Rightarrow$ longer signal: the sweep spans segment
+durations $4$ s ($80\,M_\odot$, $n_{\rm freq}=4097$) to $32$ s ($10\,M_\odot$,
+$n_{\rm freq}=32769$) — an $8\times$ waveform-cost lever at fixed SNR. All three routes
+(A-CPU, A-GPU, B) are timed across it; Route B additionally logs the wall-clock split
+between **waveform generation** (timed `PhaseDistanceMarginalLikelihood` calls) and **GPry
+GP-fit + acquisition** (the remainder of `engine.run()`) — precisely the split D4's port
+trigger is defined on. Run at `--config fast` (timing-oriented; per-step/per-eval rates,
+not convergence, carry the scaling signal). **Measured** (matched SNR 15, 4-D intrinsic
+$(\mathcal{M},q,\chi_{1z},\chi_{2z})$):
+
+| $M_{\rm tot}$ | dur. | $n_{\rm freq}$ | B evals | B total | · waveform | · GPry | A-CPU | A-GPU |
+|---|---|---|---|---|---|---|---|---|
+| 80 | 4 s | 4097 | 184 | 258 s | 2.6 s | 255 s | 187 s | 166 s |
+| 70 | 4 s | 4097 | 376 | 651 s | 3.5 s | 648 s | 168 s | 142 s |
+| 60 | 8 s | 8193 | 460 | 832 s | 5.2 s | 827 s | 244 s | 167 s |
+| 50 | 8 s | 8193 | 176 | 302 s | 3.2 s | 298 s | 243 s | 161 s |
+| 40 | 8 s | 8193 | 240 | 430 s | 3.6 s | 427 s | 246 s | — |
+| 30 | 8 s | 8193 | 392 | 812 s | 4.9 s | 807 s | 247 s | 162 s |
+| 20 | 16 s | 16385 | 504 | 1341 s | 9.1 s | 1332 s | 613 s | 210 s |
+
+($M_{\rm tot}=10$, 32 s: the gradient graph overflowed host-LLVM / T2000 memory — a 4 GB
+hardware limit, not a code issue, and two A-GPU cells hit the same OOM; the Route-B point
+hit the *documented* UltraNest MLFriends fragility on its sharp posterior — both are
+known-issue limits, not new failures.) Scaling figure:
+[`examples/output/phenomd_duration_scaling.png`](../examples/output/phenomd_duration_scaling.png).
+
+*D4 assessment (measured).* **Route B is $\sim 99\%$ GPry across the whole sweep:** waveform
+generation is $0.5$–$1.1\%$ of wall-clock ($2.6$–$9.1$ s) while GP fit + NORA/UltraNest
+acquisition is the remaining $255$–$1332$ s — GPry outweighs the waveform by $\sim
+95$–$185\times$ with **no crossover**, because PhenomD is a vectorized $\sim 9$–$18$ ms/call
+kernel even at $16$ s. Route B's cost tracks the *evaluation count* ($176$–$504$, set by how
+sharp the intrinsic posterior is — lower masses are better-constrained), not the signal
+duration. So the D4 non-waveform share is $\sim 99\%$, far past the $30\%$ port trigger, and
+the indicated lever is the **acquisition** nested sampler (the **BlackJAX** backend already
+exposed at the `gpry/ns_interfaces.py` seam), *not* the GP fit or a waveform port. **But the
+trigger is regime-dependent on waveform cost:** the crossover to waveform-dominated sits at a
+per-call waveform cost of $\sim 1.4$–$2.6$ s (where waveform/eval $\approx$ GPry/eval); a
+production case-(2) EOB waveform (minutes/call, $\sim 10^{4}\times$ PhenomD) lands far on the
+waveform-dominated side, so **for the real target D4 stays "interface" and the surrogate's
+value is minimizing waveform calls** — while for cheap FD models a JAX acquisition NS is the
+one worthwhile partial port. Separately, the **A-route GPU advantage grows with signal
+duration** ($1.1\times$ at $4$ s $\to 2.9\times$ at $16$ s: $613$ s CPU vs $210$ s GPU at
+$M_{\rm tot}=20$), reinforcing finding-#2-reversed: longer FD signals are *wider* (larger
+$n_{\rm freq}$), and width is the GPU's lever.
+
 ### Phase 2 — Multifidelity mean (~4–6 d)
 
 | # | task | deliverable / test |

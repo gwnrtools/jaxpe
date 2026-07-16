@@ -1,73 +1,82 @@
-"""Cross-validation of two parameter-estimation methods on a PhenomD injection.
+"""Cross-validation and duration-scaling of two PE methods on FD dominant-mode signals.
 
 This is the frequency-domain, aligned-spin counterpart of
-``examples/07_td_higher_mode_route_comparison.py``. It injects one IMRPhenomD signal and recovers its
-intrinsic parameters two different ways, checking that the posteriors agree. Agreement
-is a strong end-to-end test: the two methods share almost no code, so a match validates
-both the differentiable likelihood and the marginalized likelihood at once.
+``examples/07_td_higher_mode_route_comparison.py``. It injects an IMRPhenomD signal and
+recovers its intrinsic parameters two different ways, checking that the posteriors
+agree. Agreement is a strong end-to-end test: the two methods share almost no code, so a
+match validates both the differentiable likelihood and the marginalized likelihood.
 
 The two methods
 ---------------
-1. Gradient-based direct sampling
-   Samples the full set of free parameters directly from the differentiable
-   likelihood with the normalizing-flow-enhanced Global-Local sampler (Metropolis-
-   adjusted Langevin kernel). It explores the intrinsic parameters plus the two
-   extrinsic parameters left free (coalescence phase and luminosity distance).
+1. Gradient-based direct sampling (Route A)
+   Samples the full set of free parameters directly from the differentiable likelihood
+   with the normalizing-flow-enhanced Global-Local sampler (Metropolis-adjusted Langevin
+   kernel): the intrinsic parameters plus coalescence phase and luminosity distance.
 
-2. Surrogate marginalized inference
-   Marginalizes coalescence phase and luminosity distance out of the likelihood
-   analytically, leaving a likelihood over the intrinsic parameters only, and builds a
-   Gaussian-process surrogate of it by active learning (GPry) from a few dozen
-   evaluations. This is the method intended for expensive, non-differentiable waveform
-   models where each likelihood call is precious.
+2. Surrogate marginalized inference (Route B)
+   Marginalizes phase and distance out of the likelihood analytically (the closed-form
+   :class:`~jaxpe.gw.PhaseDistanceMarginalLikelihood`, exact because IMRPhenomD is a
+   dominant-(2,2)-mode model) and builds a Gaussian-process surrogate of the resulting
+   intrinsic likelihood by active learning (GPry).
 
-Two stages of increasing dimensionality are provided:
-  * ``nonspin``      -- recover (chirp_mass, mass_ratio); spins fixed at zero.
-  * ``alignedspin``  -- recover (chirp_mass, mass_ratio, spin1z, spin2z).
-Sky position, inclination and coalescence time are held FIXED at truth in both methods
-so the comparison is like-for-like over the same intrinsic parameters.
+Sky position, inclination and coalescence time are held FIXED at truth in both methods.
 
-How Route B differs from example 07 (and why)
----------------------------------------------
-Example 07 marginalizes phase and distance with the general *mode-based* marginalizer
-(:class:`~jaxpe.gw.marginalized.ModesNetworkLikelihood`), which decomposes the waveform
-into spherical-harmonic modes -- necessary for a genuinely multi-harmonic model like
-the eccentric ESIGMA. IMRPhenomD is a dominant-(2,2)-mode model, so here Route B uses
-the exact closed-form marginal :class:`~jaxpe.gw.PhaseDistanceMarginalLikelihood`
-instead: the phase integral collapses to a Bessel function ln I0(u|Z|) and the distance
-integral to a 1-D quadrature, with no mode decomposition or FFT. That object self-checks
-that the plugged-in model really is dominant-mode (it warns otherwise), and it is
-model-agnostic, so any frequency-domain model registered in ``MODELS`` below can be
-swapped in via ``--model``.
+What this script can do
+-----------------------
+* Single injection, two "stages" (default): ``nonspin`` recovers (chirp_mass,
+  mass_ratio); ``alignedspin`` also recovers (spin1z, spin2z).
+* Read injections from a bilby/pycbc-compatible file (``--injection-file``) and run the
+  routes on each, so inputs are portable across tools.
+* Generate a matched-SNR total-mass sweep as a bilby injection file
+  (``--make-mass-sweep``); lower total mass => longer signal, which is the lever for the
+  duration-scaling study.
+* Profile Route B: how much wall time is spent generating waveforms vs training the GP
+  surrogate inside GPry. Measured across this sweep, GPry's GP fit + acquisition is
+  ~99% of Route B for vectorized frequency-domain waveforms (the waveform, already JAX,
+  is ms-scale even at 16 s), so a jaxified acquisition sampler is the only worthwhile
+  port; the waveform dominates only for minutes-per-call models (the production target).
+* Summarize duration scaling across the three routes A-CPU, A-GPU and B
+  (``--scaling-plot``).
+
+Injection file format (bilby / pycbc compatible)
+------------------------------------------------
+A whitespace/CSV table with a header of bilby parameter names (one row per injection),
+or a JSON dict / list of dicts. Recognized columns (bilby convention, with jaxpe
+fallbacks): ``mass_1, mass_2`` or ``chirp_mass, mass_ratio``; aligned spins as
+``a_1, a_2, tilt_1, tilt_2`` (spin_z = a*cos(tilt)) or directly ``spin1z, spin2z``;
+``theta_jn`` or ``inclination``; ``luminosity_distance, phase, ra, dec, psi,
+geocent_time``; optional ``duration``. This is exactly the table ``bilby_pipe
+--injection-file`` consumes.
 
 Hardware note (opposite to example 07)
 --------------------------------------
-The likelihood must run in float64. For the ODE-based ESIGMA model of example 07 the
-gradient sampler is *slower* on a small consumer GPU than on CPU; for the vectorized
-frequency-domain IMRPhenomD the gradient sampler is *faster* on the GPU. Run the
-gradient method once per backend (via ``JAX_PLATFORMS``) to reproduce that finding --
-the overlay figure keeps the CPU and GPU posteriors as separate curves so you can see
-they coincide.
-
-Results are persisted per run to ``examples/output/`` and every run present for a stage
-is overlaid on one figure, mirroring the ``route_comparison_3way`` convention. So a
-single ``--method both`` run on CPU gives a two-curve figure; adding a GPU gradient run
-upgrades it to three curves.
+The likelihood runs in float64. For the ODE-based ESIGMA of example 07 the gradient
+sampler is slower on a small consumer GPU than on CPU; for the vectorized frequency-
+domain IMRPhenomD it is faster on the GPU. Run the gradient method once per backend (via
+``JAX_PLATFORMS``) to keep the CPU and GPU curves separate.
 
 Examples
 --------
-    # gradient (whatever JAX sees) + surrogate, both stages, then overlay:
+    # single injection, both methods, both stages (then overlay):
     JAX_PLATFORMS=cpu python examples/08_fd_dominant_mode_route_comparison.py
-    # add the GPU gradient curve to the same figures:
-    python examples/08_fd_dominant_mode_route_comparison.py --method gradient
-    # just rebuild the overlays from already-saved runs:
-    python examples/08_fd_dominant_mode_route_comparison.py --overlay-only
+    # generate the matched-SNR mass sweep as a bilby injection file:
+    python examples/08_fd_dominant_mode_route_comparison.py --make-mass-sweep sweep.dat
+    # run all three routes over a file of injections (CPU gradient + surrogate here):
+    JAX_PLATFORMS=cpu python examples/08_fd_dominant_mode_route_comparison.py \
+        --injection-file sweep.dat --config fast
+    # add the GPU gradient curve, then build the duration-scaling summary:
+    python examples/08_fd_dominant_mode_route_comparison.py --injection-file sweep.dat \
+        --method gradient --config fast
+    python examples/08_fd_dominant_mode_route_comparison.py --scaling-plot
 
-Requires jaxpe with the ``surrogate`` extra (GPry) for the surrogate method.
+Requires jaxpe with the ``surrogate`` extra (GPry). ``--make-mass-sweep`` uses pycbc's
+signal-length estimator when available (a 0-post-Newtonian fallback otherwise).
 """
 
 import argparse
+import json
 import time
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import jax
@@ -89,8 +98,8 @@ REFERENCE_DISTANCE_MPC = (
     1000.0  # distance at which Route B evaluates its reference strain
 )
 
-# The shared aligned-spin binary. The two stages differ only in whether the spins are
-# injected (and recovered) or pinned at zero.
+# The shared aligned-spin binary for the single-injection (stage) mode. The two stages
+# differ only in whether the spins are injected/recovered or pinned at zero.
 BASE_PARAMETERS = dict(
     chirp_mass=25.0,  # solar masses
     mass_ratio=0.8,
@@ -109,16 +118,39 @@ STAGE_SPINS = {
 
 # Prior ranges. Distance uses a distance^2 (volume) prior over these bounds; phase is
 # uniform on [0, 2*pi]. The surrogate marginalizes phase and distance with these same
-# priors, so the two methods are compared on identical footing.
-CHIRP_MASS_PRIOR = (23.0, 27.0)
+# priors, so the two methods are compared on identical footing. The chirp-mass prior is
+# widened for the mass sweep, whose injected chirp masses span ~4 - 35 solar masses.
 MASS_RATIO_PRIOR = (0.5, 1.0)
 SPIN_PRIOR = (-0.5, 0.5)
 DISTANCE_PRIOR_MPC = (1000.0, 8000.0)
+CHIRP_MASS_PRIOR_STAGE = (23.0, 27.0)  # narrow prior around the single stage injection
+CHIRP_MASS_HALF_WIDTH = 2.0  # sweep: prior is truth +- this many solar masses
+
+# Sampler / GPry workload presets. "full" reproduces the committed cross-validation;
+# "fast" is a timing-oriented preset for the duration-scaling study, where the per-step
+# and per-evaluation rates -- not full posterior convergence -- carry the signal.
+CONFIGS = {
+    "full": dict(n_chains=48, n_training=15, n_production=150),
+    "fast": dict(n_chains=32, n_training=6, n_production=20),
+}
+
+# Matched-SNR total-mass sweep defaults (the duration-scaling campaign).
+SWEEP_TOTAL_MASSES = (80.0, 70.0, 60.0, 50.0, 40.0, 30.0, 20.0, 10.0)
+SWEEP_MASS_RATIO = 0.8
+SWEEP_SPIN1Z = 0.2
+SWEEP_SPIN2Z = -0.1
+SWEEP_TARGET_SNR = 15.0
+SWEEP_SKY = dict(
+    inclination=0.4,
+    phase=1.5,
+    ra=1.2,
+    dec=0.5,
+    psi=0.8,
+    geocent_time=COALESCENCE_TIME_GPS,
+)
 
 
 # A tiny registry so any frequency-domain, dominant-(2,2)-mode model can be swapped in.
-# The model must take the standard params dict and return (h+, hx) in the frequency
-# domain; the closed-form Route B self-checks that it is dominant-mode.
 def _build_model(name, f_ref):
     from jaxpe.gw import IMRPhenomD
 
@@ -132,99 +164,371 @@ def _build_model(name, f_ref):
 
 
 MODELS = ("phenomd",)
-# Pretty names for figure titles; falls back to the registry key for unlisted models.
 _MODEL_DISPLAY = {"phenomd": "PhenomD"}
 
 
-def intrinsic_names(stage):
-    """The parameters both methods estimate at a given stage."""
-    if stage == "alignedspin":
-        return ("chirp_mass", "mass_ratio", "spin1z", "spin2z")
-    return ("chirp_mass", "mass_ratio")
+# ============================================================ injection description
+@dataclass
+class Injection:
+    """One injection plus the analysis grid and the parameters to recover.
+
+    ``params`` uses jaxpe names (chirp_mass, mass_ratio, spin1z, spin2z,
+    luminosity_distance, inclination, phase, ra, dec, psi, geocent_time). ``recover`` is
+    the ordered tuple of intrinsic parameters both methods estimate; every other
+    parameter is held fixed at its injected value.
+    """
+
+    label: str
+    params: dict
+    recover: tuple
+    duration: float
+    sampling_rate: float = SAMPLING_RATE_HZ
+    network_snr: float = field(default=None)
+
+    def truth(self):
+        return [self.params[n] for n in self.recover]
 
 
-def injected_parameters(stage):
-    return {**BASE_PARAMETERS, **STAGE_SPINS[stage]}
+def chirp_mass_of(mass_1, mass_2):
+    return (mass_1 * mass_2) ** 0.6 / (mass_1 + mass_2) ** 0.2
 
 
-def build_injection(model_name, stage):
-    """Inject the stage's signal into two detectors (Hanford, Livingston), no noise."""
+def component_masses(total_mass, mass_ratio):
+    """(m1, m2) from total mass and mass_ratio = m2/m1 <= 1 (m1 >= m2)."""
+    m1 = total_mass / (1.0 + mass_ratio)
+    return m1, total_mass - m1
+
+
+def signal_length_seconds(mass_1, mass_2, f_low):
+    """Time in band from f_low to merger. Uses pycbc's estimator; 0PN fallback."""
+    try:
+        from pycbc.waveform import get_waveform_filter_length_in_time
+
+        return float(
+            get_waveform_filter_length_in_time(
+                "IMRPhenomD", mass1=mass_1, mass2=mass_2, f_lower=f_low
+            )
+        )
+    except Exception:
+        # leading-order (0PN) chirp time; verified to ~10% of the pycbc value
+        G, c, msun = 6.674e-11, 2.998e8, 1.989e30
+        mc = G * chirp_mass_of(mass_1, mass_2) * msun / c**3  # seconds
+        return (5.0 / 256.0) * mc ** (-5.0 / 3.0) * (np.pi * f_low) ** (-8.0 / 3.0)
+
+
+def auto_duration(mass_1, mass_2, f_low, post_trigger=2.0, safety=1.25, min_dur=4.0):
+    """Segment duration (power of 2 s) that contains the signal plus padding."""
+    needed = safety * signal_length_seconds(mass_1, mass_2, f_low) + post_trigger + 1.0
+    return float(2.0 ** np.ceil(np.log2(max(needed, min_dur))))
+
+
+# ------------------------------------------------------------ injection file I/O
+# Defaults for extrinsic parameters absent from an injection file.
+_EXTRINSIC_DEFAULTS = dict(
+    inclination=0.0,
+    phase=0.0,
+    ra=0.0,
+    dec=0.0,
+    psi=0.0,
+    geocent_time=COALESCENCE_TIME_GPS,
+)
+
+
+def _row_to_jaxpe_params(row):
+    """Translate one bilby/pycbc/jaxpe parameter row into a jaxpe params dict."""
+    g = lambda *keys: next((row[k] for k in keys if k in row and _finite(row[k])), None)
+
+    # masses: prefer chirp_mass/mass_ratio, else component masses (bilby/pycbc)
+    chirp = g("chirp_mass")
+    q = g("mass_ratio", "q")
+    m1, m2 = g("mass_1", "mass1"), g("mass_2", "mass2")
+    if chirp is None or q is None:
+        if m1 is None or m2 is None:
+            raise ValueError(
+                "injection row needs chirp_mass+mass_ratio or mass_1+mass_2"
+            )
+        m1, m2 = (m1, m2) if m1 >= m2 else (m2, m1)  # enforce m1 >= m2
+        chirp, q = chirp_mass_of(m1, m2), m2 / m1
+
+    # aligned spins: prefer explicit z-components, else a*cos(tilt) (bilby convention)
+    def spin_z(idx):
+        z = g(f"spin{idx}z", f"spin_{idx}z", f"chi_{idx}")
+        if z is not None:
+            return float(z)
+        a, tilt = g(f"a_{idx}"), g(f"tilt_{idx}")
+        return float(a) * np.cos(float(tilt)) if a is not None else 0.0
+
+    params = dict(
+        chirp_mass=float(chirp),
+        mass_ratio=float(q),
+        spin1z=spin_z(1),
+        spin2z=spin_z(2),
+        luminosity_distance=float(
+            g("luminosity_distance", "distance") or REFERENCE_DISTANCE_MPC
+        ),
+        inclination=float(
+            g("inclination", "theta_jn") or _EXTRINSIC_DEFAULTS["inclination"]
+        ),
+    )
+    for key, default in _EXTRINSIC_DEFAULTS.items():
+        if key == "inclination":
+            continue
+        val = g(key)
+        params[key] = float(val) if val is not None else float(default)
+    return params
+
+
+def _finite(x):
+    try:
+        return np.isfinite(float(x))
+    except (TypeError, ValueError):
+        return False
+
+
+def load_injections(
+    path,
+    recover=("chirp_mass", "mass_ratio", "spin1z", "spin2z"),
+    f_low=LOWER_FREQUENCY_HZ,
+    sampling_rate=SAMPLING_RATE_HZ,
+):
+    """Read a bilby/pycbc-compatible injection file into a list of Injection objects."""
+    path = Path(path)
+    if path.suffix == ".json":
+        payload = json.loads(path.read_text())
+        rows = payload if isinstance(payload, list) else [payload]
+    else:  # whitespace/CSV table with a header of parameter names
+        import pandas as pd
+
+        sep = "," if path.suffix == ".csv" else r"\s+"
+        rows = pd.read_csv(path, sep=sep, comment="#").to_dict("records")
+
+    injections = []
+    for i, row in enumerate(rows):
+        params = _row_to_jaxpe_params(row)
+        m1, m2 = _component_from_chirp_q(params["chirp_mass"], params["mass_ratio"])
+        dur = (
+            float(row["duration"])
+            if ("duration" in row and _finite(row.get("duration")))
+            else auto_duration(m1, m2, f_low)
+        )
+        label = str(row.get("label") or f"inj{i}")
+        injections.append(Injection(label, params, tuple(recover), dur, sampling_rate))
+    return injections
+
+
+def _component_from_chirp_q(chirp, q):
+    """(m1, m2) from chirp mass and mass_ratio = m2/m1.
+
+    Inverts Mc = M_total * eta^(3/5) with eta = q/(1+q)^2, i.e.
+    M_total = Mc * (1+q)^(6/5) / q^(3/5).
+    """
+    total = chirp * (1.0 + q) ** 1.2 / q**0.6
+    return component_masses(total, q)
+
+
+def write_injection_file(path, injections):
+    """Write injections as a bilby-convention whitespace table (a_i, tilt_i spins)."""
+    cols = [
+        "label",
+        "mass_1",
+        "mass_2",
+        "a_1",
+        "a_2",
+        "tilt_1",
+        "tilt_2",
+        "theta_jn",
+        "luminosity_distance",
+        "phase",
+        "ra",
+        "dec",
+        "psi",
+        "geocent_time",
+        "duration",
+    ]
+    lines = [
+        "# bilby-convention injection table (spin_z = a * cos(tilt))",
+        " ".join(cols),
+    ]
+    for inj in injections:
+        p = inj.params
+        m1, m2 = _component_from_chirp_q(p["chirp_mass"], p["mass_ratio"])
+        a1, t1 = abs(p["spin1z"]), (0.0 if p["spin1z"] >= 0 else np.pi)
+        a2, t2 = abs(p["spin2z"]), (0.0 if p["spin2z"] >= 0 else np.pi)
+        vals = [
+            inj.label,
+            m1,
+            m2,
+            a1,
+            a2,
+            t1,
+            t2,
+            p["inclination"],
+            p["luminosity_distance"],
+            p["phase"],
+            p["ra"],
+            p["dec"],
+            p["psi"],
+            p["geocent_time"],
+            inj.duration,
+        ]
+        lines.append(" ".join(str(v) for v in vals))
+    Path(path).write_text("\n".join(lines) + "\n")
+
+
+# ------------------------------------------------------- stage / sweep constructors
+def stage_injection(stage):
+    """Build the single-injection Injection for the default 'stage' mode."""
+    params = {**BASE_PARAMETERS, **STAGE_SPINS[stage]}
+    recover = ("chirp_mass", "mass_ratio") + (
+        ("spin1z", "spin2z") if stage == "alignedspin" else ()
+    )
+    return Injection(stage, params, recover, SEGMENT_DURATION_S, SAMPLING_RATE_HZ)
+
+
+def make_mass_sweep(
+    model_name,
+    total_masses=SWEEP_TOTAL_MASSES,
+    mass_ratio=SWEEP_MASS_RATIO,
+    spin1z=SWEEP_SPIN1Z,
+    spin2z=SWEEP_SPIN2Z,
+    target_snr=SWEEP_TARGET_SNR,
+    f_low=LOWER_FREQUENCY_HZ,
+    sampling_rate=SAMPLING_RATE_HZ,
+):
+    """Build a matched-SNR total-mass sweep (fixed q and spins), tuning distance per
+    injection to `target_snr`. Lower total mass => longer signal => the duration lever.
+    """
     from jaxpe.gw import make_injection
 
-    injection = injected_parameters(stage)
+    injections = []
+    for total in total_masses:
+        m1, m2 = component_masses(total, mass_ratio)
+        chirp = chirp_mass_of(m1, m2)
+        dur = auto_duration(m1, m2, f_low)
+        base = dict(
+            chirp_mass=chirp,
+            mass_ratio=mass_ratio,
+            spin1z=spin1z,
+            spin2z=spin2z,
+            luminosity_distance=REFERENCE_DISTANCE_MPC,
+            **SWEEP_SKY,
+        )
+        waveform = _build_model(model_name, f_low)
+        like = make_injection(
+            waveform,
+            base,
+            detector_names=("H1", "L1"),
+            duration=dur,
+            sampling_rate=sampling_rate,
+            f_min=f_low,
+            noise_seed=None,
+        )
+        snr_ref = float(
+            np.sqrt(
+                sum(
+                    s**2
+                    for s in like.optimal_snr(
+                        {k: jnp.asarray(v) for k, v in base.items()}
+                    ).values()
+                )
+            )
+        )
+        base["luminosity_distance"] = REFERENCE_DISTANCE_MPC * snr_ref / target_snr
+        params = base
+        injections.append(
+            Injection(
+                f"M{int(total)}",
+                params,
+                ("chirp_mass", "mass_ratio", "spin1z", "spin2z"),
+                dur,
+                sampling_rate,
+                network_snr=target_snr,
+            )
+        )
+        print(
+            f"[sweep] M_total={total:5.1f}  chirp={chirp:6.2f}  duration={dur:5.1f}s  "
+            f"distance={params['luminosity_distance']:7.0f}Mpc  (SNR->{target_snr:.0f})"
+        )
+    return injections
+
+
+# ============================================================ likelihood + methods
+def build_injection_likelihood(model_name, inj: Injection):
+    """Inject `inj` into a two-detector network (Hanford, Livingston), no noise."""
+    from jaxpe.gw import make_injection
+
     waveform = _build_model(model_name, LOWER_FREQUENCY_HZ)
     likelihood = make_injection(
         waveform,
-        injection,
+        inj.params,
         detector_names=("H1", "L1"),
-        duration=SEGMENT_DURATION_S,
-        sampling_rate=SAMPLING_RATE_HZ,
+        duration=inj.duration,
+        sampling_rate=inj.sampling_rate,
         f_min=LOWER_FREQUENCY_HZ,
         noise_seed=None,
     )
     per_detector = likelihood.optimal_snr(
-        {k: jnp.asarray(v) for k, v in injection.items()}
+        {k: jnp.asarray(v) for k, v in inj.params.items()}
     )
-    network = float(np.sqrt(sum(s**2 for s in per_detector.values())))
+    inj.network_snr = float(np.sqrt(sum(s**2 for s in per_detector.values())))
+    n_freq = int(len(likelihood.freqs))
     print(
-        f"[injection:{stage}] {model_name} signal-to-noise per detector "
-        f"{per_detector}, network {network:.1f}"
+        f"[injection:{inj.label}] {model_name}  duration={inj.duration:.1f}s  "
+        f"n_freq={n_freq}  network SNR {inj.network_snr:.1f}"
     )
-    return likelihood, network
+    return likelihood, n_freq
+
+
+def _chirp_prior(inj: Injection):
+    """Chirp-mass prior: narrow fixed window for the stage demo, truth-centred for a sweep."""
+    if inj.label in STAGE_SPINS:
+        return CHIRP_MASS_PRIOR_STAGE
+    mc = inj.params["chirp_mass"]
+    return (mc - CHIRP_MASS_HALF_WIDTH, mc + CHIRP_MASS_HALF_WIDTH)
 
 
 # ------------------------------------------------- method 1: gradient direct sampling
 def run_gradient_direct_sampling(
-    likelihood, stage, n_chains=48, n_production=150, seed=0
+    likelihood, inj: Injection, n_freq, config="full", seed=0
 ):
-    """Sample the intrinsic parameters plus phase and distance directly with gradients.
-
-    Uses the Global-Local sampler (normalizing-flow global proposals plus a local
-    Metropolis-adjusted Langevin kernel). Returns the intrinsic marginal together with
-    timing and cost information.
-    """
+    """Sample the intrinsic parameters plus phase and distance directly with gradients."""
     from jaxpe.core.priors import JointPrior, PowerLaw, Uniform
     from jaxpe.core.problem import InferenceProblem
     from jaxpe.kernels import MALA
     from jaxpe.sampler import GlobalLocalConfig, Sampler, best_of_prior_init
 
+    cfg = CONFIGS[config]
     device = jax.devices()[0]
     print(
-        f"\n=== Method 1: gradient-based direct sampling [{stage}] "
-        f"(device: {device}) ==="
+        f"\n=== Route A: gradient direct sampling [{inj.label}] (device: {device}) ==="
     )
 
-    injection = injected_parameters(stage)
+    cm_prior = _chirp_prior(inj)
     sampled = {
-        "chirp_mass": Uniform(low=CHIRP_MASS_PRIOR[0], high=CHIRP_MASS_PRIOR[1]),
+        "chirp_mass": Uniform(low=cm_prior[0], high=cm_prior[1]),
         "mass_ratio": Uniform(low=MASS_RATIO_PRIOR[0], high=MASS_RATIO_PRIOR[1]),
         "phase": Uniform(low=0.0, high=2 * np.pi),
         "luminosity_distance": PowerLaw(
             alpha=2.0, low=DISTANCE_PRIOR_MPC[0], high=DISTANCE_PRIOR_MPC[1]
         ),
     }
-    if stage == "alignedspin":
+    if "spin1z" in inj.recover:
         sampled["spin1z"] = Uniform(low=SPIN_PRIOR[0], high=SPIN_PRIOR[1])
         sampled["spin2z"] = Uniform(low=SPIN_PRIOR[0], high=SPIN_PRIOR[1])
     prior = JointPrior(sampled)
 
-    # Everything not sampled is supplied fixed at truth (sky, inclination, time, and the
-    # spins in the non-spinning stage).
-    fixed_keys = ["ra", "dec", "psi", "inclination", "geocent_time"]
-    if stage == "nonspin":
-        fixed_keys += ["spin1z", "spin2z"]
-    fixed = {k: jnp.asarray(injection[k]) for k in fixed_keys}
+    fixed = {k: jnp.asarray(v) for k, v in inj.params.items() if k not in sampled}
     problem = InferenceProblem(
         prior=prior,
         log_likelihood=lambda s: likelihood.log_likelihood({**fixed, **s}),
     )
 
-    buffer = n_chains * 20
-    config = GlobalLocalConfig(
-        n_chains=n_chains,
+    buffer = cfg["n_chains"] * 20
+    gl_config = GlobalLocalConfig(
+        n_chains=cfg["n_chains"],
         n_prelim_loops=2,
-        n_training_loops=15,
-        n_production_loops=n_production,
+        n_training_loops=cfg["n_training"],
+        n_production_loops=cfg["n_production"],
         n_local_steps=50,
         n_global_steps=50,
         local_thin=3,
@@ -234,59 +538,77 @@ def run_gradient_direct_sampling(
         n_epochs=40,
         batch_size=min(1024, 15 * buffer),
     )
-    sampler = Sampler(MALA(step_size=0.03), problem=problem, config=config)
-
+    kernel = MALA(step_size=0.03)
+    sampler = Sampler(kernel, problem=problem, config=gl_config)
     key = jax.random.PRNGKey(seed)
-    start_points = best_of_prior_init(key, problem, n_chains, n_draws=5000)
+    start_points = best_of_prior_init(key, problem, cfg["n_chains"], n_draws=5000)
+
+    # Exclude JIT/XLA compilation from the performance measurement, identically on CPU and
+    # GPU: run a minimal-loop probe (loop counts dropped to 1, everything else -- shapes,
+    # the *same* kernel instance, flow architecture -- unchanged) which warms the
+    # module-level jit cache (jaxpe.kernels.base._run_chains_jit, _global_block, the flow
+    # trainer step; all @jit / @eqx.filter_jit). The timed run then reuses those compiled
+    # executables on whatever backend this process is on, so its wall time is
+    # execution-only. Compile is reported separately.
+    probe_config = replace(
+        gl_config,
+        n_prelim_loops=1,
+        n_training_loops=1,
+        n_production_loops=1,
+        n_epochs=1,
+    )
+    t_probe = time.time()
+    Sampler(kernel, problem=problem, config=probe_config).run(key, x0=start_points)
+    compile_seconds = time.time() - t_probe
 
     started = time.time()
     result = sampler.run(key, x0=start_points)
-    wall_seconds = time.time() - started
+    wall_seconds = time.time() - started  # execution only (compile warmed above)
 
     samples = sampler.to_physical(result.samples).reshape(-1, problem.n_dim)
     names = list(problem.names)
-    order = [names.index(n) for n in intrinsic_names(stage)]
+    order = [names.index(n) for n in inj.recover]
     gradient_steps = (
-        config.n_prelim_loops + config.n_training_loops + config.n_production_loops
-    ) * config.n_local_steps
+        gl_config.n_prelim_loops
+        + gl_config.n_training_loops
+        + gl_config.n_production_loops
+    ) * gl_config.n_local_steps
     print(
-        f"[gradient:{stage}] {samples.shape[0]} samples, ~{gradient_steps} gradient "
-        f"steps, {wall_seconds:.0f} s on {device}"
+        f"[gradient:{inj.label}] {samples.shape[0]} samples, ~{gradient_steps} gradient "
+        f"steps, {wall_seconds:.0f} s exec (+{compile_seconds:.0f} s compile) on {device}"
     )
     return dict(
         samples=samples[:, order],
         weights=None,
-        wall_seconds=wall_seconds,
+        wall_seconds=wall_seconds,  # execution only (compile excluded)
+        compile_seconds=compile_seconds,
         likelihood_evaluations=gradient_steps,
         method="gradient",
         device=device.platform,
         n_samples=samples.shape[0],
+        duration=inj.duration,
+        n_freq=n_freq,
+        network_snr=inj.network_snr,
     )
 
 
 # --------------------------------------------- method 2: surrogate marginalized inference
-def run_surrogate_marginalized_inference(likelihood, stage, seed=11):
-    """Learn a surrogate of the phase-and-distance-marginalized likelihood (GPry).
-
-    Route B here is the closed-form :class:`~jaxpe.gw.PhaseDistanceMarginalLikelihood`,
-    valid because IMRPhenomD is a dominant-(2,2)-mode model with a fixed sky. Its
-    constructor self-checks that factorization on the injected parameters.
-    """
+def run_surrogate_marginalized_inference(likelihood, inj: Injection, n_freq, seed=11):
+    """Learn a GPry surrogate of the closed-form phase+distance-marginalized likelihood,
+    profiling waveform-generation time vs GP-training/acquisition time."""
     from jaxpe.gw import PhaseDistanceMarginalLikelihood
     from jaxpe.surrogate import GPryEngine
 
-    print(f"\n=== Method 2: surrogate marginalized inference [{stage}] (GPry) ===")
-    injection = injected_parameters(stage)
-    names = intrinsic_names(stage)
-
-    bounds = {"chirp_mass": CHIRP_MASS_PRIOR, "mass_ratio": MASS_RATIO_PRIOR}
-    if stage == "alignedspin":
+    print(f"\n=== Route B: surrogate marginalized inference [{inj.label}] (GPry) ===")
+    names = inj.recover
+    bounds = {"chirp_mass": _chirp_prior(inj), "mass_ratio": MASS_RATIO_PRIOR}
+    if "spin1z" in names:
         bounds["spin1z"] = SPIN_PRIOR
         bounds["spin2z"] = SPIN_PRIOR
-    fixed_ext = {k: injection[k] for k in ("ra", "dec", "psi", "inclination")}
-    if stage == "nonspin":
-        fixed_ext["spin1z"] = 0.0
-        fixed_ext["spin2z"] = 0.0
+    fixed_ext = {k: inj.params[k] for k in ("ra", "dec", "psi", "inclination")}
+    for spin in ("spin1z", "spin2z"):  # any spin not recovered is held fixed at truth
+        if spin not in names:
+            fixed_ext[spin] = inj.params[spin]
 
     marginal = PhaseDistanceMarginalLikelihood(
         likelihood,
@@ -295,62 +617,103 @@ def run_surrogate_marginalized_inference(likelihood, stage, seed=11):
         dist_bounds=DISTANCE_PRIOR_MPC,
         dist_power=2.0,
         d_ref=REFERENCE_DISTANCE_MPC,
-        check_params=injection,  # verifies the dominant-mode factorization for this model
+        check_params=inj.params,
     )
     print(
-        f"[surrogate:{stage}] dominant-mode residual "
+        f"[surrogate:{inj.label}] dominant-mode residual "
         f"{marginal.dominant_mode_residual:.2e} (0 => closed form exact)"
     )
+
+    # Profiling wrapper: accumulate time spent in the (waveform + overlap) likelihood.
+    profile = dict(waveform_seconds=0.0, n_calls=0, first_call_seconds=0.0)
+
+    def timed_loglike(x):
+        t0 = time.perf_counter()
+        value = marginal(x)
+        dt = time.perf_counter() - t0
+        if profile["n_calls"] == 0:
+            profile["first_call_seconds"] = dt  # includes one-time JIT compile
+        profile["waveform_seconds"] += dt
+        profile["n_calls"] += 1
+        return value
 
     started = time.time()
     diagnostics = None
     for attempt in range(3):  # UltraNest's MLFriends is stochastic; retry on failure
         try:
             engine = GPryEngine(
-                marginal, bounds=bounds, options={"seed": seed + attempt}, verbose=0
+                timed_loglike,
+                bounds=bounds,
+                options={"seed": seed + attempt},
+                verbose=0,
             )
             diagnostics = engine.run()
             break
         except Exception as error:  # noqa: BLE001
             print(f"  [attempt {attempt} failed: {type(error).__name__}: {error}]")
     if diagnostics is None:
-        raise RuntimeError(f"GPry failed three times on {stage}")
+        raise RuntimeError(f"GPry failed three times on {inj.label}")
     posterior = engine.sample()
     wall_seconds = time.time() - started
 
+    # Exclude compile from the performance measure, symmetric with Route A: the only JAX
+    # compilation in Route B is the marginal's overlaps jit on the FIRST waveform call
+    # (first_call_seconds); GPry's GP fit + acquisition are numpy/sklearn (no compile).
+    # So execution-only wall = total - first_call, and the reported waveform time is the
+    # steady-state (compile-excluded) total.
+    compile_seconds = profile["first_call_seconds"]
+    t_wave = max(profile["waveform_seconds"] - compile_seconds, 0.0)  # compile-excluded
+    exec_seconds = max(wall_seconds - compile_seconds, 0.0)
+    t_gp = max(exec_seconds - t_wave, 0.0)
     print(
-        f"[surrogate:{stage}] converged={diagnostics['has_converged']}, "
-        f"{diagnostics['n_truth_evals']} waveform evaluations, "
-        f"{wall_seconds:.0f} s, {len(posterior.x)} samples"
+        f"[surrogate:{inj.label}] converged={diagnostics['has_converged']}, "
+        f"{diagnostics['n_truth_evals']} evals, {exec_seconds:.0f} s exec "
+        f"(+{compile_seconds:.1f} s compile; waveform {t_wave:.1f}s / GPry {t_gp:.1f}s), "
+        f"{len(posterior.x)} samples"
     )
     return dict(
         samples=np.asarray(posterior.x),
         weights=np.asarray(posterior.weights),
-        wall_seconds=wall_seconds,
+        wall_seconds=exec_seconds,  # execution only (compile excluded)
+        compile_seconds=compile_seconds,
         likelihood_evaluations=diagnostics["n_truth_evals"],
         method="surrogate",
         device="cpu",
         n_samples=len(posterior.x),
+        duration=inj.duration,
+        n_freq=n_freq,
+        network_snr=inj.network_snr,
+        waveform_seconds=t_wave,
+        gp_seconds=t_gp,
+        n_waveform_calls=profile["n_calls"],
     )
 
 
 # ------------------------------------------------------------------ persistence + overlay
-# Stable colour + label per (method, device), so a curve keeps its identity across runs.
 _RUN_STYLE = {
     ("gradient", "cpu"): ("#1f6fb2", "gradient direct (CPU)"),
     ("gradient", "gpu"): ("#0f8f80", "gradient direct (GPU)"),
     ("surrogate", "cpu"): ("#c0392b", "surrogate marginalized"),
 }
+# fields carried through the npz beyond the samples themselves
+_META_FIELDS = (
+    "wall_seconds",  # execution only (compile excluded)
+    "compile_seconds",
+    "likelihood_evaluations",
+    "method",
+    "device",
+    "duration",
+    "n_freq",
+    "network_snr",
+    "waveform_seconds",
+    "gp_seconds",
+    "n_waveform_calls",
+)
 
 
-def persist_run(model, stage, result, max_samples=20000):
-    """Save one run's intrinsic posterior to output/<model>_<stage>_<method>_<device>.npz.
-
-    Keyed by ``model`` so a future FD model dropped into ``MODELS`` writes to its own
-    files and never collides with the PhenomD artifacts. Gradient chains are thinned to
-    keep the file small; the surrogate posterior is already compact and is saved with
-    its importance weights.
-    """
+def persist_run(model, inj: Injection, result, max_samples=20000):
+    """Save one run to output/<model>_<label>_<method>_<device>.npz (keyed by model so a
+    future FD model writes to its own files). Gradient chains are thinned."""
     OUTPUT_DIR.mkdir(exist_ok=True)
     samples = np.asarray(result["samples"])
     weights = (
@@ -358,91 +721,94 @@ def persist_run(model, stage, result, max_samples=20000):
         if result["weights"] is None
         else np.asarray(result["weights"])
     )
-    if len(samples) > max_samples:  # thin (weighted) for a lightweight, plottable file
+    if len(samples) > max_samples:
         rng = np.random.default_rng(0)
         pick = rng.choice(
             len(samples), max_samples, replace=False, p=weights / weights.sum()
         )
         samples, weights = samples[pick], weights[pick]
-    truth = [injected_parameters(stage)[n] for n in intrinsic_names(stage)]
-    path = OUTPUT_DIR / f"{model}_{stage}_{result['method']}_{result['device']}.npz"
+    meta = {k: result[k] for k in _META_FIELDS if k in result}
+    path = OUTPUT_DIR / f"{model}_{inj.label}_{result['method']}_{result['device']}.npz"
     np.savez(
         path,
         samples=samples,
         weights=weights,
-        names=np.array(intrinsic_names(stage)),
-        truth=np.array(truth),
-        wall_seconds=result["wall_seconds"],
-        likelihood_evaluations=result["likelihood_evaluations"],
-        method=result["method"],
-        device=result["device"],
+        names=np.array(inj.recover),
+        truth=np.array(inj.truth()),
+        label=inj.label,
+        **meta,
     )
     print(f"  saved run to {path}")
 
 
-def load_runs(model, stage):
-    """Load every persisted run for a model/stage, keyed by (method, device)."""
+def load_runs(model, label):
+    """Load every persisted run for a model/label, keyed by (method, device)."""
     runs = {}
-    for path in sorted(OUTPUT_DIR.glob(f"{model}_{stage}_*.npz")):
+    for path in sorted(OUTPUT_DIR.glob(f"{model}_{label}_*.npz")):
         d = np.load(path, allow_pickle=True)
-        runs[(str(d["method"]), str(d["device"]))] = dict(
-            samples=d["samples"],
-            weights=d["weights"],
-            names=[str(n) for n in d["names"]],
-            truth=d["truth"],
-            wall_seconds=float(d["wall_seconds"]),
-            likelihood_evaluations=int(d["likelihood_evaluations"]),
-        )
+        runs[(str(d["method"]), str(d["device"]))] = {
+            "samples": d["samples"],
+            "weights": d["weights"],
+            "names": [str(n) for n in d["names"]],
+            "truth": d["truth"],
+            **{k: d[k].item() for k in _META_FIELDS if k in d.files},
+        }
     return runs
 
 
 def credible_interval(values, weights):
-    """Median and 16th/84th percentiles of one parameter (weighted)."""
     order = np.argsort(values)
     cumulative = np.cumsum(weights[order] / weights.sum())
     return np.interp([0.16, 0.5, 0.84], cumulative, values[order])
 
 
-def report(stage, runs):
+def report(label, runs):
     """Print each run's recovered intrinsic posterior and its cost."""
-    names = intrinsic_names(stage)
-    truth = [injected_parameters(stage)[n] for n in names]
-    print(f"\n--- {stage}: recovered intrinsic posterior (median [16th, 84th]) ---")
+    if not runs:
+        return
+    names = next(iter(runs.values()))["names"]
+    truth = list(next(iter(runs.values()))["truth"])
+    print(f"\n--- {label}: recovered intrinsic posterior (median [16th, 84th]) ---")
     for (method, device), r in runs.items():
-        label = _RUN_STYLE.get((method, device), (None, f"{method} ({device})"))[1]
-        cols = []
-        for i, n in enumerate(names):
-            lo, mid, hi = credible_interval(r["samples"][:, i], r["weights"])
-            cols.append(f"{n} {mid:.3f} [{lo:.3f}, {hi:.3f}]")
-        print(f"  {label:26s} " + "   ".join(cols))
+        lab = _RUN_STYLE.get((method, device), (None, f"{method} ({device})"))[1]
+        cols = [
+            f"{n} {credible_interval(r['samples'][:, i], r['weights'])[1]:.3f}"
+            for i, n in enumerate(names)
+        ]
+        print(f"  {lab:26s} " + "   ".join(cols))
     print(
         f"  {'injected truth':26s} "
         + "   ".join(f"{n} {t:.3f}" for n, t in zip(names, truth))
     )
-    print(f"--- {stage}: cost per run ---")
+    print(f"--- {label}: cost per run ---")
     for (method, device), r in runs.items():
-        label = _RUN_STYLE.get((method, device), (None, f"{method} ({device})"))[1]
+        lab = _RUN_STYLE.get((method, device), (None, f"{method} ({device})"))[1]
+        extra = ""
+        if method == "surrogate" and "waveform_seconds" in r:
+            extra = (
+                f"  [waveform {r['waveform_seconds']:.1f}s / "
+                f"GPry {r['gp_seconds']:.1f}s]"
+            )
+        comp = f" (+{r.get('compile_seconds', 0):.0f}s compile)"
         print(
-            f"  {label:26s} {r['likelihood_evaluations']:7d} evaluations   "
-            f"{r['wall_seconds']:7.0f} s   {len(r['samples']):6d} samples"
+            f"  {lab:26s} {int(r['likelihood_evaluations']):7d} evaluations   "
+            f"{r['wall_seconds']:7.0f} s exec{comp}{extra}"
         )
 
 
-def overlay(model, stage, network_snr=None):
-    """Overlay every persisted run's intrinsic posterior for a model/stage on one figure."""
+def overlay(model, label, network_snr=None):
+    """Overlay every persisted run's intrinsic posterior for a model/label."""
     import corner
     import matplotlib
     import matplotlib.lines as mlines
 
     matplotlib.use("Agg")
-
-    runs = load_runs(model, stage)
+    runs = load_runs(model, label)
     if not runs:
-        print(f"[overlay:{stage}] no saved runs found; nothing to plot")
+        print(f"[overlay:{label}] no saved runs found; nothing to plot")
         return
-    names = intrinsic_names(stage)
+    names = next(iter(runs.values()))["names"]
     truth = list(next(iter(runs.values()))["truth"])
-    # common plotting range across all runs so contours are comparable
     ranges = [
         (
             min(r["samples"][:, i].min() for r in runs.values()),
@@ -453,7 +819,7 @@ def overlay(model, stage, network_snr=None):
 
     figure, legend = None, []
     for (method, device), r in runs.items():
-        color, label = _RUN_STYLE.get(
+        color, lab = _RUN_STYLE.get(
             (method, device), ("#555555", f"{method} ({device})")
         )
         weights = r["weights"] / r["weights"].sum()
@@ -472,15 +838,151 @@ def overlay(model, stage, network_snr=None):
             levels=(0.393, 0.865),
             bins=30,
         )
-        legend.append(mlines.Line2D([], [], color=color, label=label))
+        legend.append(mlines.Line2D([], [], color=color, label=lab))
     legend.append(mlines.Line2D([], [], color="k", label="injected truth"))
     figure.legend(handles=legend, loc="upper right", frameon=False, fontsize=10)
     snr = f" (network SNR ~{network_snr:.0f})" if network_snr else ""
     display = _MODEL_DISPLAY.get(model, model)
-    figure.suptitle(f"{display} {stage}: PE routes on one injection{snr}", y=1.02)
-    path = OUTPUT_DIR / f"{model}_{stage}_route_comparison.png"
+    figure.suptitle(f"{display} {label}: PE routes on one injection{snr}", y=1.02)
+    path = OUTPUT_DIR / f"{model}_{label}_route_comparison.png"
     figure.savefig(path, dpi=140, bbox_inches="tight")
-    print(f"[overlay:{stage}] saved {path}")
+    print(f"[overlay:{label}] saved {path}")
+
+
+# ------------------------------------------------------------------ duration scaling
+def scaling_summary(model, labels):
+    """Collect per-route wall time vs signal duration across a set of labels (the mass
+    sweep), plus the Route-B waveform/GP-training split, and plot + tabulate them."""
+    import matplotlib
+    import matplotlib.pyplot as plt
+
+    matplotlib.use("Agg")
+    # gather: series[(method, device)] = list of (duration, wall, extra...)
+    series = {}
+    wave_split = []  # (duration, waveform_seconds, gp_seconds, n_evals)
+    for label in labels:
+        for (method, device), r in load_runs(model, label).items():
+            series.setdefault((method, device), []).append(
+                (
+                    r["duration"],
+                    r["wall_seconds"],
+                    r.get("n_freq", np.nan),
+                    int(r["likelihood_evaluations"]),
+                )
+            )
+            if method == "surrogate" and "waveform_seconds" in r:
+                wave_split.append(
+                    (
+                        r["duration"],
+                        r["waveform_seconds"],
+                        r["gp_seconds"],
+                        int(r["likelihood_evaluations"]),
+                    )
+                )
+    if not series:
+        print("[scaling] no runs found for the sweep labels; nothing to plot")
+        return
+
+    print("\n=== duration scaling (wall time vs signal duration) ===")
+    for (method, device), pts in sorted(series.items()):
+        pts.sort()
+        lab = _RUN_STYLE.get((method, device), (None, f"{method} ({device})"))[1]
+        print(f"  {lab}:")
+        for dur, wall, nf, ev in pts:
+            print(
+                f"    duration {dur:6.1f}s  n_freq {int(nf):6d}  wall {wall:8.1f}s  "
+                f"{ev:5d} evals"
+            )
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    for (method, device), pts in sorted(series.items()):
+        pts.sort()
+        d = np.array([p[0] for p in pts])
+        w = np.array([p[1] for p in pts])
+        color, lab = _RUN_STYLE.get(
+            (method, device), ("#555555", f"{method} ({device})")
+        )
+        # scatter, not lines: several masses share a (power-of-two) duration, so a
+        # connecting line would zig-zag vertically at the same x
+        axes[0].plot(d, w, "o", color=color, label=lab, markersize=7, alpha=0.85)
+    axes[0].set(
+        xlabel="signal duration (s)",
+        ylabel="wall time (s)",
+        title="Total wall time vs duration",
+        xscale="log",
+        yscale="log",
+    )
+    axes[0].legend(frameon=False, fontsize=9)
+    axes[0].grid(alpha=0.3, which="both")
+
+    if wave_split:
+        wave_split.sort()
+        d = np.array([p[0] for p in wave_split])
+        wv = np.array([p[1] for p in wave_split])
+        gp = np.array([p[2] for p in wave_split])
+        n = np.array([p[3] for p in wave_split])
+        axes[1].plot(
+            d, wv, "o", color="#c0392b", label="waveform generation", markersize=7
+        )
+        axes[1].plot(
+            d, gp, "s", color="#7d3c98", label="GP fit + acquisition", markersize=7
+        )
+        axes[1].set(
+            xlabel="signal duration (s)",
+            ylabel="wall time (s)",
+            title="Route B: waveform vs GPry overhead",
+            xscale="log",
+            yscale="log",
+        )
+        axes[1].legend(frameon=False, fontsize=9)
+        axes[1].grid(alpha=0.3, which="both")
+        # honest read: report an actual sign change, else name the regime + the per-call
+        # waveform cost at which the waveform would overtake the GPry overhead
+        gpry_per_eval = gp / n
+        if np.all(wv < gp):
+            print(
+                f"\n[scaling] Route B is GPry-dominated across the whole range: GP fit + "
+                f"acquisition is {np.min(gp / wv):.0f}-{np.max(gp / wv):.0f}x the waveform "
+                f"time (no crossover). The waveform (already JAX) is "
+                f"{np.min(wv / n) * 1e3:.0f}-{np.max(wv / n) * 1e3:.0f} ms/call and would "
+                f"overtake GPry only above ~{np.min(gpry_per_eval):.1f}-"
+                f"{np.max(gpry_per_eval):.1f} s/call. Lever: a JAX acquisition nested "
+                f"sampler (the BlackJAX seam), not the GP fit or a waveform port."
+            )
+        elif np.all(wv > gp):
+            print(
+                "\n[scaling] Route B is waveform-dominated across the whole range: the "
+                "surrogate's value is minimizing (expensive) waveform calls."
+            )
+        else:
+            sign = np.sign(wv - gp)
+            idx = int(np.where(np.diff(sign) != 0)[0][0])
+            print(
+                f"\n[scaling] Route B waveform/GPry crossover between "
+                f"{d[idx]:.0f}s and {d[idx + 1]:.0f}s."
+            )
+    fig.suptitle(f"{_MODEL_DISPLAY.get(model, model)}: PE duration scaling", y=1.02)
+    path = OUTPUT_DIR / f"{model}_duration_scaling.png"
+    fig.savefig(path, dpi=140, bbox_inches="tight")
+    print(f"[scaling] saved {path}")
+
+
+# ------------------------------------------------------------------ driver
+def run_injection(model, inj, method, config, seed):
+    """Run the requested method(s) on one injection and persist each."""
+    likelihood, n_freq = build_injection_likelihood(model, inj)
+    if method in ("gradient", "both"):
+        persist_run(
+            model,
+            inj,
+            run_gradient_direct_sampling(
+                likelihood, inj, n_freq, config=config, seed=seed
+            ),
+        )
+    if method in ("surrogate", "both"):
+        persist_run(
+            model, inj, run_surrogate_marginalized_inference(likelihood, inj, n_freq)
+        )
 
 
 def main():
@@ -489,54 +991,74 @@ def main():
     )
     parser.add_argument("--model", choices=MODELS, default="phenomd")
     parser.add_argument(
-        "--stage", choices=["nonspin", "alignedspin", "both"], default="both"
-    )
-    parser.add_argument(
-        "--method",
-        choices=["gradient", "surrogate", "both"],
+        "--stage",
+        choices=["nonspin", "alignedspin", "both"],
         default="both",
-        help="which method(s) to run this invocation",
+        help="single-injection mode (ignored with a file)",
     )
     parser.add_argument(
-        "--n-chains", type=int, default=48, help="chains for the gradient sampler"
+        "--method", choices=["gradient", "surrogate", "both"], default="both"
     )
     parser.add_argument(
-        "--n-production",
-        type=int,
-        default=150,
-        help="production loops for the gradient sampler",
+        "--config",
+        choices=list(CONFIGS),
+        default="full",
+        help="'full' reproduces the cross-validation; 'fast' is for timing",
+    )
+    parser.add_argument(
+        "--injection-file", help="bilby/pycbc injection file to analyze"
+    )
+    parser.add_argument(
+        "--make-mass-sweep",
+        metavar="PATH",
+        help="write the matched-SNR mass sweep to a bilby file and exit",
+    )
+    parser.add_argument(
+        "--scaling-plot",
+        action="store_true",
+        help="build the duration-scaling summary from saved sweep runs",
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--overlay-only",
         action="store_true",
-        help="skip running; just rebuild overlays from saved runs",
+        help="skip running; rebuild overlays from saved runs",
     )
     args = parser.parse_args()
-
     OUTPUT_DIR.mkdir(exist_ok=True)
-    stages = ["nonspin", "alignedspin"] if args.stage == "both" else [args.stage]
 
-    for stage in stages:
-        network = None
-        if not args.overlay_only:
-            likelihood, network = build_injection(args.model, stage)
-            if args.method in ("gradient", "both"):
-                result = run_gradient_direct_sampling(
-                    likelihood,
-                    stage,
-                    n_chains=args.n_chains,
-                    n_production=args.n_production,
-                    seed=args.seed,
-                )
-                persist_run(args.model, stage, result)
-            if args.method in ("surrogate", "both"):
-                result = run_surrogate_marginalized_inference(likelihood, stage)
-                persist_run(args.model, stage, result)
-        runs = load_runs(args.model, stage)
-        if runs:
-            report(stage, runs)
-            overlay(args.model, stage, network_snr=network)
+    if args.make_mass_sweep:
+        write_injection_file(args.make_mass_sweep, make_mass_sweep(args.model))
+        print(f"\nwrote mass-sweep injection file to {args.make_mass_sweep}")
+        return
+
+    if args.scaling_plot:
+        scaling_summary(args.model, [f"M{int(m)}" for m in SWEEP_TOTAL_MASSES])
+        return
+
+    if args.injection_file:
+        injections = load_injections(args.injection_file)
+    else:
+        injections = [
+            stage_injection(s)
+            for s in (
+                ["nonspin", "alignedspin"] if args.stage == "both" else [args.stage]
+            )
+        ]
+
+    for inj in injections:
+        try:
+            if not args.overlay_only:
+                run_injection(args.model, inj, args.method, args.config, args.seed)
+            runs = load_runs(args.model, inj.label)
+            report(inj.label, runs)
+            overlay(args.model, inj.label, network_snr=inj.network_snr)
+        except Exception as error:  # keep a long sweep alive if one injection fails
+            print(
+                f"[ERROR] injection {inj.label} failed: "
+                f"{type(error).__name__}: {error}",
+                flush=True,
+            )
 
 
 if __name__ == "__main__":
