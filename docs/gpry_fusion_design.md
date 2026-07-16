@@ -543,7 +543,10 @@ width (< 30%), and lnL shape near the peak (< 0.5), converging in ~80-160 truth
 evaluations. Demo-driver profile (2D, ms-scale waveform): acquisition (NORA/UltraNest)
 dominates at ~83% of 271 s; **extrapolated to a 2 min/call production waveform the
 non-truth share is ~3% — far below the 30% D4 port trigger** (measured, not assumed;
-re-check at 6-10D where NORA cost grows). Notes: jaxpe requires `jax_enable_x64`
+re-check at 6-10D where NORA cost grows). *(The acquisition-dominance held up on the real
+FD Route B — measured ~77% at §9; but the 2 min/call premise did **not**: real aligned-spin
+EOB is 13–800 ms/call across stellar-mass BBH, so that regime is GPry-dominated, not
+waveform-dominated — see the §9 EOB-cost block and Phase 2.5.)* Notes: jaxpe requires `jax_enable_x64`
 (float32 GPS times silently NaN — the driver sets it; scripts must too);
 GPry's `logp_truth` is single-point (wrapped with a loop); strict-editable installs
 need `pip install -e . --no-deps` re-run when a new subpackage is added.
@@ -779,16 +782,101 @@ kernel even at $16$ s. Route B's cost tracks the *evaluation count* ($176$–$50
 sharp the intrinsic posterior is — lower masses are better-constrained), not the signal
 duration. So the D4 non-waveform share is $\sim 99\%$, far past the $30\%$ port trigger, and
 the indicated lever is the **acquisition** nested sampler (the **BlackJAX** backend already
-exposed at the `gpry/ns_interfaces.py` seam), *not* the GP fit or a waveform port. **But the
-trigger is regime-dependent on waveform cost:** the crossover to waveform-dominated sits at a
-per-call waveform cost of $\sim 1.4$–$2.6$ s (where waveform/eval $\approx$ GPry/eval); a
-production case-(2) EOB waveform (minutes/call, $\sim 10^{4}\times$ PhenomD) lands far on the
-waveform-dominated side, so **for the real target D4 stays "interface" and the surrogate's
-value is minimizing waveform calls** — while for cheap FD models a JAX acquisition NS is the
-one worthwhile partial port. Separately, the **A-route GPU advantage grows with signal
-duration** ($1.1\times$ at $4$ s $\to 2.9\times$ at $16$ s: $613$ s CPU vs $210$ s GPU at
-$M_{\rm tot}=20$), reinforcing finding-#2-reversed: longer FD signals are *wider* (larger
-$n_{\rm freq}$), and width is the GPU's lever.
+exposed at the `gpry/ns_interfaces.py` seam), *not* the GP fit or a waveform port. The two
+quantities this conclusion hinges on — the GP-fit-vs-acquisition split *within* that
+$\sim 99\%$, and the *actual* per-call cost of a production case-(2) EOB model (the design
+originally assumed $0.5$–$10$ min/call, $\sim 10^{4}\times$ PhenomD) — were still assumed
+here; both were then **measured directly** (next two blocks), which confirms the port target
+and *relocates* the waveform-dominated regime. Separately, the **A-route GPU advantage grows
+with signal duration** ($1.1\times$ at $4$ s $\to 2.9\times$ at $16$ s: $613$ s CPU vs $210$ s
+GPU at $M_{\rm tot}=20$), reinforcing finding-#2-reversed: longer FD signals are *wider*
+(larger $n_{\rm freq}$), and width is the GPU's lever.
+
+*GP-fit vs acquisition, measured (Rec 1 — closes the split half of task 1.5).* `examples/08`
+now reads GPry's own per-iteration timing table (`gpry.progress.Progress`) after
+`engine.run()`, so the lumped "GPry" cost is broken into GP hyperparameter-refit
+(`time_fit`), acquisition nested sampling (`time_acquire`, NORA over the GP surrogate),
+convergence, and MC. Measured at two eval counts (the split is **$N$-dependent**, so a single
+point would mislead):
+
+| $M_{\rm tot}$ | evals $N$ | GPry | acquisition | GP fit | MC | acq/fit |
+|---|---|---|---|---|---|---|
+| 80 | 136 | 196 s | $151.5$ s ($1.11$/eval, $77\%$) | $9.1$ s ($0.07$/eval, $5\%$) | $\sim35$ s ($18\%$) | $17\times$ |
+| 20 | 560 | 1639 s | $1147$ s ($2.05$/eval, $70\%$) | $425$ s ($0.76$/eval, $26\%$) | $\sim66$ s ($4\%$) | $2.7\times$ |
+
+**Acquisition is the dominant cost at both ends ($70$–$77\%$)** — the primary port target — but
+the GP fit's $O(N^3)$ Cholesky grows from a negligible $5\%$ at $136$ points to a non-trivial
+$26\%$ at $560$, while acquisition (a nested sampler over the GP predictive, cheaper per added
+point) stays dominant. Implications for D4: **(i)** the acquisition NS is the port to do first
+($70$–$77\%$, and the `vmap`/BlackJAX-friendly part — it optimizes over the GP predictive with a
+*cached* factorization, so the poor-consumer-GPU-fp64 objection does **not** apply to it);
+**(ii)** the GP-fit fp64-Cholesky term the "don't rewrite" argument worried about is genuinely
+small only at *low* eval count — at the high-$N$ end (which is where high-dimensional case-(2)
+lives) it returns as $\sim$a quarter of the loop, so a *full* speedup there eventually needs the
+Cholesky ported too, and that is exactly the fp64-hostile piece the design flagged. So the port
+decision is not one-shot: acquisition always; GP fit only if profiling at the target
+dimensionality shows it dominating. Matches the Phase-1 demo datum (acquisition $\sim 83\%$) now
+on the real FD Route B.
+
+*Real case-(2) EOB per-call cost, BBH$\to$BNS, measured (Rec 2 — the assumption D4 rested on).*
+The "interface, don't rewrite" call rested on production EOB waveforms costing $0.5$–$10$
+min/call. `examples/08 --eob-timing` times real external models at the sweep's intrinsic
+configuration, **with the sampling rate set from the waveform's own highest frequency content**
+(the ringdown; Nyquist sized for the $(4,4)$ mode, higher-mode models capped at $(l,m)\le(4,4)$),
+warmup-excluded, across a total-mass grid extended down to **BNS masses** where the long signal
+and high ringdown make the ODE integration expensive. `pyseobnr` (SEOBNRv5) was installed for
+this. **Measured** (median ms/call; fs in Hz set per point):
+
+| model | $M{=}80$ | $M{=}40$ | $M{=}20$ | $M{=}10$ | $M{=}4$ | $M{=}2.8$ (BNS) | crosses GPry ($\sim1.9$ s/eval) at |
+|---|---|---|---|---|---|---|---|
+| TEOBResumS      | 13 | 15 | 21 | 77 | 1200 | 2170 | $M\!\approx\!3$ (BNS) |
+| SEOBNRv5HM      | 36 | 40 | 52 | 100 | 1640 | 3280 | $M\!\approx\!3$–$4$ |
+| SEOBNRv5PHM     | 62 | 84 | 127 | 287 | 3880 | 7200 | $M\!\approx\!4$–$5$ |
+| SEOBNRv4\_opt   | 17 | 22 | 35 | 67 | 384 | 690 | none (in range) |
+| SEOBNRv4        | 234 | 393 | 790 | 2270 | 22600 | 50700 | $M\!\approx\!10$ |
+| SEOBNRv4HM      | 390 | 640 | 1770 | 7580 | 65000 | 218000 | $M\!\approx\!10$–$20$ |
+
+(fs rises $2048\to 4096\to 8192\to 16384\to 32768$ Hz as $M$ drops, from the $(4,4)$-mode
+Nyquist; SEOBNRv5HM's native mode set already tops at $(4,4)$. Data:
+[`examples/output/phenomd_eob_call_timing.json`](../examples/output/phenomd_eob_call_timing.json).)
+
+**The $0.5$–$10$ min/call premise is false for standard aligned-spin EOB.** Across the whole
+**stellar-mass BBH** range ($M\gtrsim 10$) every production model is $13$–$800$ ms/call —
+$10^{2}$–$10^{4}\times$ cheaper than assumed, i.e. *comparable to the JAX PhenomD FD kernel* —
+so Route B is GPry-dominated ($25$–$130\times$ for the fast models) and the acquisition NS is
+the sole bottleneck. The waveform overtakes the $\sim 1.9$ s/eval GPry overhead **only at low
+mass**, and the crossover mass is strongly model-dependent: fast models (TEOBResumS,
+SEOBNRv5HM) cross only at **BNS masses** ($M\!\approx\!3$); precessing/higher-mode/unoptimized
+models (SEOBNRv5PHM, SEOBNRv4HM, SEOBNRv4) cross at $M\!\approx\!4$–$20$; SEOBNRv4\_opt never
+crosses in range.
+
+*D4 reframed: a per-call-cost threshold, not a case-(1)/case-(2) dichotomy.* The port trigger
+is a waveform cost of $\sim 1.9$ s/call, and both cheap JAX FD models **and** standard
+aligned-spin EOB across the entire stellar-mass BBH range sit below it — so a **JAX/BlackJAX
+acquisition nested sampler is a broadly worthwhile partial port**, not an FD-only curiosity: it
+cuts real PE wall-clock for BBH parameter estimation with *any* of these waveform families. The
+waveform-dominated regime the design assumed is real but **relocated to BNS / very-low-mass
+($M\lesssim 3$–$5$) and the slow higher-mode variants**, where the surrogate's value is exactly
+its original one — minimizing expensive calls — and pure "interface" holds. Net: D4's
+"interface, don't rewrite the GP/robustness machinery" stands, but its escape-hatch clause is
+now *active for the acquisition component in the BBH regime*, and specifically names the
+acquisition NS (measured $70$–$77\%$), not the GP fit (measured $5$–$26\%$, $N$-dependent).
+
+*Eccentricity, measured (the real "minutes/call" candidate).* SEOBNRv5EHM (available via
+`pyseobnr`) at the same $(4,4)$ modes / physical fs costs **$\sim 4.5$–$12\times$ its aligned
+SEOBNRv5HM counterpart** — M40 $41\to 186$ ms, M20 $54\to 495$ ms, M10 $125\to 1522$ ms, M6
+$413\to 3725$ ms, M4 $1.65\to 8.6$ s — from the denser eccentric ODE, and nearly
+$e$-independent between $e=0.1$ and $0.3$. So eccentricity **moves the crossover up to
+$M\!\approx\!8$–$10$** (from $M\!\approx\!3$ aligned), but even eccentric SEOBNRv5 is
+*seconds*/call at worst ($8.6$ s at M4/$e{=}0.3$), **not** the assumed minutes: across
+stellar-mass BBH $M\gtrsim 20$ it is still GPry-dominated ($495$ ms $\ll 2.6$ s/eval). The
+genuine minutes/call regime needs eccentricity **compounded** with a BNS-length signal (few
+$M_\odot$) and/or sub-$20$ Hz $f_{\rm low}$ — not reached here.
+
+*Remaining caveats.* Point-particle, aligned-spin timings; at BNS masses the standard models
+omit tides (an ODE-length cost *proxy*, not production BNS waveforms); SEOBNRv5PHM at aligned
+config is a lower bound on precessing cost. The harness (`--eob-timing`) is one registry entry
+(`_EOB_MODELS`) from timing any approximant for the follow-up.
 
 ### Phase 2 — Multifidelity mean (~4–6 d)
 
@@ -800,6 +888,27 @@ $n_{\rm freq}$), and width is the GPU's lever.
 
 **Gate G2:** measured expensive-call reduction ≥ 2× at matched posterior accuracy on the
 controlled pair (else multifidelity stays opt-in/off and we proceed single-fidelity).
+
+### Phase 2.5 — JAX acquisition nested sampler (conditional; D4 escape hatch, now triggered)
+
+*Rationale (measured, §9): the acquisition NS is $70$–$77\%$ of the GPry loop (dominant at both
+low and high eval count) while real aligned-spin EOB is $13$–$800$ ms/call across stellar-mass
+BBH, so Route B is GPry-dominated for the whole BBH regime — the acquisition, not the waveform,
+is the wall-clock. This is the one partial port the §D4 checkpoint now warrants. Only the
+acquisition is ported; the GP regressor, SVM/robustness, convergence and checkpointing stay
+GPry (D4). The GP fit ($O(N^3)$ Cholesky) is $5\%$ at low $N$ but $\sim 26\%$ at $N\!\sim\!560$
+— revisit a fit port only if high-dimensional profiling shows it dominating (task 2.5.1).*
+
+| # | task | deliverable / test |
+|---|---|---|
+| 2.5.1 | Split-timing + BBH$\to$BNS EOB timing landed (`examples/08 --eob-timing`, `gpry.progress` readout; eccentric SEOBNRv5EHM measured — $\sim$4.5–12$\times$ aligned, crossover $M\!\approx\!8$–$10$); remaining: the *compounded* minutes/call corner (eccentric + BNS-length + sub-20 Hz $f_{\rm low}$, + tidal EOB) | extend the §9 EOB table; confirms which targets stay waveform-dominated |
+| 2.5.2 | JAX acquisition over the GP predictive at the `gpry/ns_interfaces.py` **BlackJAX** seam: `vmap` the acquisition function on a cached GP factorization; keep GPry's NORA batch/trust-region logic | matches GPry-native acquisition proposals within tolerance on a fixed GP; wall-clock speedup measured |
+| 2.5.3 | Wire behind the `SurrogateEngine` protocol as an optional backend; default stays GPry-native | opt-in flag; falls back cleanly; posterior unchanged vs native on the Phase-1 pseudo-black-box |
+
+**Gate G2.5:** on a fixed training set the JAX acquisition reproduces GPry-native proposals
+(same next-point distribution within tolerance) **and** cuts acquisition wall-clock ≥ 2× at
+$N\sim$ few$\times10^2$ training points; else it stays off and we keep GPry-native (correctness
+over speed — a wrong acquisition silently biases the posterior).
 
 ### Phase 3 — Production case (2) (~6–10 d + cluster time)
 
@@ -818,8 +927,10 @@ consistent.
 ### Deferred / explicitly out of scope now
 
 10D eccentric+precessing production runs (do after G3); ROM-from-cache amortization (D2
-optionality); gradient-enhanced kernels; any JAX port of GPry components absent a failed §D4
-checkpoint; RIFT head-to-head paper comparison.
+optionality); gradient-enhanced kernels; **any JAX port of the GP regressor / SVM / convergence
+machinery** (the §D4 checkpoint triggered a port of the *acquisition NS only* — Phase 2.5 — and
+the GP fit measured $5$–$26\%$, $N$-dependent, deferred pending high-dimensional profiling);
+RIFT head-to-head paper comparison.
 
 ---
 

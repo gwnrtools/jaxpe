@@ -593,6 +593,46 @@ def run_gradient_direct_sampling(
 
 
 # --------------------------------------------- method 2: surrogate marginalized inference
+def _gpry_timing_split(engine) -> dict:
+    """Sum GPry's own per-iteration wall-clock timers over ``engine.run()``.
+
+    GPry records a per-iteration timing table internally (``gpry.progress.Progress``,
+    one row per active-learning iteration). We read it here to break the otherwise
+    lumped "GPry" cost into the stages the §D4 port decision turns on:
+
+    - ``acquire_seconds`` (``time_acquire``): optimizing the acquisition function --
+      NORA runs a nested sampler over the GP surrogate. Embarrassingly parallel,
+      vmap-friendly, uses a *cached* GP factorization (no per-eval fp64 Cholesky):
+      the clean JAX/BlackJAX port target if it dominates.
+    - ``fit_seconds`` (``time_fit``): refitting the GP after adding points --
+      hyperparameter optimization + O(N^3) fp64 Cholesky over the training set. On a
+      consumer GPU with throttled fp64 this can be *slower* than LAPACK at N<=few*10^3
+      (design note D4): a port here may lose.
+    - ``gpry_truth_seconds`` (``time_truth``): GPry's own timing of the true-model
+      (waveform) calls -- an independent cross-check on our ``timed_loglike`` sum.
+    - ``convergence_seconds`` / ``inloop_mc_seconds`` (``time_convergence`` /
+      ``time_mc``): the convergence criterion and any in-loop MC sampling.
+
+    Missing columns/rows (older GPry, non-main MPI ranks) count as zero. NaN-safe.
+    """
+    try:
+        df = engine.runner.progress.data
+    except AttributeError:
+        return {}
+
+    def col(name: str) -> float:
+        return float(np.nansum(df[name].to_numpy(dtype=float))) if name in df else 0.0
+
+    return dict(
+        acquire_seconds=col("time_acquire"),
+        fit_seconds=col("time_fit"),
+        gpry_truth_seconds=col("time_truth"),
+        convergence_seconds=col("time_convergence"),
+        inloop_mc_seconds=col("time_mc"),
+        n_iterations=int(len(df)),
+    )
+
+
 def run_surrogate_marginalized_inference(likelihood, inj: Injection, n_freq, seed=11):
     """Learn a GPry surrogate of the closed-form phase+distance-marginalized likelihood,
     profiling waveform-generation time vs GP-training/acquisition time."""
@@ -653,7 +693,10 @@ def run_surrogate_marginalized_inference(likelihood, inj: Injection, n_freq, see
             print(f"  [attempt {attempt} failed: {type(error).__name__}: {error}]")
     if diagnostics is None:
         raise RuntimeError(f"GPry failed three times on {inj.label}")
-    posterior = engine.sample()
+    run_seconds = time.time() - started  # active-learning loop only
+    t_sample0 = time.time()
+    posterior = engine.sample()  # final MC over the converged surrogate (separate cost)
+    sample_seconds = time.time() - t_sample0
     wall_seconds = time.time() - started
 
     # Exclude compile from the performance measure, symmetric with Route A: the only JAX
@@ -665,18 +708,39 @@ def run_surrogate_marginalized_inference(likelihood, inj: Injection, n_freq, see
     t_wave = max(profile["waveform_seconds"] - compile_seconds, 0.0)  # compile-excluded
     exec_seconds = max(wall_seconds - compile_seconds, 0.0)
     t_gp = max(exec_seconds - t_wave, 0.0)
+
+    # Rec 1: break the lumped GPry cost into GP-refit vs acquisition-NS (the D4 split).
+    # GPry's internal timers measure the loop stages; the final MC is sample_seconds.
+    split = _gpry_timing_split(engine)
+    fit_s = split.get("fit_seconds", float("nan"))
+    acq_s = split.get("acquire_seconds", float("nan"))
+    conv_s = split.get("convergence_seconds", 0.0)
+    inloop_mc_s = split.get("inloop_mc_seconds", 0.0)
+    n_evals = diagnostics["n_truth_evals"]
+    per = (lambda s: s / n_evals) if n_evals else (lambda s: float("nan"))
     print(
         f"[surrogate:{inj.label}] converged={diagnostics['has_converged']}, "
-        f"{diagnostics['n_truth_evals']} evals, {exec_seconds:.0f} s exec "
+        f"{n_evals} evals, {exec_seconds:.0f} s exec "
         f"(+{compile_seconds:.1f} s compile; waveform {t_wave:.1f}s / GPry {t_gp:.1f}s), "
         f"{len(posterior.x)} samples"
+    )
+    print(
+        f"  GPry split: fit {fit_s:.1f}s ({per(fit_s):.2f}/eval)  "
+        f"acquire {acq_s:.1f}s ({per(acq_s):.2f}/eval)  "
+        f"convergence {conv_s:.1f}s  in-loop MC {inloop_mc_s:.1f}s  "
+        f"final MC {sample_seconds:.1f}s"
+        + (
+            f"  [acq/fit={acq_s / fit_s:.1f}x]"
+            if fit_s and fit_s == fit_s and fit_s > 0
+            else ""
+        )
     )
     return dict(
         samples=np.asarray(posterior.x),
         weights=np.asarray(posterior.weights),
         wall_seconds=exec_seconds,  # execution only (compile excluded)
         compile_seconds=compile_seconds,
-        likelihood_evaluations=diagnostics["n_truth_evals"],
+        likelihood_evaluations=n_evals,
         method="surrogate",
         device="cpu",
         n_samples=len(posterior.x),
@@ -686,6 +750,15 @@ def run_surrogate_marginalized_inference(likelihood, inj: Injection, n_freq, see
         waveform_seconds=t_wave,
         gp_seconds=t_gp,
         n_waveform_calls=profile["n_calls"],
+        # Rec 1: GP-fit vs acquisition-NS split (the D4 port decision axis)
+        fit_seconds=fit_s,
+        acquire_seconds=acq_s,
+        convergence_seconds=conv_s,
+        inloop_mc_seconds=inloop_mc_s,
+        final_mc_seconds=sample_seconds,
+        loop_seconds=max(run_seconds - compile_seconds, 0.0),  # AL loop, compile-excl
+        gpry_truth_seconds=split.get("gpry_truth_seconds", float("nan")),
+        n_gpry_iterations=split.get("n_iterations", 0),
     )
 
 
@@ -708,6 +781,15 @@ _META_FIELDS = (
     "waveform_seconds",
     "gp_seconds",
     "n_waveform_calls",
+    # Rec 1: GPry internal split (present only for surrogate runs; the D4 port axis)
+    "fit_seconds",
+    "acquire_seconds",
+    "convergence_seconds",
+    "inloop_mc_seconds",
+    "final_mc_seconds",
+    "loop_seconds",
+    "gpry_truth_seconds",
+    "n_gpry_iterations",
 )
 
 
@@ -967,6 +1049,220 @@ def scaling_summary(model, labels):
     print(f"[scaling] saved {path}")
 
 
+# ------------------------------------- Rec 2: real (case-2) EOB per-call cost profiling
+# The §D4 port decision hinges on where an external, non-JAX EOB waveform's per-call cost
+# sits relative to GPry's per-eval overhead (measured ~1.1-2.6 s here). The design note
+# *assumed* case-(2) models cost 0.5-10 min/call; this measures them directly, across a
+# BBH->BNS total-mass grid, warmup-excluded (same compile/first-call exclusion discipline
+# as the JAX routes). Timing is done "properly": the sampling rate is set from the
+# waveform's own highest frequency content (the ringdown), not a fixed 2048 Hz -- planning
+# for the (4,4) mode in higher-mode models -- and lower masses (longer signals, higher
+# ringdown) are where the ODE-integration cost can finally overtake the GPry overhead.
+#
+# engine: which generator; highest_m: highest angular mode m reaching the detector (sets
+# Nyquist); cap44: restrict to (l,m)<=(4,4) so "highest content" is the well-measured
+# (4,4), not a marginal (5,5) that only inflates fs.
+_EOB_MODELS = {
+    "TEOBResumS":   dict(engine="lal", highest_m=2, cap44=False),
+    "SEOBNRv4":     dict(engine="lal", highest_m=2, cap44=False),
+    "SEOBNRv4_opt": dict(engine="lal", highest_m=2, cap44=False),
+    "SEOBNRv4HM":   dict(engine="lal", highest_m=4, cap44=True),
+    "SEOBNRv5HM":   dict(engine="pyseobnr", highest_m=4, cap44=True),
+    "SEOBNRv5PHM":  dict(engine="pyseobnr", highest_m=4, cap44=True),
+}
+_MODE_ARRAY_44 = [(2, 2), (2, 1), (3, 3), (4, 4)]  # standard HM set capped at (4,4)
+# Dominant-QNM ringdown frequency of mode (m,m) relative to (2,2): f_{mm}/f_{22}. Kerr
+# values shift together with remnant spin, so the ratio is stable to ~10%.
+_QNM_RATIO = {2: 1.0, 3: 1.60, 4: 2.10, 5: 2.60}
+# BBH -> BNS total-mass grid (Msun) at fixed q=0.8, chi=+0.2/-0.1. Lower mass = longer
+# signal (more ODE steps) and higher ringdown (higher fs) -- both raise the per-call cost.
+_EOB_MASS_GRID = (80.0, 60.0, 40.0, 20.0, 10.0, 8.0, 6.0, 4.0, 3.0, 2.8)
+
+
+def _ringdown_22_hz(total_mass_msun):
+    """Approximate (2,2) ringdown (dominant QNM) frequency of the remnant. M_f ~= 0.95
+    M_tot (~5% radiated); Re(M_f omega_220) ~= 0.53 for a ~0.7 remnant (0.374 Schwarzschild,
+    rising with spin). f = Re(omega)/(2 pi) . c^3/(G M_f)."""
+    m_f = 0.95 * total_mass_msun
+    c3_over_2piG_msun = 32312.0  # c^3 / (2 pi G M_sun), Hz
+    return 0.53 * c3_over_2piG_msun / m_f
+
+
+def _physical_sampling_rate(total_mass_msun, highest_m, floor=2048.0):
+    """Smallest power-of-two fs whose Nyquist clears the highest ringdown mode present --
+    'commensurate with the highest frequency content', not a fixed rate. The generator
+    errors (does not silently alias) if fs is too low, so this is the Nyquist minimum and
+    the caller bumps up only if the estimate is marginally low."""
+    f_max = _QNM_RATIO[highest_m] * _ringdown_22_hz(total_mass_msun)
+    return float(max(floor, 2.0 ** np.ceil(np.log2(2.0 * f_max))))
+
+
+def _eob_generate(approximant, m1, m2, s1z, s2z, incl, dist_mpc, phi, f_low, fs, cap44):
+    """Generate one external TD EOB waveform; return its length. Raises on model
+    domain/Nyquist errors so the caller can bump fs or record a genuine model limit."""
+    dt = 1.0 / fs
+    cfg = _EOB_MODELS[approximant]
+    if cfg["engine"] == "pyseobnr":
+        from pyseobnr.generate_waveform import GenerateWaveform  # optional dep
+
+        params = dict(
+            mass1=m1, mass2=m2, spin1x=0.0, spin1y=0.0, spin1z=s1z,
+            spin2x=0.0, spin2y=0.0, spin2z=s2z, deltaT=dt, f22_start=f_low,
+            f_ref=f_low, distance=dist_mpc, inclination=incl, phi_ref=phi,
+            approximant=approximant,
+        )
+        if cap44:
+            params["mode_array"] = _MODE_ARRAY_44
+        hp, _ = GenerateWaveform(params).generate_td_polarizations()
+        return hp.data.length
+    import lal
+    import lalsimulation as ls  # optional dep
+
+    lal_params = None
+    if cap44:  # restrict LAL higher-mode models to (l,m) <= (4,4)
+        lal_params = lal.CreateDict()
+        mode_array = ls.SimInspiralCreateModeArray()
+        for ell, m in _MODE_ARRAY_44:
+            ls.SimInspiralModeArrayActivateMode(mode_array, ell, m)
+            ls.SimInspiralModeArrayActivateMode(mode_array, ell, -m)
+        ls.SimInspiralWaveformParamsInsertModeArray(lal_params, mode_array)
+    aid = ls.GetApproximantFromString(approximant)
+    hp, _ = ls.SimInspiralChooseTDWaveform(
+        m1 * lal.MSUN_SI, m2 * lal.MSUN_SI, 0.0, 0.0, s1z, 0.0, 0.0, s2z,
+        dist_mpc * 1e6 * lal.PC_SI, incl, phi, 0.0, 0.0, 0.0,
+        dt, f_low, f_low, lal_params, aid,
+    )
+    return hp.data.length
+
+
+def eob_call_seconds(inj: Injection, approximant, repeats=5, f_low=LOWER_FREQUENCY_HZ):
+    """Median warmup-excluded seconds for one external EOB call at this injection.
+
+    Returns ``(seconds, fs_used, n_samples)``. fs is set from the waveform's highest
+    ringdown mode (``_physical_sampling_rate``); if the generator still reports the content
+    exceeds Nyquist we bump fs by powers of two. Repeats are reduced for slow (low-mass)
+    calls so a BNS sweep stays affordable. Raises the underlying error if no fs works."""
+    cfg = _EOB_MODELS[approximant]
+    m1, m2 = _component_from_chirp_q(inj.params["chirp_mass"], inj.params["mass_ratio"])
+    total_mass = m1 + m2
+    s1z, s2z = inj.params.get("spin1z", 0.0), inj.params.get("spin2z", 0.0)
+    incl = inj.params.get("inclination", 0.0)
+    dist = inj.params.get("luminosity_distance", REFERENCE_DISTANCE_MPC)
+    phi = inj.params.get("phase", 0.0)
+    cap44 = cfg["cap44"]
+
+    fs0 = _physical_sampling_rate(total_mass, cfg["highest_m"])
+    fs_options = [fs0, fs0 * 2, fs0 * 4]  # Nyquist minimum, then bump if marginally low
+    last_err = None
+    for fs in fs_options:
+        try:
+            n0 = _eob_generate(
+                approximant, m1, m2, s1z, s2z, incl, dist, phi, f_low, fs, cap44
+            )
+        except Exception as error:  # noqa: BLE001 -- domain/Nyquist; try a higher fs
+            last_err = error
+            continue
+        # adaptive repeats: one timed call, then fewer the slower it is (keep BNS cheap)
+        def _one():
+            t0 = time.perf_counter()
+            _eob_generate(
+                approximant, m1, m2, s1z, s2z, incl, dist, phi, f_low, fs, cap44
+            )
+            return time.perf_counter() - t0
+
+        times = [_one()]
+        n_more = 0 if times[0] > 8.0 else (1 if times[0] > 1.5 else repeats - 1)
+        times.extend(_one() for _ in range(n_more))
+        return float(np.median(times)), float(fs), int(n0)
+    if last_err is not None:  # exhausted the fs ladder on a real model/domain error
+        raise last_err
+    raise RuntimeError(f"{approximant}: no sampling rate in {fs_options} succeeded")
+
+
+def timing_injections(masses, q=0.8, s1z=0.2, s2z=-0.1):
+    """Lightweight injections for a pure waveform-timing sweep (no PE / SNR tuning): the
+    same intrinsic configuration as the matched-SNR sweep, extended down to BNS masses."""
+    injections = []
+    for total in masses:
+        m1, m2 = component_masses(total, q)
+        params = {
+            "chirp_mass": chirp_mass_of(m1, m2), "mass_ratio": q,
+            "spin1z": s1z, "spin2z": s2z, "inclination": 0.4,
+            "luminosity_distance": REFERENCE_DISTANCE_MPC, "phase": 1.5,
+        }
+        label = f"M{total:g}"
+        injections.append(
+            Injection(label, params, ("chirp_mass", "mass_ratio", "spin1z", "spin2z"),
+                      auto_duration(m1, m2, LOWER_FREQUENCY_HZ), SAMPLING_RATE_HZ)
+        )
+    return injections
+
+
+def eob_timing_sweep(model, injections, approximants, repeats=5):
+    """Time each external EOB model across the injections and compare its per-call cost to
+    the measured GPry per-eval overhead (from saved surrogate runs, where present). Writes
+    a JSON table and prints where -- if anywhere -- the waveform overtakes GPry."""
+    print(f"\n=== Real EOB per-call cost vs GPry per-eval overhead ({model}) ===")
+    print("(warmup-excluded; fs set from the (4,4) ringdown; D4 trigger: EOB/call ~ GPry/eval)")
+    results = {}
+    for approximant in approximants:
+        if approximant not in _EOB_MODELS:
+            print(f"  [skip {approximant}: unknown; known = {list(_EOB_MODELS)}]")
+            continue
+        row = {}
+        for inj in injections:
+            m1, m2 = _component_from_chirp_q(
+                inj.params["chirp_mass"], inj.params["mass_ratio"]
+            )
+            gp_per_eval = _gpry_per_eval(model, inj.label)  # from saved Route B, or nan
+            try:
+                sec, fs, n = eob_call_seconds(inj, approximant, repeats=repeats)
+                crossed = sec > gp_per_eval  # nan compares False -> "gpry-dominated"
+                row[inj.label] = dict(
+                    total_mass=m1 + m2, seconds=sec, fs=fs, n_samples=n,
+                    signal_s=n / fs, gpry_per_eval=gp_per_eval,
+                )
+                gp_note = (
+                    f"  vs GPry/eval {gp_per_eval:.2f}s "
+                    f"[{'WAVEFORM>GPry' if crossed else 'gpry-dominated'}, "
+                    f"{max(gp_per_eval, sec) / min(gp_per_eval, sec):.0f}x]"
+                    if gp_per_eval == gp_per_eval
+                    else ""
+                )
+                print(
+                    f"  {approximant:12s} {inj.label:>5s} (M={m1 + m2:5.1f}, "
+                    f"sig {n / fs:6.1f}s @fs={fs:6.0f}): {sec * 1e3:9.1f} ms/call{gp_note}"
+                )
+            except Exception as error:  # noqa: BLE001
+                row[inj.label] = dict(error=f"{type(error).__name__}: {str(error)[:70]}")
+                print(
+                    f"  {approximant:12s} {inj.label:>5s} (M={m1 + m2:5.1f}): "
+                    f"FAILED ({type(error).__name__}: {str(error)[:50]})"
+                )
+        results[approximant] = row
+    path = OUTPUT_DIR / f"{model}_eob_call_timing.json"
+    with open(path, "w") as handle:
+        json.dump(
+            dict(f_low=LOWER_FREQUENCY_HZ, repeats=repeats, cap="(l,m)<=(4,4) for HM",
+                 models=results), handle, indent=2,
+        )
+    print(f"[eob-timing] saved {path}")
+    return results
+
+
+def _gpry_per_eval(model, label):
+    """GPry per-eval overhead (gp_seconds / n_waveform_calls) from a saved Route B run,
+    or NaN if that surrogate run is not on disk."""
+    path = OUTPUT_DIR / f"{model}_{label}_surrogate_cpu.npz"
+    if not path.exists():
+        return float("nan")
+    d = np.load(path, allow_pickle=True)
+    if "gp_seconds" not in d or "n_waveform_calls" not in d:
+        return float("nan")
+    n = float(d["n_waveform_calls"])
+    return float(d["gp_seconds"]) / n if n else float("nan")
+
+
 # ------------------------------------------------------------------ driver
 def run_injection(model, inj, method, config, seed):
     """Run the requested method(s) on one injection and persist each."""
@@ -1018,6 +1314,19 @@ def main():
         action="store_true",
         help="build the duration-scaling summary from saved sweep runs",
     )
+    parser.add_argument(
+        "--eob-timing",
+        metavar="MODELS",
+        help="comma-separated external EOB approximants (e.g. "
+        "'TEOBResumS,SEOBNRv4,SEOBNRv5HM,SEOBNRv5PHM') to time per-call across a "
+        "BBH->BNS mass grid (fs set from the (4,4) ringdown) and compare to the GPry "
+        "per-eval overhead (Rec 2 / D4 checkpoint)",
+    )
+    parser.add_argument(
+        "--eob-mass-grid",
+        metavar="M1,M2,...",
+        help="override total masses (Msun) for --eob-timing (default: BBH->BNS grid)",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--overlay-only",
@@ -1045,6 +1354,20 @@ def main():
                 ["nonspin", "alignedspin"] if args.stage == "both" else [args.stage]
             )
         ]
+
+    if args.eob_timing:
+        approximants = [a.strip() for a in args.eob_timing.split(",") if a.strip()]
+        if args.injection_file:
+            eob_injections = injections  # time on the same injections as the PE sweep
+        else:
+            masses = (
+                [float(m) for m in args.eob_mass_grid.split(",")]
+                if args.eob_mass_grid
+                else list(_EOB_MASS_GRID)
+            )
+            eob_injections = timing_injections(masses)
+        eob_timing_sweep(args.model, eob_injections, approximants)
+        return
 
     for inj in injections:
         try:

@@ -1,0 +1,499 @@
+{
+  "f_low": 20.0,
+  "repeats": 5,
+  "cap": "(l,m)<=(4,4) for HM",
+  "models": {
+    "TEOBResumS": {
+      "M80": {
+        "total_mass": 79.99999999999999,
+        "seconds": 0.013381321914494038,
+        "fs": 2048.0,
+        "n_samples": 2316,
+        "signal_s": 1.130859375,
+        "gpry_per_eval": 1.4421129879423569
+      },
+      "M60": {
+        "total_mass": 59.99999999999999,
+        "seconds": 0.013539394014514983,
+        "fs": 2048.0,
+        "n_samples": 1872,
+        "signal_s": 0.9140625,
+        "gpry_per_eval": 1.7973551052412444
+      },
+      "M40": {
+        "total_mass": 40.0,
+        "seconds": 0.014667753945104778,
+        "fs": 2048.0,
+        "n_samples": 3767,
+        "signal_s": 1.83935546875,
+        "gpry_per_eval": 1.7776506234561869
+      },
+      "M20": {
+        "total_mass": 20.0,
+        "seconds": 0.02078358398284763,
+        "fs": 2048.0,
+        "n_samples": 12391,
+        "signal_s": 6.05029296875,
+        "gpry_per_eval": 2.6428822521713937
+      },
+      "M10": {
+        "total_mass": 10.0,
+        "seconds": 0.07740435400046408,
+        "fs": 4096.0,
+        "n_samples": 79751,
+        "signal_s": 19.470458984375,
+        "gpry_per_eval": 2.5792825954785945
+      },
+      "M8": {
+        "total_mass": 7.999999999999998,
+        "seconds": 0.19797246204689145,
+        "fs": 8192.0,
+        "n_samples": 231665,
+        "signal_s": 28.2794189453125,
+        "gpry_per_eval": NaN
+      },
+      "M6": {
+        "total_mass": 5.999999999999999,
+        "seconds": 0.3193184600677341,
+        "fs": 8192.0,
+        "n_samples": 374358,
+        "signal_s": 45.697998046875,
+        "gpry_per_eval": NaN
+      },
+      "M4": {
+        "total_mass": 4.0,
+        "seconds": 1.2024423929397017,
+        "fs": 16384.0,
+        "n_samples": 1470329,
+        "signal_s": 89.74176025390625,
+        "gpry_per_eval": NaN
+      },
+      "M3": {
+        "total_mass": 3.0,
+        "seconds": 1.9277044015470892,
+        "fs": 16384.0,
+        "n_samples": 2371979,
+        "signal_s": 144.77410888671875,
+        "gpry_per_eval": NaN
+      },
+      "M2.8": {
+        "total_mass": 2.8,
+        "seconds": 2.1665433190064505,
+        "fs": 16384.0,
+        "n_samples": 2660134,
+        "signal_s": 162.3616943359375,
+        "gpry_per_eval": NaN
+      }
+    },
+    "SEOBNRv4": {
+      "M80": {
+        "total_mass": 79.99999999999999,
+        "seconds": 0.23382546100765467,
+        "fs": 2048.0,
+        "n_samples": 1363,
+        "signal_s": 0.66552734375,
+        "gpry_per_eval": 1.4421129879423569
+      },
+      "M60": {
+        "total_mass": 59.99999999999999,
+        "seconds": 0.3032586040208116,
+        "fs": 2048.0,
+        "n_samples": 2032,
+        "signal_s": 0.9921875,
+        "gpry_per_eval": 1.7973551052412444
+      },
+      "M40": {
+        "total_mass": 40.0,
+        "seconds": 0.39337666297797114,
+        "fs": 2048.0,
+        "n_samples": 3900,
+        "signal_s": 1.904296875,
+        "gpry_per_eval": 1.7776506234561869
+      },
+      "M20": {
+        "total_mass": 20.0,
+        "seconds": 0.7896703300066292,
+        "fs": 2048.0,
+        "n_samples": 12542,
+        "signal_s": 6.1240234375,
+        "gpry_per_eval": 2.6428822521713937
+      },
+      "M10": {
+        "total_mass": 10.0,
+        "seconds": 2.2683311559958383,
+        "fs": 4096.0,
+        "n_samples": 80264,
+        "signal_s": 19.595703125,
+        "gpry_per_eval": 2.5792825954785945
+      },
+      "M8": {
+        "total_mass": 7.999999999999998,
+        "seconds": 4.182998310076073,
+        "fs": 8192.0,
+        "n_samples": 232935,
+        "signal_s": 28.4344482421875,
+        "gpry_per_eval": NaN
+      },
+      "M6": {
+        "total_mass": 5.999999999999999,
+        "seconds": 7.425739698577672,
+        "fs": 8192.0,
+        "n_samples": 376046,
+        "signal_s": 45.904052734375,
+        "gpry_per_eval": NaN
+      },
+      "M4": {
+        "total_mass": 4.0,
+        "seconds": 22.648286271025427,
+        "fs": 16384.0,
+        "n_samples": 1475426,
+        "signal_s": 90.0528564453125,
+        "gpry_per_eval": NaN
+      },
+      "M3": {
+        "total_mass": 3.0,
+        "seconds": 43.16644478891976,
+        "fs": 16384.0,
+        "n_samples": 2378822,
+        "signal_s": 145.1917724609375,
+        "gpry_per_eval": NaN
+      },
+      "M2.8": {
+        "total_mass": 2.8,
+        "seconds": 50.66764834697824,
+        "fs": 16384.0,
+        "n_samples": 2667481,
+        "signal_s": 162.81011962890625,
+        "gpry_per_eval": NaN
+      }
+    },
+    "SEOBNRv4_opt": {
+      "M80": {
+        "total_mass": 79.99999999999999,
+        "seconds": 0.017448346014134586,
+        "fs": 2048.0,
+        "n_samples": 1365,
+        "signal_s": 0.66650390625,
+        "gpry_per_eval": 1.4421129879423569
+      },
+      "M60": {
+        "total_mass": 59.99999999999999,
+        "seconds": 0.023639920982532203,
+        "fs": 2048.0,
+        "n_samples": 2033,
+        "signal_s": 0.99267578125,
+        "gpry_per_eval": 1.7973551052412444
+      },
+      "M40": {
+        "total_mass": 40.0,
+        "seconds": 0.02219359891023487,
+        "fs": 2048.0,
+        "n_samples": 3901,
+        "signal_s": 1.90478515625,
+        "gpry_per_eval": 1.7776506234561869
+      },
+      "M20": {
+        "total_mass": 20.0,
+        "seconds": 0.0349323459668085,
+        "fs": 2048.0,
+        "n_samples": 12542,
+        "signal_s": 6.1240234375,
+        "gpry_per_eval": 2.6428822521713937
+      },
+      "M10": {
+        "total_mass": 10.0,
+        "seconds": 0.0671949899988249,
+        "fs": 4096.0,
+        "n_samples": 80265,
+        "signal_s": 19.595947265625,
+        "gpry_per_eval": 2.5792825954785945
+      },
+      "M8": {
+        "total_mass": 7.999999999999998,
+        "seconds": 0.10025597701314837,
+        "fs": 8192.0,
+        "n_samples": 232935,
+        "signal_s": 28.4344482421875,
+        "gpry_per_eval": NaN
+      },
+      "M6": {
+        "total_mass": 5.999999999999999,
+        "seconds": 0.15496614598669112,
+        "fs": 8192.0,
+        "n_samples": 376047,
+        "signal_s": 45.9041748046875,
+        "gpry_per_eval": NaN
+      },
+      "M4": {
+        "total_mass": 4.0,
+        "seconds": 0.38421608100179583,
+        "fs": 16384.0,
+        "n_samples": 1475426,
+        "signal_s": 90.0528564453125,
+        "gpry_per_eval": NaN
+      },
+      "M3": {
+        "total_mass": 3.0,
+        "seconds": 0.6196825730148703,
+        "fs": 16384.0,
+        "n_samples": 2378822,
+        "signal_s": 145.1917724609375,
+        "gpry_per_eval": NaN
+      },
+      "M2.8": {
+        "total_mass": 2.8,
+        "seconds": 0.6898660019505769,
+        "fs": 16384.0,
+        "n_samples": 2667481,
+        "signal_s": 162.81011962890625,
+        "gpry_per_eval": NaN
+      }
+    },
+    "SEOBNRv4HM": {
+      "M80": {
+        "total_mass": 79.99999999999999,
+        "seconds": 0.3896637558937073,
+        "fs": 2048.0,
+        "n_samples": 1354,
+        "signal_s": 0.6611328125,
+        "gpry_per_eval": 1.4421129879423569
+      },
+      "M60": {
+        "total_mass": 59.99999999999999,
+        "seconds": 0.5402683509746566,
+        "fs": 2048.0,
+        "n_samples": 2025,
+        "signal_s": 0.98876953125,
+        "gpry_per_eval": 1.7973551052412444
+      },
+      "M40": {
+        "total_mass": 40.0,
+        "seconds": 0.640295417048037,
+        "fs": 4096.0,
+        "n_samples": 7792,
+        "signal_s": 1.90234375,
+        "gpry_per_eval": 1.7776506234561869
+      },
+      "M20": {
+        "total_mass": 20.0,
+        "seconds": 1.7661795785534196,
+        "fs": 8192.0,
+        "n_samples": 50157,
+        "signal_s": 6.1226806640625,
+        "gpry_per_eval": 2.6428822521713937
+      },
+      "M10": {
+        "total_mass": 10.0,
+        "seconds": 7.575303576013539,
+        "fs": 16384.0,
+        "n_samples": 321048,
+        "signal_s": 19.59521484375,
+        "gpry_per_eval": 2.5792825954785945
+      },
+      "M8": {
+        "total_mass": 7.999999999999998,
+        "seconds": 11.045113047002815,
+        "fs": 16384.0,
+        "n_samples": 465861,
+        "signal_s": 28.43389892578125,
+        "gpry_per_eval": NaN
+      },
+      "M6": {
+        "total_mass": 5.999999999999999,
+        "seconds": 18.509660264942795,
+        "fs": 16384.0,
+        "n_samples": 752086,
+        "signal_s": 45.9036865234375,
+        "gpry_per_eval": NaN
+      },
+      "M4": {
+        "total_mass": 4.0,
+        "seconds": 65.25697970693,
+        "fs": 32768.0,
+        "n_samples": 2950844,
+        "signal_s": 90.0526123046875,
+        "gpry_per_eval": NaN
+      },
+      "M3": {
+        "total_mass": 3.0,
+        "seconds": 111.12114185607061,
+        "fs": 32768.0,
+        "n_samples": 4757638,
+        "signal_s": 145.19158935546875,
+        "gpry_per_eval": NaN
+      },
+      "M2.8": {
+        "total_mass": 2.8,
+        "seconds": 218.2224834759254,
+        "fs": 65536.0,
+        "n_samples": 10669916,
+        "signal_s": 162.80999755859375,
+        "gpry_per_eval": NaN
+      }
+    },
+    "SEOBNRv5HM": {
+      "M80": {
+        "total_mass": 79.99999999999999,
+        "seconds": 0.0359708369942382,
+        "fs": 2048.0,
+        "n_samples": 1346,
+        "signal_s": 0.6572265625,
+        "gpry_per_eval": 1.4421129879423569
+      },
+      "M60": {
+        "total_mass": 59.99999999999999,
+        "seconds": 0.03770994604565203,
+        "fs": 2048.0,
+        "n_samples": 2025,
+        "signal_s": 0.98876953125,
+        "gpry_per_eval": 1.7973551052412444
+      },
+      "M40": {
+        "total_mass": 40.0,
+        "seconds": 0.04044575907755643,
+        "fs": 2048.0,
+        "n_samples": 3900,
+        "signal_s": 1.904296875,
+        "gpry_per_eval": 1.7776506234561869
+      },
+      "M20": {
+        "total_mass": 20.0,
+        "seconds": 0.05200450599659234,
+        "fs": 4096.0,
+        "n_samples": 25083,
+        "signal_s": 6.123779296875,
+        "gpry_per_eval": 2.6428822521713937
+      },
+      "M10": {
+        "total_mass": 10.0,
+        "seconds": 0.09994284494314343,
+        "fs": 8192.0,
+        "n_samples": 160530,
+        "signal_s": 19.595947265625,
+        "gpry_per_eval": 2.5792825954785945
+      },
+      "M8": {
+        "total_mass": 7.999999999999998,
+        "seconds": 0.26091766997706145,
+        "fs": 16384.0,
+        "n_samples": 465866,
+        "signal_s": 28.4342041015625,
+        "gpry_per_eval": NaN
+      },
+      "M6": {
+        "total_mass": 5.999999999999999,
+        "seconds": 0.3992228739662096,
+        "fs": 16384.0,
+        "n_samples": 752092,
+        "signal_s": 45.904052734375,
+        "gpry_per_eval": NaN
+      },
+      "M4": {
+        "total_mass": 4.0,
+        "seconds": 1.6395145044662058,
+        "fs": 32768.0,
+        "n_samples": 2950848,
+        "signal_s": 90.052734375,
+        "gpry_per_eval": NaN
+      },
+      "M3": {
+        "total_mass": 3.0,
+        "seconds": 2.909821033477783,
+        "fs": 32768.0,
+        "n_samples": 4757642,
+        "signal_s": 145.19171142578125,
+        "gpry_per_eval": NaN
+      },
+      "M2.8": {
+        "total_mass": 2.8,
+        "seconds": 3.2761161774396896,
+        "fs": 32768.0,
+        "n_samples": 5334955,
+        "signal_s": 162.80990600585938,
+        "gpry_per_eval": NaN
+      }
+    },
+    "SEOBNRv5PHM": {
+      "M80": {
+        "total_mass": 79.99999999999999,
+        "seconds": 0.06163370702415705,
+        "fs": 2048.0,
+        "n_samples": 1348,
+        "signal_s": 0.658203125,
+        "gpry_per_eval": 1.4421129879423569
+      },
+      "M60": {
+        "total_mass": 59.99999999999999,
+        "seconds": 0.07052815798670053,
+        "fs": 2048.0,
+        "n_samples": 2025,
+        "signal_s": 0.98876953125,
+        "gpry_per_eval": 1.7973551052412444
+      },
+      "M40": {
+        "total_mass": 40.0,
+        "seconds": 0.08345622301567346,
+        "fs": 2048.0,
+        "n_samples": 3900,
+        "signal_s": 1.904296875,
+        "gpry_per_eval": 1.7776506234561869
+      },
+      "M20": {
+        "total_mass": 20.0,
+        "seconds": 0.12740039604250342,
+        "fs": 4096.0,
+        "n_samples": 25083,
+        "signal_s": 6.123779296875,
+        "gpry_per_eval": 2.6428822521713937
+      },
+      "M10": {
+        "total_mass": 10.0,
+        "seconds": 0.2864602280315012,
+        "fs": 8192.0,
+        "n_samples": 160530,
+        "signal_s": 19.595947265625,
+        "gpry_per_eval": 2.5792825954785945
+      },
+      "M8": {
+        "total_mass": 7.999999999999998,
+        "seconds": 0.6929853170877323,
+        "fs": 16384.0,
+        "n_samples": 465866,
+        "signal_s": 28.4342041015625,
+        "gpry_per_eval": NaN
+      },
+      "M6": {
+        "total_mass": 5.999999999999999,
+        "seconds": 1.1212852440075949,
+        "fs": 16384.0,
+        "n_samples": 752092,
+        "signal_s": 45.904052734375,
+        "gpry_per_eval": NaN
+      },
+      "M4": {
+        "total_mass": 4.0,
+        "seconds": 3.8823422220302746,
+        "fs": 32768.0,
+        "n_samples": 2950848,
+        "signal_s": 90.052734375,
+        "gpry_per_eval": NaN
+      },
+      "M3": {
+        "total_mass": 3.0,
+        "seconds": 6.579059727489948,
+        "fs": 32768.0,
+        "n_samples": 4757642,
+        "signal_s": 145.19171142578125,
+        "gpry_per_eval": NaN
+      },
+      "M2.8": {
+        "total_mass": 2.8,
+        "seconds": 7.201173867972102,
+        "fs": 32768.0,
+        "n_samples": 5334955,
+        "signal_s": 162.80990600585938,
+        "gpry_per_eval": NaN
+      }
+    }
+  }
+}
