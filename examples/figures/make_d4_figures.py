@@ -7,7 +7,8 @@ Inputs (committed):
 Outputs:
   examples/figures/fig_eob_timing.png
   examples/figures/fig_pe_scaling.png
-  examples/figures/fig_posteriors.png  -- every posterior from every run vs truth
+  examples/figures/fig_posteriors.png       -- 1-D marginals, every run vs truth (overview)
+  examples/figures/fig_corner_M<mass>.png   -- one 2-D corner per total mass, all routes
 
 Run:  conda run -n lalsuite-dev python examples/figures/make_d4_figures.py
 """
@@ -289,7 +290,79 @@ def fig_posteriors():
     print("wrote", p)
 
 
+def _wquantile(x, w, q):
+    o = np.argsort(x)
+    xs, ws = x[o], w[o]
+    c = (np.cumsum(ws) - 0.5 * ws) / ws.sum()
+    return np.interp(q, c, xs)
+
+
+def fig_corners():
+    """One 2-D corner plot per total mass, with every run at that mass overlaid
+    (Route A CPU/GPU + Route B) against the injected truth. Weighted 50%/90% credible
+    contours on a common range so the routes are directly comparable."""
+    import corner  # optional dep (env: lalsuite-dev)
+
+    masses = [80, 70, 60, 50, 40, 30, 20, 10]
+    routes = [("gradient_cpu", "#1f6fb2", "Route A – gradient (CPU)"),
+              ("gradient_gpu", "#0f8f80", "Route A – gradient (GPU)"),
+              ("surrogate_cpu", "#c0392b", "Route B – GPry surrogate")]
+    labels = [r"$\mathcal{M}\,[M_\odot]$", "$q$", r"$\chi_{1z}$", r"$\chi_{2z}$"]
+
+    for mass in masses:
+        present = [(rt, col, lab, _load_run(mass, rt))
+                   for rt, col, lab in routes]
+        present = [(rt, col, lab, v) for rt, col, lab, v in present if v is not None]
+        if not present:
+            continue
+        truth = present[0][3]["truth"]
+        dur = present[0][3]["dur"]
+        ndim = len(labels)
+        rng = []
+        for d in range(ndim):
+            los, his = [], []
+            for _, _, _, v in present:
+                lo, hi = _wquantile(v["x"][:, d], v["w"], [0.005, 0.995])
+                los.append(lo)
+                his.append(hi)
+            lo, hi = min(los + [truth[d]]), max(his + [truth[d]])
+            pad = 0.10 * (hi - lo + 1e-9)
+            rng.append((lo - pad, hi + pad))
+
+        fig = None
+        a_short = False
+        for rt, col, _, v in present:
+            if rt in ("gradient_cpu", "gradient_gpu") and v["evals"] < 5000:
+                a_short = True
+            fig = corner.corner(
+                v["x"], weights=v["w"], labels=labels, range=rng, bins=32,
+                color=col, smooth=1.0, levels=(0.5, 0.9),
+                plot_datapoints=False, plot_density=False, fill_contours=True,
+                contour_kwargs=dict(linewidths=1.1),
+                contourf_kwargs=dict(alpha=0.28),
+                hist_kwargs=dict(density=True, lw=1.5),
+                truths=truth if fig is None else None, truth_color="#222",
+                labelpad=0.08, fig=fig,
+            )
+        handles = [Line2D([0], [0], color=col, lw=2.4, label=lab)
+                   for _, col, lab, _ in present]
+        handles.append(Line2D([0], [0], color="#222", ls=(0, (4, 2)), lw=1.3,
+                              label="injected truth"))
+        note = "  (Route A: short 1.4k-step benchmark)" if a_short else ""
+        fig.legend(handles=handles, loc="upper right",
+                   bbox_to_anchor=(0.98, 0.98), frameon=False, fontsize=11)
+        fig.suptitle(
+            f"$M_{{\\rm tot}} = {mass}\\,M_\\odot$   ·   {dur:.0f} s   ·   SNR $\\approx$ 15"
+            f"   ·   4-D intrinsic posterior{note}",
+            fontsize=13, y=1.02)
+        p = os.path.join(FIG, f"fig_corner_M{mass}.png")
+        fig.savefig(p, bbox_inches="tight", dpi=130)
+        plt.close(fig)
+        print("wrote", p)
+
+
 if __name__ == "__main__":
     fig_eob()
     fig_pe()
     fig_posteriors()
+    fig_corners()
