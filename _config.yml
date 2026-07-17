@@ -20,9 +20,16 @@ footer_content: >-
   Copyright &copy; Prayush Kumar. Distributed under the
   <a href="https://github.com/gwnrtools/jaxpe/blob/master/LICENSE">MIT license</a>.
 
-# Don't build the site out of package sources, build products or notebooks.
+# Don't build the site out of package sources, build products or notebooks. NOTE:
+# examples/ is NOT excluded wholesale -- we deliberately publish the D4 timing report
+# (examples/d4_timing_report.html, a static HTML page) and its figures
+# (examples/figures/*.png), and exclude only the scripts, outputs and caches beneath it.
 exclude:
-  - examples/
+  - examples/*.py          # all example scripts (the glob's * spans / in Jekyll,
+                           # so this also covers examples/figures/make_d4_figures.py)
+  - examples/compile_scaling.png   # stray output png (figures/*.png stay published)
+  - examples/output/
+  - examples/__pycache__/
   - jaxpe/
   - jaxpe.egg-info/
   - tests/
