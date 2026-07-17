@@ -818,6 +818,64 @@ decision is not one-shot: acquisition always; GP fit only if profiling at the ta
 dimensionality shows it dominating. Matches the Phase-1 demo datum (acquisition $\sim 83\%$) now
 on the real FD Route B.
 
+*Acquisition: overhead-bound, not flops-bound — measured per surrogate point (the CPU-port
+decision).* The split above says acquisition is $70$–$77\%$ of the loop; it does **not** say
+whether that time is the GP posterior predictive's linear algebra (which a JAX port could beat)
+or the nested sampler's own Python machinery (which only an end-to-end-jitted NS removes). GPry
+logs the denominator: `evals_acquire` counts surrogate **points** (`gpr.py`:
+`self.n_eval += len(X)`), so `time_acquire / evals_acquire` is a wall time *per acquisition
+point*. `examples/08` now records it. Measured on the M80 injection (CPU, `lalsuite-dev`;
+converged run, $336$ truth evals over $82$ iterations, $2.74\times 10^{6}$ acquisition points):
+
+| $N$ (train) | acquisition $\mu$s/point | acq points / iter | GP fit ms/point |
+|---|---|---|---|
+| $<60$        | $185$ | $19{,}700$ | $1.8$ |
+| $60$–$120$   | $85$  | $39{,}000$ | $1.8$ |
+| $120$–$200$  | $89$  | $33{,}800$ | $5.3$ |
+| $200$–$280$  | $96$  | $35{,}900$ | $11.9$ |
+| $280$–$332$  | $102$ | $36{,}200$ | $18.7$ |
+
+Two things are decisive. **(a) The acquisition per-point cost is $N$-independent** ($\sim 90\,\mu$s
+from $N{=}60$ to $N{=}332$, a $5.5\times$ growth in $N$ producing only a $1.2\times$ change). A
+cost dominated by the GP predictive would rise with $N$ — the mean is $O(N)$/point and the
+posterior-variance triangular solve $O(N^2)$/point — so the *absence* of $N$-scaling proves the
+predictive is **not** what sets the acquisition cost. **(b) The measured $\sim 90\,\mu$s/point is
+$\sim 5$–$20\times$ the GP predictive's own vectorized cost** at these training sizes — a separate
+CPU microbenchmark (`scratchpad/bench_acq_cpu.py`, sklearn vs a jitted JAX twin, fp64, $d{=}4$)
+puts the predictive at $\sim 4$–$7\,\mu$s/point at $N{=}136$ and $\sim 17$–$27\,\mu$s/point at
+$N{=}560$ in the batched regime UltraNest uses. So **$\sim 80$–$90\%$ of acquisition wall-clock is
+the sampler's machinery** (MLFriends region rebuilds, slice/ellipsoid proposals, per-batch
+dispatch), not the GP linear algebra. Contrast the **GP fit**, whose per-point cost rises
+$1.8\to 18.7$ ms ($\sim 10\times$ over the same $N$ range) — that is the genuinely
+linear-algebra-bound, $O(N^3)$-driven term.
+
+*Consequences for a JAX port, and specifically on CPU.* **(i)** A port of the GP *predictive
+alone* is the wrong target: it touches only the $\sim 10$–$20\%$ flops slice, and the same
+microbenchmark shows XLA-CPU at $0.3$–$3.2\times$ sklearn (mostly $\approx 1\times$ or worse) in
+the batch regime UltraNest occupies, because that work is already BLAS-bound — so on CPU even a
+perfect predictive port removes $\lesssim 3\%$ of the loop. **(ii)** The only lever that reaches
+the dominant $\sim 85\%$ is jitting the **whole** NS (`lax.scan` + `vmap` over the live points,
+e.g. BlackJAX-NSS), which wins by deleting the Python loop — a *hardware-independent* gain, so it
+would help on CPU too. **But GPry's existing BlackJAX seam cannot deliver it**: its
+`loglikelihood_fn` wraps the numpy acquisition in `jax.pure_callback(..., vmap_method="sequential")`
+returning a scalar per call, i.e. the jitted NS escapes to Python one point at a time — likely
+*slower* than the `vectorized=True` UltraNest we run today. A real port needs a **JAX-native GP
+predictive** inlined into the jitted NS (and, since $N$ grows every iteration, fixed-size padding
++ masking to avoid XLA recompiling each iteration — not free on CPU). **(iii)** The fp64 objection
+that shaped D4 is GPU-specific and simply *vanishes on CPU* (full-rate fp64) — but so does most of
+the predictive-port upside, since LAPACK is already near-optimal there. **(iv)** The cheapest,
+hardware-independent win attacks the true dominant term — the **eval count**: $2.74\times 10^6$
+surrogate points to acquire $336$ truth points is $\sim 8{,}000$ points per acquired point, at a
+fixed $\sim 90\,\mu$s each. Replacing the per-iteration NS with a gradient-multistart optimum
+(Option 2, using GPry's analytic `return_mean_grad`/`return_std_grad`) would use $\sim 10^2$–$10^3$
+points/iteration instead of $\sim 35{,}000$ — orders of magnitude, pure algorithm, no JAX, no GPU.
+**So on CPU the ordering is: Option 0 (direct NS) and Option 2 (cheaper acquisition) before any
+JAX port; a JAX port pays only as an end-to-end-jitted NS, never as a predictive-only port, and
+Phase 2.5's "`vmap`-friendly, fp64 objection moot" rationale is a GPU argument that does not
+transfer to CPU.** (Caveat: GPry convergence is stochastic run-to-run — this converged M80 run
+took $336$ evals / $82$ iters, longer than the $136$-eval run in the split table above — so the
+robust quantity is the per-point *rate* ($\sim 90\,\mu$s, $N$-independent), not the totals.)
+
 *Real case-(2) EOB per-call cost, BBH$\to$BNS, measured (Rec 2 — the assumption D4 rested on).*
 The "interface, don't rewrite" call rested on production EOB waveforms costing $0.5$–$10$
 min/call. `examples/08 --eob-timing` times real external models at the sweep's intrinsic
@@ -910,15 +968,29 @@ cut it, most-impactful first, each with its tradeoff:
   the measured crossover.
 - **1 — JAX/BlackJAX acquisition NS (Phase 2.5).** Port the $70$–$77\%$: the acquisition
   optimizes over the GP *predictive* with a cached factorization (fp64 Cholesky *not* re-run per
-  eval), so it is `vmap`/GPU-friendly and the consumer-GPU-fp64 objection does not apply.
-  *Tradeoff:* a wrong acquisition silently biases the posterior — must reproduce GPry-native
-  proposals within tolerance (gate G2.5), preserving NORA's batch/trust-region logic.
+  eval), so it is `vmap`/GPU-friendly and the consumer-GPU-fp64 objection does not apply. **But
+  scope it correctly (measured above): $\sim 85\%$ of acquisition wall-clock is the sampler's own
+  Python machinery, not the predictive** ($\sim 90\,\mu$s/point, $N$-independent, vs $\sim 5$–$20\,\mu$s
+  for the predictive itself). So the port only pays as an **end-to-end-jitted NS** (`lax.scan` +
+  `vmap`, removing the Python loop — a *hardware-independent* win, hence the one that also helps on
+  **CPU**); a predictive-only port touches the wrong $\sim 15\%$ and is $\approx$break-even on CPU.
+  GPry's existing BlackJAX seam does *not* qualify — it `pure_callback`s to numpy point-by-point
+  (`vmap_method="sequential"`), likely slower than the `vectorized=True` UltraNest we run — so this
+  needs a JAX-native predictive inlined into the jitted NS, with fixed-size padding/masking to stop
+  XLA recompiling as $N$ grows. *Tradeoff:* a wrong acquisition silently biases the posterior — must
+  reproduce GPry-native proposals within tolerance (gate G2.5), preserving NORA's batch/trust-region
+  logic.
 - **2 — Cheaper acquisition than a full NS.** NORA runs a nested sampler over the acquisition
   surface *every* iteration; the GP exposes analytic mean/std gradients
   (`return_mean_grad`/`return_std_grad`, verified seam), so a multi-start gradient (L-BFGS)
-  optimum is far cheaper and `vmap`-friendly. *Tradeoff:* gradient multistart can miss modes on
-  the SNR$^2$-amplified multi-lobed acquisition surfaces we have already seen — validate against
-  NORA before trusting. Orthogonal to (1): it attacks the same $70$–$77\%$ algorithmically.
+  optimum is far cheaper and `vmap`-friendly. **This is the highest-leverage CPU lever
+  (measured):** acquisition cost is eval-count $\times$ a fixed $\sim 90\,\mu$s/point, and NORA
+  spends $\sim 2.74\times 10^6$ points ($\sim 35{,}000$/iteration) to acquire a few hundred truth
+  points; gradient multistart would use $\sim 10^2$–$10^3$/iteration — orders of magnitude fewer,
+  pure algorithm, no JAX and no GPU. *Tradeoff:* gradient multistart can miss modes on the
+  SNR$^2$-amplified multi-lobed acquisition surfaces we have already seen — validate against NORA
+  before trusting. Orthogonal to (1) and strictly cheaper on CPU: it attacks the same $70$–$77\%$
+  algorithmically rather than by compilation.
 - **3 — Cut the eval count $N$ (multifidelity mean + tight bounds; Phase 2).** Fewer evals means
   fewer acquisition iterations *and* a smaller GP, so it attacks **both** the acquisition total
   and the $O(N^3)$ fit. The cheap-model mean gives the GP a head start; cheap-model-derived bounds
@@ -938,11 +1010,15 @@ cut it, most-impactful first, each with its tradeoff:
 *Recommendation (ordered).* **(i)** Measure Option 0 first — a direct-NS baseline on the marginal;
 it may remove the bottleneck entirely for low-D cheap-waveform BBH and pins exactly when GPry is
 worth using, at zero GP-engineering cost. **(ii)** Where GPry *is* warranted (expensive-waveform
-or high-D), do Option 1 (Phase 2.5) together with Option 2 — port *and* cheapen the acquisition —
-gated on G2.5. **(iii)** In parallel, Option 3 (multifidelity + bounds, Phase 2) to cut $N$, which
-attacks both terms and is already on the roadmap; try Option 4 opportunistically (near-free).
-**(iv)** Only if high-$N$/high-$D$ profiling shows the GP fit dominating, add Option 5; defer any
-fp64-Cholesky-on-GPU port per D4. Throughout, **correctness $>$ speed**: Options 1/2/5 change the
+or high-D), do **Option 2 before Option 1** — the per-point measurement shows acquisition is
+overhead-bound ($\sim 85\%$ sampler machinery), so cutting the eval count algorithmically
+(gradient-multistart, no JAX) is both cheaper to build and the larger CPU win; reach for the
+Option 1 JAX port only as a full end-to-end-jitted NS, and only once Option 2's mode-coverage is
+validated. On CPU specifically a predictive-only port is near-useless (see §9); it earns its keep
+mainly on GPU or once the loop is fully jitted. **(iii)** In parallel, Option 3 (multifidelity +
+bounds, Phase 2) to cut $N$, which attacks both terms and is already on the roadmap; try Option 4
+opportunistically (near-free). **(iv)** Only if high-$N$/high-$D$ profiling shows the GP fit
+dominating, add Option 5; defer any fp64-Cholesky-on-GPU port per D4. Throughout, **correctness $>$ speed**: Options 1/2/5 change the
 surrogate internals and can *silently* bias the posterior, so each is validated against the pinned
 GPry loop before it is trusted — Option 0 is the safe baseline because it carries no surrogate at
 all.
@@ -968,10 +1044,21 @@ acquisition is ported; the GP regressor, SVM/robustness, convergence and checkpo
 GPry (D4). The GP fit ($O(N^3)$ Cholesky) is $5\%$ at low $N$ but $\sim 26\%$ at $N\!\sim\!560$
 — revisit a fit port only if high-dimensional profiling shows it dominating (task 2.5.1).*
 
+**Scope correction (per-point measurement, §9).** The $70$–$77\%$ is **not** GP-predictive flops:
+at $\sim 90\,\mu$s/acquisition-point ($N$-independent) it is $\sim 85\%$ nested-sampler machinery
+and only $\sim 15\%$ predictive. So Phase 2.5 must port the **whole NS loop** (`lax.scan`/`vmap`,
+removing the Python overhead), not just the predictive — GPry's `pure_callback`-per-point BlackJAX
+seam does **not** qualify (task 2.5.2 below is rewritten accordingly). On **CPU** this is worth
+doing only after Option 2 (gradient-multistart acquisition, which removes most of the eval count
+with no JAX at all); the `vmap`-friendly / fp64-moot framing above is a **GPU** argument that a CPU
+microbenchmark shows does not transfer (XLA-CPU is $0.3$–$3.2\times$ sklearn on the predictive).
+Sequence for this phase: **run Option 2 and the Option 0 direct-NS baseline first; a full jitted-NS
+port is justified mainly for the GPU path or once Option 2 is exhausted.***
+
 | # | task | deliverable / test |
 |---|---|---|
 | 2.5.1 | Split-timing + BBH$\to$BNS EOB timing landed (`examples/08 --eob-timing`, `gpry.progress` readout; eccentric SEOBNRv5EHM measured — $\sim$4.5–12$\times$ aligned, crossover $M\!\approx\!8$–$10$); remaining: the *compounded* minutes/call corner (eccentric + BNS-length + sub-20 Hz $f_{\rm low}$, + tidal EOB) | extend the §9 EOB table; confirms which targets stay waveform-dominated |
-| 2.5.2 | JAX acquisition over the GP predictive at the `gpry/ns_interfaces.py` **BlackJAX** seam: `vmap` the acquisition function on a cached GP factorization; keep GPry's NORA batch/trust-region logic | matches GPry-native acquisition proposals within tolerance on a fixed GP; wall-clock speedup measured |
+| 2.5.2 | **End-to-end-jitted** acquisition NS (not a predictive-only wrap): a JAX-native GP predictive inlined into a `lax.scan`/`vmap` nested sampler (BlackJAX-NSS), fixed-size padding+masking for the growing training set; the current `gpry/ns_interfaces.py::InterfaceBlackJAX` `pure_callback`-per-point path is explicitly *not* the target (it escapes to numpy sequentially, likely slower than `vectorized=True` UltraNest). Precede with **task 2.5.0**: run Option 0 (direct-NS baseline) and Option 2 (gradient-multistart acquisition) — both no-JAX — and only proceed here if they leave a gap | matches GPry-native proposals within tolerance on a fixed GP; wall-clock speedup measured **on the target device** (CPU *and* GPU — the predictive-only path is $\approx$break-even on CPU, §9) |
 | 2.5.3 | Wire behind the `SurrogateEngine` protocol as an optional backend; default stays GPry-native | opt-in flag; falls back cleanly; posterior unchanged vs native on the Phase-1 pseudo-black-box |
 
 **Gate G2.5:** on a fixed training set the JAX acquisition reproduces GPry-native proposals

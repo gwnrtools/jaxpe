@@ -613,6 +613,15 @@ def _gpry_timing_split(engine) -> dict:
     - ``convergence_seconds`` / ``inloop_mc_seconds`` (``time_convergence`` /
       ``time_mc``): the convergence criterion and any in-loop MC sampling.
 
+    We also read GPry's surrogate-evaluation *counters* (``evals_acquire``,
+    ``evals_fit``). GPry increments these by ``len(X)`` per predictive call
+    (``gpr.py``: ``self.n_eval += len(X)``), so they count surrogate **points**, not
+    calls. That makes ``acquire_seconds / acquire_evals`` a wall-time *per acquisition
+    point*, directly comparable to a measured cost per point of the GP posterior
+    predictive -- which is what decides whether the acquisition is flops-bound (a JAX
+    port buys the ratio of the two linear algebras) or overhead-bound (it does not: the
+    win would have to come from jitting away the sampler's Python loop instead).
+
     Missing columns/rows (older GPry, non-main MPI ranks) count as zero. NaN-safe.
     """
     try:
@@ -629,6 +638,9 @@ def _gpry_timing_split(engine) -> dict:
         gpry_truth_seconds=col("time_truth"),
         convergence_seconds=col("time_convergence"),
         inloop_mc_seconds=col("time_mc"),
+        # surrogate-point counters (denominators for the per-point costs above)
+        acquire_evals=int(col("evals_acquire")),
+        fit_evals=int(col("evals_fit")),
         n_iterations=int(len(df)),
     )
 
@@ -716,6 +728,8 @@ def run_surrogate_marginalized_inference(likelihood, inj: Injection, n_freq, see
     acq_s = split.get("acquire_seconds", float("nan"))
     conv_s = split.get("convergence_seconds", 0.0)
     inloop_mc_s = split.get("inloop_mc_seconds", 0.0)
+    acq_evals = split.get("acquire_evals", 0)
+    fit_evals = split.get("fit_evals", 0)
     n_evals = diagnostics["n_truth_evals"]
     per = (lambda s: s / n_evals) if n_evals else (lambda s: float("nan"))
     print(
@@ -735,6 +749,16 @@ def run_surrogate_marginalized_inference(likelihood, inj: Injection, n_freq, see
             else ""
         )
     )
+    # Per-acquisition-point wall time: the number that separates "the acquisition is
+    # flops-bound" (comparable to the GP predictive's own cost per point) from "it is
+    # overhead-bound" (orders of magnitude above it -> the sampler's Python loop, not
+    # the linear algebra, is the target).
+    if acq_evals:
+        print(
+            f"  acquisition: {acq_evals} surrogate points in {acq_s:.1f}s "
+            f"=> {acq_s / acq_evals * 1e6:.1f} us/point"
+            + (f"  |  fit: {fit_evals} points" if fit_evals else "")
+        )
     return dict(
         samples=np.asarray(posterior.x),
         weights=np.asarray(posterior.weights),
@@ -758,6 +782,8 @@ def run_surrogate_marginalized_inference(likelihood, inj: Injection, n_freq, see
         final_mc_seconds=sample_seconds,
         loop_seconds=max(run_seconds - compile_seconds, 0.0),  # AL loop, compile-excl
         gpry_truth_seconds=split.get("gpry_truth_seconds", float("nan")),
+        acquire_evals=acq_evals,
+        fit_evals=fit_evals,
         n_gpry_iterations=split.get("n_iterations", 0),
     )
 
@@ -789,6 +815,9 @@ _META_FIELDS = (
     "final_mc_seconds",
     "loop_seconds",
     "gpry_truth_seconds",
+    # surrogate-point counters: denominators for the per-point acquisition/fit cost
+    "acquire_evals",
+    "fit_evals",
     "n_gpry_iterations",
 )
 
