@@ -1061,6 +1061,29 @@ port is justified mainly for the GPU path or once Option 2 is exhausted.***
 | 2.5.2 | **End-to-end-jitted** acquisition NS (not a predictive-only wrap): a JAX-native GP predictive inlined into a `lax.scan`/`vmap` nested sampler (BlackJAX-NSS), fixed-size padding+masking for the growing training set; the current `gpry/ns_interfaces.py::InterfaceBlackJAX` `pure_callback`-per-point path is explicitly *not* the target (it escapes to numpy sequentially, likely slower than `vectorized=True` UltraNest). Precede with **task 2.5.0**: run Option 0 (direct-NS baseline) and Option 2 (gradient-multistart acquisition) — both no-JAX — and only proceed here if they leave a gap | matches GPry-native proposals within tolerance on a fixed GP; wall-clock speedup measured **on the target device** (CPU *and* GPU — the predictive-only path is $\approx$break-even on CPU, §9) |
 | 2.5.3 | Wire behind the `SurrogateEngine` protocol as an optional backend; default stays GPry-native | opt-in flag; falls back cleanly; posterior unchanged vs native on the Phase-1 pseudo-black-box |
 
+**Progress (2026-07, implemented + tested — `jaxpe/surrogate/jax_acquisition.py`).**
+- **2.5.2 (core done):** `JAXNORA`/`JAXInterfaceBlackJAX` inline a **JAX-native GP predictive
+  mean** into the jitted BlackJAX-NSS step (no `pure_callback`). The predictive-mean-only path
+  is correct *by construction*: NORA's MC step samples the mean posterior
+  (`surrogate.predict(return_std=False)`), σ enters only in the later numpy ranking — so the
+  JAX mean is the whole acquisition target. Unit-tested to match GPry's mean to $<10^{-6}$ (RBF
+  and Matern) against a real fitted `SurrogateModel`.
+- **Recompile trap fixed.** The GP-predictive state (training arrays, hyperparameters) is passed
+  to the jitted init/step as **arguments**, and the training set is **zero-$\alpha$ padded to a
+  bucketed capacity** (`_bucket_size`, exact — padded rows drop out of the mean, unit-tested). A
+  per-interface `_compiled_runtime_cache` keys the compiled step on shape/precision, not values,
+  so one artifact is reused across iterations. Validated end-to-end on a 2-D Gaussian: distinct
+  compiles $=$ number of *(bucket, nlive, num\_delete)* combinations (a handful), **not** one per
+  iteration — the growth-driven blow-up (measured $5.7$ h at M10 on GPU with the old closure
+  path) is removed. Posterior matches native (means within $\sim0.1$ of truth; cov-diag
+  $[0.48,1.49]$ vs truth $[0.5,1.5]$).
+- **2.5.3 done:** opt-in only — `GPryEngine(jax_acquisition=…)` defaults to native NORA;
+  `examples/08 --jax-acquisition` toggles it (routing unit-tested).
+- **Still open for Gate G2.5:** a *controlled* native-vs-JAX **speedup** measurement (same seed,
+  same convergence target, one device) — the earlier CPU numbers ($0.65$–$4.7\times$) were
+  confounded by stochastic convergence; and a GPU re-time now that the recompile is gone. Per §9
+  the CPU ordering still puts Option 2 / Option 0 first; the JAX port's clean win is the GPU path.
+
 **Gate G2.5:** on a fixed training set the JAX acquisition reproduces GPry-native proposals
 (same next-point distribution within tolerance) **and** cuts acquisition wall-clock ≥ 2× at
 $N\sim$ few$\times10^2$ training points; else it stays off and we keep GPry-native (correctness
