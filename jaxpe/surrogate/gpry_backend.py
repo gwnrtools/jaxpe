@@ -45,6 +45,7 @@ class GPryEngine:
         load_checkpoint: str = "resume",
         verbose: int = 1,
         options: dict | None = None,
+        jax_acquisition: bool = False,
     ):
         from gpry import Runner  # deferred: optional dependency
 
@@ -62,6 +63,14 @@ class GPryEngine:
         kwargs = dict(options or {})
         if checkpoint is not None:
             kwargs.update(checkpoint=checkpoint, load_checkpoint=load_checkpoint)
+
+        if jax_acquisition:
+            from .jax_acquisition import JAXNORA
+
+            kwargs["gp_acquisition"] = JAXNORA(
+                bounds_arr, sampler="blackjax", verbose=verbose
+            )
+
         self.runner = Runner(
             loglike, bounds=bounds_arr, params=params, verbose=verbose, **kwargs
         )

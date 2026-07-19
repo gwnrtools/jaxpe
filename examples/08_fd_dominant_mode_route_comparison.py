@@ -130,8 +130,9 @@ CHIRP_MASS_HALF_WIDTH = 2.0  # sweep: prior is truth +- this many solar masses
 # "fast" is a timing-oriented preset for the duration-scaling study, where the per-step
 # and per-evaluation rates -- not full posterior convergence -- carry the signal.
 CONFIGS = {
-    "full": dict(n_chains=48, n_training=15, n_production=150),
-    "fast": dict(n_chains=32, n_training=6, n_production=20),
+    "extreme": dict(n_chains=48, n_training=15, n_production=150, max_total=4000),
+    "full": dict(n_chains=48, n_training=15, n_production=150, max_total=2000),
+    "fast": dict(n_chains=32, n_training=6, n_production=20, max_total=560),
 }
 
 # Matched-SNR total-mass sweep defaults (the duration-scaling campaign).
@@ -484,7 +485,8 @@ def _chirp_prior(inj: Injection):
     if inj.label in STAGE_SPINS:
         return CHIRP_MASS_PRIOR_STAGE
     mc = inj.params["chirp_mass"]
-    return (mc - CHIRP_MASS_HALF_WIDTH, mc + CHIRP_MASS_HALF_WIDTH)
+    lower_bound = max(0.2, mc - CHIRP_MASS_HALF_WIDTH)
+    return (lower_bound, mc + CHIRP_MASS_HALF_WIDTH)
 
 
 # ------------------------------------------------- method 1: gradient direct sampling
@@ -645,12 +647,21 @@ def _gpry_timing_split(engine) -> dict:
     )
 
 
-def run_surrogate_marginalized_inference(likelihood, inj: Injection, n_freq, seed=11):
+def run_surrogate_marginalized_inference(
+    likelihood, inj: Injection, n_freq, config="full", seed=11, jax_acquisition=False
+):
     """Learn a GPry surrogate of the closed-form phase+distance-marginalized likelihood,
-    profiling waveform-generation time vs GP-training/acquisition time."""
+    profiling waveform-generation time vs GP-training/acquisition time.
+
+    ``jax_acquisition`` selects the experimental JAX/BlackJAX acquisition nested sampler
+    (Phase 2.5) instead of GPry-native NORA. It is **off by default**: the native path is
+    the validated reference, and keeping it the default is what lets the two be compared
+    head-to-head (gate G2.5). See ``docs/gpry_fusion_design.md``.
+    """
     from jaxpe.gw import PhaseDistanceMarginalLikelihood
     from jaxpe.surrogate import GPryEngine
 
+    cfg = CONFIGS[config]
     print(f"\n=== Route B: surrogate marginalized inference [{inj.label}] (GPry) ===")
     names = inj.recover
     bounds = {"chirp_mass": _chirp_prior(inj), "mass_ratio": MASS_RATIO_PRIOR}
@@ -696,8 +707,15 @@ def run_surrogate_marginalized_inference(likelihood, inj: Injection, n_freq, see
             engine = GPryEngine(
                 timed_loglike,
                 bounds=bounds,
-                options={"seed": seed + attempt},
+                options={
+                    "seed": seed + attempt,
+                    "options": {
+                        "max_total": cfg.get("max_total", 560),
+                        "n_initial": cfg.get("n_training", 15) * 4,
+                    },
+                },
                 verbose=0,
+                jax_acquisition=jax_acquisition,
             )
             diagnostics = engine.run()
             break
@@ -765,8 +783,8 @@ def run_surrogate_marginalized_inference(likelihood, inj: Injection, n_freq, see
         wall_seconds=exec_seconds,  # execution only (compile excluded)
         compile_seconds=compile_seconds,
         likelihood_evaluations=n_evals,
-        method="surrogate",
-        device="cpu",
+        method="surrogate_jax" if jax_acquisition else "surrogate",
+        device=jax.devices()[0].platform if jax_acquisition else "cpu",
         n_samples=len(posterior.x),
         duration=inj.duration,
         n_freq=n_freq,
@@ -1092,12 +1110,12 @@ def scaling_summary(model, labels):
 # Nyquist); cap44: restrict to (l,m)<=(4,4) so "highest content" is the well-measured
 # (4,4), not a marginal (5,5) that only inflates fs.
 _EOB_MODELS = {
-    "TEOBResumS":   dict(engine="lal", highest_m=2, cap44=False),
-    "SEOBNRv4":     dict(engine="lal", highest_m=2, cap44=False),
+    "TEOBResumS": dict(engine="lal", highest_m=2, cap44=False),
+    "SEOBNRv4": dict(engine="lal", highest_m=2, cap44=False),
     "SEOBNRv4_opt": dict(engine="lal", highest_m=2, cap44=False),
-    "SEOBNRv4HM":   dict(engine="lal", highest_m=4, cap44=True),
-    "SEOBNRv5HM":   dict(engine="pyseobnr", highest_m=4, cap44=True),
-    "SEOBNRv5PHM":  dict(engine="pyseobnr", highest_m=4, cap44=True),
+    "SEOBNRv4HM": dict(engine="lal", highest_m=4, cap44=True),
+    "SEOBNRv5HM": dict(engine="pyseobnr", highest_m=4, cap44=True),
+    "SEOBNRv5PHM": dict(engine="pyseobnr", highest_m=4, cap44=True),
 }
 _MODE_ARRAY_44 = [(2, 2), (2, 1), (3, 3), (4, 4)]  # standard HM set capped at (4,4)
 # Dominant-QNM ringdown frequency of mode (m,m) relative to (2,2): f_{mm}/f_{22}. Kerr
@@ -1135,9 +1153,20 @@ def _eob_generate(approximant, m1, m2, s1z, s2z, incl, dist_mpc, phi, f_low, fs,
         from pyseobnr.generate_waveform import GenerateWaveform  # optional dep
 
         params = dict(
-            mass1=m1, mass2=m2, spin1x=0.0, spin1y=0.0, spin1z=s1z,
-            spin2x=0.0, spin2y=0.0, spin2z=s2z, deltaT=dt, f22_start=f_low,
-            f_ref=f_low, distance=dist_mpc, inclination=incl, phi_ref=phi,
+            mass1=m1,
+            mass2=m2,
+            spin1x=0.0,
+            spin1y=0.0,
+            spin1z=s1z,
+            spin2x=0.0,
+            spin2y=0.0,
+            spin2z=s2z,
+            deltaT=dt,
+            f22_start=f_low,
+            f_ref=f_low,
+            distance=dist_mpc,
+            inclination=incl,
+            phi_ref=phi,
             approximant=approximant,
         )
         if cap44:
@@ -1157,9 +1186,25 @@ def _eob_generate(approximant, m1, m2, s1z, s2z, incl, dist_mpc, phi, f_low, fs,
         ls.SimInspiralWaveformParamsInsertModeArray(lal_params, mode_array)
     aid = ls.GetApproximantFromString(approximant)
     hp, _ = ls.SimInspiralChooseTDWaveform(
-        m1 * lal.MSUN_SI, m2 * lal.MSUN_SI, 0.0, 0.0, s1z, 0.0, 0.0, s2z,
-        dist_mpc * 1e6 * lal.PC_SI, incl, phi, 0.0, 0.0, 0.0,
-        dt, f_low, f_low, lal_params, aid,
+        m1 * lal.MSUN_SI,
+        m2 * lal.MSUN_SI,
+        0.0,
+        0.0,
+        s1z,
+        0.0,
+        0.0,
+        s2z,
+        dist_mpc * 1e6 * lal.PC_SI,
+        incl,
+        phi,
+        0.0,
+        0.0,
+        0.0,
+        dt,
+        f_low,
+        f_low,
+        lal_params,
+        aid,
     )
     return hp.data.length
 
@@ -1170,7 +1215,8 @@ def eob_call_seconds(inj: Injection, approximant, repeats=5, f_low=LOWER_FREQUEN
     Returns ``(seconds, fs_used, n_samples)``. fs is set from the waveform's highest
     ringdown mode (``_physical_sampling_rate``); if the generator still reports the content
     exceeds Nyquist we bump fs by powers of two. Repeats are reduced for slow (low-mass)
-    calls so a BNS sweep stays affordable. Raises the underlying error if no fs works."""
+    calls so a BNS sweep stays affordable. Raises the underlying error if no fs works.
+    """
     cfg = _EOB_MODELS[approximant]
     m1, m2 = _component_from_chirp_q(inj.params["chirp_mass"], inj.params["mass_ratio"])
     total_mass = m1 + m2
@@ -1191,6 +1237,7 @@ def eob_call_seconds(inj: Injection, approximant, repeats=5, f_low=LOWER_FREQUEN
         except Exception as error:  # noqa: BLE001 -- domain/Nyquist; try a higher fs
             last_err = error
             continue
+
         # adaptive repeats: one timed call, then fewer the slower it is (keep BNS cheap)
         def _one():
             t0 = time.perf_counter()
@@ -1210,19 +1257,29 @@ def eob_call_seconds(inj: Injection, approximant, repeats=5, f_low=LOWER_FREQUEN
 
 def timing_injections(masses, q=0.8, s1z=0.2, s2z=-0.1):
     """Lightweight injections for a pure waveform-timing sweep (no PE / SNR tuning): the
-    same intrinsic configuration as the matched-SNR sweep, extended down to BNS masses."""
+    same intrinsic configuration as the matched-SNR sweep, extended down to BNS masses.
+    """
     injections = []
     for total in masses:
         m1, m2 = component_masses(total, q)
         params = {
-            "chirp_mass": chirp_mass_of(m1, m2), "mass_ratio": q,
-            "spin1z": s1z, "spin2z": s2z, "inclination": 0.4,
-            "luminosity_distance": REFERENCE_DISTANCE_MPC, "phase": 1.5,
+            "chirp_mass": chirp_mass_of(m1, m2),
+            "mass_ratio": q,
+            "spin1z": s1z,
+            "spin2z": s2z,
+            "inclination": 0.4,
+            "luminosity_distance": REFERENCE_DISTANCE_MPC,
+            "phase": 1.5,
         }
         label = f"M{total:g}"
         injections.append(
-            Injection(label, params, ("chirp_mass", "mass_ratio", "spin1z", "spin2z"),
-                      auto_duration(m1, m2, LOWER_FREQUENCY_HZ), SAMPLING_RATE_HZ)
+            Injection(
+                label,
+                params,
+                ("chirp_mass", "mass_ratio", "spin1z", "spin2z"),
+                auto_duration(m1, m2, LOWER_FREQUENCY_HZ),
+                SAMPLING_RATE_HZ,
+            )
         )
     return injections
 
@@ -1232,7 +1289,9 @@ def eob_timing_sweep(model, injections, approximants, repeats=5):
     the measured GPry per-eval overhead (from saved surrogate runs, where present). Writes
     a JSON table and prints where -- if anywhere -- the waveform overtakes GPry."""
     print(f"\n=== Real EOB per-call cost vs GPry per-eval overhead ({model}) ===")
-    print("(warmup-excluded; fs set from the (4,4) ringdown; D4 trigger: EOB/call ~ GPry/eval)")
+    print(
+        "(warmup-excluded; fs set from the (4,4) ringdown; D4 trigger: EOB/call ~ GPry/eval)"
+    )
     results = {}
     for approximant in approximants:
         if approximant not in _EOB_MODELS:
@@ -1248,8 +1307,12 @@ def eob_timing_sweep(model, injections, approximants, repeats=5):
                 sec, fs, n = eob_call_seconds(inj, approximant, repeats=repeats)
                 crossed = sec > gp_per_eval  # nan compares False -> "gpry-dominated"
                 row[inj.label] = dict(
-                    total_mass=m1 + m2, seconds=sec, fs=fs, n_samples=n,
-                    signal_s=n / fs, gpry_per_eval=gp_per_eval,
+                    total_mass=m1 + m2,
+                    seconds=sec,
+                    fs=fs,
+                    n_samples=n,
+                    signal_s=n / fs,
+                    gpry_per_eval=gp_per_eval,
                 )
                 gp_note = (
                     f"  vs GPry/eval {gp_per_eval:.2f}s "
@@ -1263,7 +1326,9 @@ def eob_timing_sweep(model, injections, approximants, repeats=5):
                     f"sig {n / fs:6.1f}s @fs={fs:6.0f}): {sec * 1e3:9.1f} ms/call{gp_note}"
                 )
             except Exception as error:  # noqa: BLE001
-                row[inj.label] = dict(error=f"{type(error).__name__}: {str(error)[:70]}")
+                row[inj.label] = dict(
+                    error=f"{type(error).__name__}: {str(error)[:70]}"
+                )
                 print(
                     f"  {approximant:12s} {inj.label:>5s} (M={m1 + m2:5.1f}): "
                     f"FAILED ({type(error).__name__}: {str(error)[:50]})"
@@ -1272,8 +1337,14 @@ def eob_timing_sweep(model, injections, approximants, repeats=5):
     path = OUTPUT_DIR / f"{model}_eob_call_timing.json"
     with open(path, "w") as handle:
         json.dump(
-            dict(f_low=LOWER_FREQUENCY_HZ, repeats=repeats, cap="(l,m)<=(4,4) for HM",
-                 models=results), handle, indent=2,
+            dict(
+                f_low=LOWER_FREQUENCY_HZ,
+                repeats=repeats,
+                cap="(l,m)<=(4,4) for HM",
+                models=results,
+            ),
+            handle,
+            indent=2,
         )
     print(f"[eob-timing] saved {path}")
     return results
@@ -1293,7 +1364,7 @@ def _gpry_per_eval(model, label):
 
 
 # ------------------------------------------------------------------ driver
-def run_injection(model, inj, method, config, seed):
+def run_injection(model, inj, method, config, seed, jax_acquisition=False):
     """Run the requested method(s) on one injection and persist each."""
     likelihood, n_freq = build_injection_likelihood(model, inj)
     if method in ("gradient", "both"):
@@ -1306,7 +1377,16 @@ def run_injection(model, inj, method, config, seed):
         )
     if method in ("surrogate", "both"):
         persist_run(
-            model, inj, run_surrogate_marginalized_inference(likelihood, inj, n_freq)
+            model,
+            inj,
+            run_surrogate_marginalized_inference(
+                likelihood,
+                inj,
+                n_freq,
+                config=config,
+                seed=seed,
+                jax_acquisition=jax_acquisition,
+            ),
         )
 
 
@@ -1358,6 +1438,12 @@ def main():
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
+        "--jax-acquisition",
+        action="store_true",
+        help="Route B: use the experimental JAX/BlackJAX acquisition NS (Phase 2.5) "
+        "instead of GPry-native NORA. Default off (native is the validated reference).",
+    )
+    parser.add_argument(
         "--overlay-only",
         action="store_true",
         help="skip running; rebuild overlays from saved runs",
@@ -1401,7 +1487,14 @@ def main():
     for inj in injections:
         try:
             if not args.overlay_only:
-                run_injection(args.model, inj, args.method, args.config, args.seed)
+                run_injection(
+                    args.model,
+                    inj,
+                    args.method,
+                    args.config,
+                    args.seed,
+                    jax_acquisition=args.jax_acquisition,
+                )
             runs = load_runs(args.model, inj.label)
             report(inj.label, runs)
             overlay(args.model, inj.label, network_snr=inj.network_snr)

@@ -500,3 +500,37 @@ def test_importance_sampling_summary_peak_window():
     # without the window argument, the near-peak keys are absent
     s2 = lik.importance_sampling_summary(effective_sample_size_floor=100.0)
     assert "n_below_floor_near_peak" not in s2
+
+
+def test_gpry_engine_routes_jax_acquisition_flag():
+    """Task 2.5.3: the JAX/BlackJAX acquisition NS is *opt-in*.
+
+    ``jax_acquisition=True`` must route a ``JAXNORA`` acquisition into ``gpry.Runner``;
+    the default must not (GPry-native NORA stays the reference). We patch ``gpry.Runner``
+    to capture its kwargs so the wiring is checked without running an active-learning
+    loop.
+    """
+    from unittest.mock import patch
+    from jaxpe.surrogate.jax_acquisition import JAXNORA
+
+    def loglike(x):
+        return -0.5 * float(np.sum(np.asarray(x, dtype=float) ** 2))
+
+    bounds = {"a": (-3.0, 3.0), "b": (-3.0, 3.0)}
+    captured = {}
+
+    class _FakeRunner:
+        def __init__(self, loglike, **kwargs):
+            captured.clear()
+            captured.update(kwargs)
+
+    with patch("gpry.Runner", _FakeRunner):
+        GPryEngine(loglike, bounds, verbose=0)
+        assert (
+            "gp_acquisition" not in captured
+        ), "native default must not inject an acquisition"
+
+        GPryEngine(loglike, bounds, verbose=0, jax_acquisition=True)
+        assert isinstance(
+            captured.get("gp_acquisition"), JAXNORA
+        ), "jax_acquisition=True must route a JAXNORA acquisition"
