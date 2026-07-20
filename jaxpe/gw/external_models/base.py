@@ -75,6 +75,67 @@ def reflect_modes(modes: dict) -> dict:
     return out
 
 
+def taper_start(h: np.ndarray, dt: float, taper_seconds: float) -> np.ndarray:
+    """Half-cosine on-ramp over the first ``taper_seconds`` of a complex mode.
+
+    TD models switched on at ``f_low`` carry a turn-on transient; the base-class
+    contract makes tapering the wrapper's job ("the taper is part of the waveform
+    model, not of the likelihood"). A half-cosine in amplitude over a few orbits at
+    ``f_low`` is the standard choice; it multiplies the complex strain, so the phase
+    is untouched.
+    """
+    n_taper = int(round(taper_seconds / dt))
+    if n_taper <= 1 or n_taper >= len(h):
+        return h
+    out = np.array(h)
+    ramp = 0.5 * (1.0 - np.cos(np.pi * np.arange(n_taper) / n_taper))
+    out[:n_taper] = out[:n_taper] * ramp
+    return out
+
+
+def place_modes_on_grid(
+    modes: dict, t_rel: np.ndarray, times: np.ndarray, t_ref: float
+) -> dict:
+    """Place raw model modes (own grid, coalescence at ``t_rel=0``) onto the analysis
+    grid ``times`` with coalescence at the GPS time ``t_ref``, zero-padded/truncated.
+
+    ``t_rel`` are the model's sample times relative to its coalescence. The model must
+    have been generated at the analysis sampling rate (checked); alignment is to the
+    nearest grid sample (sub-sample residual < dt/2 -- the marginalized likelihood
+    realizes other coalescence times by FD shifts *relative to t_ref*, so a fixed
+    sub-sample epoch offset only shifts the reported t_c, never the intrinsic
+    parameters). Samples falling outside the grid are dropped (the early inspiral of a
+    signal longer than the segment), which is the same truncation any segmented
+    analysis applies.
+    """
+    times = np.asarray(times, dtype=float)
+    t_rel = np.asarray(t_rel, dtype=float)
+    dt = times[1] - times[0]
+    dt_model = t_rel[1] - t_rel[0]
+    if abs(dt_model - dt) > 1e-9 * dt:
+        raise ValueError(
+            f"model sampling step {dt_model} != analysis grid step {dt}; generate the "
+            "waveform at the analysis sampling rate"
+        )
+    n = len(times)
+    j0 = int(round((t_ref + t_rel[0] - times[0]) / dt))
+    src_lo = max(0, -j0)
+    dst_lo = max(0, j0)
+    length = min(len(t_rel) - src_lo, n - dst_lo)
+    if length <= 0:
+        raise ValueError(
+            "waveform does not overlap the analysis grid: check t_ref/duration"
+        )
+    out = {}
+    for lm, h in modes.items():
+        placed = np.zeros(n, dtype=np.complex128)
+        placed[dst_lo : dst_lo + length] = np.asarray(h, dtype=np.complex128)[
+            src_lo : src_lo + length
+        ]
+        out[lm] = placed
+    return out
+
+
 class ExternalModeModel(abc.ABC):
     """A non-JAX waveform model returning modes for intrinsic parameters.
 
