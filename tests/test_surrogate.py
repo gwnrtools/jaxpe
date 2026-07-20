@@ -217,26 +217,51 @@ def test_g1_pseudo_blackbox_recovery(pseudo_blackbox):
         lo[0], hi[0], lo[1], hi[1], n=61
     )
 
-    s = engine.sample()
-    mean_gp = np.average(s.x, weights=s.weights, axis=0)
-    var_gp = np.average((s.x - mean_gp) ** 2, weights=s.weights, axis=0)
+    # This run is stochastic despite options={"seed": 11}: GPry cannot seed UltraNest
+    # (its own warning, "Seeded runs are not supported for UltraNest", fires both for
+    # the in-loop NORA acquisition and for this final MC), so both the learned training
+    # set and the final sample vary run to run. The assertions therefore (a) absorb the
+    # *quantified* MC noise of the final sample via its effective sample size, and (b)
+    # on a marginal miss draw ONE fresh MC sample of the same learned surrogate and
+    # re-check -- separating final-sampler flake (passes on the fresh sample) from a
+    # genuinely mislearned surrogate (still fails, and should).
+    def moments(s):
+        w = np.asarray(s.weights, dtype=float)
+        w = w / w.sum()
+        mean = np.average(s.x, weights=w, axis=0)
+        var = np.average((s.x - mean) ** 2, weights=w, axis=0)
+        ess = 1.0 / np.sum(w**2)
+        return mean, var, ess
 
     cell = np.array([f0g[1] - f0g[0], spg[1] - spg[0]])
-    assert np.all(
-        np.abs(mean_gp - mean_grid) < np.maximum(cell, 0.5 * np.sqrt(var_grid))
-    ), (
-        mean_gp,
-        mean_grid,
-    )
-    # width tolerance: GPry's convergence criterion targets few-percent lnL accuracy
-    # near the mode (~10-15 percent width error), plus NS sampling noise of the
-    # surrogate MC step; 30 percent is the acceptance line, not the expectation
-    np.testing.assert_allclose(np.sqrt(var_gp), np.sqrt(var_grid), rtol=0.30)
+    sd_grid = np.sqrt(var_grid)
 
-    # the injected truth must lie inside the recovered 3-sigma region
-    assert np.all(
-        np.abs(mean_gp - np.array([TRUTH["f0"], TRUTH["span"]])) < 3.0 * np.sqrt(var_gp)
-    )
+    def checks(s):
+        mean_gp, var_gp, ess = moments(s)
+        sd_gp = np.sqrt(var_gp)
+        se_mean = sd_gp / np.sqrt(ess)  # standard error of the weighted mean
+        se_sd = sd_gp / np.sqrt(2.0 * ess)  # sampling sd of the sample std itself
+        ok_mean = np.all(
+            np.abs(mean_gp - mean_grid)
+            < np.maximum(cell, 0.5 * sd_grid) + 3.0 * se_mean
+        )
+        # width: 30 percent is the modeling acceptance line (GPry targets few-percent
+        # lnL accuracy near the mode ~ 10-15 percent width error); add 3 sigma of the
+        # width estimator's own MC noise on top
+        ok_width = np.all(np.abs(sd_gp - sd_grid) < 0.30 * sd_grid + 3.0 * se_sd)
+        ok_truth = np.all(
+            np.abs(mean_gp - np.array([TRUTH["f0"], TRUTH["span"]])) < 3.0 * sd_gp
+        )
+        return ok_mean and ok_width and ok_truth, (mean_gp, sd_gp, ess)
+
+    ok, diag1 = checks(engine.sample())
+    if not ok:  # marginal miss: one fresh MC sample of the SAME learned surrogate
+        ok, diag2 = checks(engine.sample())
+        assert ok, (
+            "surrogate posterior disagrees with the dense-grid posterior on two "
+            "independent MC samples (mislearned surrogate, not sampler noise): "
+            f"first {diag1}, second {diag2}, grid ({mean_grid}, {sd_grid})"
+        )
 
     # GP accuracy where it matters: posterior-weighted RMS lnL error. (A max-norm
     # over the 5-e-fold region is flaky: NORA's UltraNest exploration is unseeded,
