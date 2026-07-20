@@ -46,6 +46,7 @@ class GPryEngine:
         verbose: int = 1,
         options: dict | None = None,
         jax_acquisition: bool = False,
+        acquisition: str | dict | None = None,
     ):
         from gpry import Runner  # deferred: optional dependency
 
@@ -64,12 +65,26 @@ class GPryEngine:
         if checkpoint is not None:
             kwargs.update(checkpoint=checkpoint, load_checkpoint=load_checkpoint)
 
+        # Acquisition selection. Default (None + jax_acquisition=False) leaves GPry on
+        # its native NORA nested-sampling acquisition. ``acquisition`` selects a native
+        # GPry acquisition class by name/spec -- notably ``"BatchOptimizer"``, the
+        # gradient-multistart L-BFGS optimizer over the analytic acquisition gradient
+        # (design-doc Option 2: far fewer surrogate evals than a per-iteration NORA NS).
+        # ``jax_acquisition`` (the experimental JAX/BlackJAX NORA) takes precedence and
+        # is mutually exclusive with an explicit ``acquisition``.
+        if jax_acquisition and acquisition is not None:
+            raise ValueError(
+                "Pass only one of jax_acquisition=True or acquisition=...; "
+                "they both set the GPry acquisition and would conflict."
+            )
         if jax_acquisition:
             from .jax_acquisition import JAXNORA
 
             kwargs["gp_acquisition"] = JAXNORA(
                 bounds_arr, sampler="blackjax", verbose=verbose
             )
+        elif acquisition is not None:
+            kwargs["gp_acquisition"] = acquisition
 
         self.runner = Runner(
             loglike, bounds=bounds_arr, params=params, verbose=verbose, **kwargs

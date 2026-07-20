@@ -534,3 +534,38 @@ def test_gpry_engine_routes_jax_acquisition_flag():
         assert isinstance(
             captured.get("gp_acquisition"), JAXNORA
         ), "jax_acquisition=True must route a JAXNORA acquisition"
+
+
+def test_gpry_engine_acquisition_selection_and_conflict():
+    """Option 2 (design doc): an explicit ``acquisition`` selects a native GPry
+    acquisition class (e.g. the gradient-multistart ``BatchOptimizer``); it routes
+    through as ``gp_acquisition`` and is mutually exclusive with ``jax_acquisition``."""
+    from unittest.mock import patch
+
+    def loglike(x):
+        return -0.5 * float(np.sum(np.asarray(x, dtype=float) ** 2))
+
+    bounds = {"a": (-3.0, 3.0), "b": (-3.0, 3.0)}
+    captured = {}
+
+    class _FakeRunner:
+        def __init__(self, loglike, **kwargs):
+            captured.clear()
+            captured.update(kwargs)
+
+    with patch("gpry.Runner", _FakeRunner):
+        GPryEngine(loglike, bounds, verbose=0, acquisition="BatchOptimizer")
+        assert captured.get("gp_acquisition") == "BatchOptimizer"
+
+        GPryEngine(loglike, bounds, verbose=0)  # default: native NORA, nothing injected
+        assert "gp_acquisition" not in captured
+
+    # jax_acquisition and an explicit acquisition both set gp_acquisition -> must reject
+    with pytest.raises(ValueError):
+        GPryEngine(
+            loglike,
+            bounds,
+            verbose=0,
+            jax_acquisition=True,
+            acquisition="BatchOptimizer",
+        )

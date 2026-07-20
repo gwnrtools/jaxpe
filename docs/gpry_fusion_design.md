@@ -991,6 +991,17 @@ cut it, most-impactful first, each with its tradeoff:
   SNR$^2$-amplified multi-lobed acquisition surfaces we have already seen — validate against NORA
   before trusting. Orthogonal to (1) and strictly cheaper on CPU: it attacks the same $70$–$77\%$
   algorithmically rather than by compilation.
+  *Status (2026-07): GPry already ships this as the `BatchOptimizer` acquisition class
+  (gradient-multistart L-BFGS), now selectable first-class via `GPryEngine(acquisition=…)`
+  (routing unit-tested; mutually exclusive with `jax_acquisition`). Two findings on measuring it:*
+  ***(i)*** *an independent 2-D-Gaussian run reconfirms the overhead diagnosis — native NORA spends
+  $1.8\times10^{5}$ acquisition points in $28.5$ s $=158\,\mu$s/point (cf. the $\sim148\,\mu$s/point
+  M80 datum), for $20$ truth evals over $8$ iterations.* ***(ii)*** *native `BatchOptimizer` is
+  **blocked in this env by a `cobaya` dependency**: unlike NORA it produces no MC sample, so GPry's
+  convergence step runs its own MCMC via `cobaya` (`convergence.py::_sample_mcmc`), which is not
+  installed. So Option 2 is not a free config win here — it needs either `cobaya` installed to
+  measure `BatchOptimizer`, or a `cobaya`-free convergence path / a lightweight custom L-BFGS
+  acquisition that reuses NORA's convergence. Decision deferred to the user (heavy optional dep).*
 - **3 — Cut the eval count $N$ (multifidelity mean + tight bounds; Phase 2).** Fewer evals means
   fewer acquisition iterations *and* a smaller GP, so it attacks **both** the acquisition total
   and the $O(N^3)$ fit. The cheap-model mean gives the GP a head start; cheap-model-derived bounds
