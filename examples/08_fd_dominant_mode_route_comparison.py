@@ -237,7 +237,9 @@ _EXTRINSIC_DEFAULTS = dict(
 
 def _row_to_jaxpe_params(row):
     """Translate one bilby/pycbc/jaxpe parameter row into a jaxpe params dict."""
-    g = lambda *keys: next((row[k] for k in keys if k in row and _finite(row[k])), None)
+
+    def g(*keys):
+        return next((row[k] for k in keys if k in row and _finite(row[k])), None)
 
     # masses: prefer chirp_mass/mass_ratio, else component masses (bilby/pycbc)
     chirp = g("chirp_mass")
@@ -485,8 +487,9 @@ def _chirp_prior(inj: Injection):
     if inj.label in STAGE_SPINS:
         return CHIRP_MASS_PRIOR_STAGE
     mc = inj.params["chirp_mass"]
-    lower_bound = max(0.2, mc - CHIRP_MASS_HALF_WIDTH)
-    return (lower_bound, mc + CHIRP_MASS_HALF_WIDTH)
+    half_width = 0.2 * mc
+    lower_bound = max(0.2, mc - half_width)
+    return (lower_bound, mc + half_width)
 
 
 # ------------------------------------------------- method 1: gradient direct sampling
@@ -499,7 +502,10 @@ def run_gradient_direct_sampling(
     from jaxpe.kernels import MALA
     from jaxpe.sampler import GlobalLocalConfig, Sampler, best_of_prior_init
 
-    cfg = CONFIGS[config]
+    cfg = dict(CONFIGS[config])
+    if inj.params.get("chirp_mass", 20) < 15:  # M20 has mc ~ 8.7
+        cfg["n_chains"] = min(cfg["n_chains"], 8)
+
     device = jax.devices()[0]
     print(
         f"\n=== Route A: gradient direct sampling [{inj.label}] (device: {device}) ==="
@@ -538,12 +544,18 @@ def run_gradient_direct_sampling(
         flow_layers=6,
         nn_width=48,
         n_epochs=40,
-        batch_size=min(1024, 15 * buffer),
+        batch_size=min(256, 15 * buffer),
     )
     kernel = MALA(step_size=0.03)
     sampler = Sampler(kernel, problem=problem, config=gl_config)
     key = jax.random.PRNGKey(seed)
-    start_points = best_of_prior_init(key, problem, cfg["n_chains"], n_draws=5000)
+    start_points = best_of_prior_init(
+        key,
+        problem,
+        cfg["n_chains"],
+        n_draws=5000,
+        batch_size=min(256, cfg["n_chains"] * 2),
+    )
 
     # Exclude JIT/XLA compilation from the performance measurement, identically on CPU and
     # GPU: run a minimal-loop probe (loop counts dropped to 1, everything else -- shapes,
@@ -692,13 +704,36 @@ def run_surrogate_marginalized_inference(
 
     def timed_loglike(x):
         t0 = time.perf_counter()
-        value = marginal(x)
+        if x.ndim == 2 and x.shape[0] > 32:
+            import jax.numpy as jnp
+
+            res = []
+            for i in range(0, x.shape[0], 32):
+                res.append(marginal(x[i : i + 32]))
+            value = jnp.concatenate(res)
+        else:
+            value = marginal(x)
         dt = time.perf_counter() - t0
         if profile["n_calls"] == 0:
             profile["first_call_seconds"] = dt  # includes one-time JIT compile
         profile["waveform_seconds"] += dt
         profile["n_calls"] += 1
         return value
+
+    # Scale n_initial relative to a M=50 reference (mc ~ 21.7)
+    m_tot = inj.params.get("mass_1", 0.0) + inj.params.get("mass_2", 0.0)
+    if m_tot == 0.0:
+        m_tot = inj.params.get("chirp_mass", 21.7) * 2.3
+
+    snr = getattr(inj, "network_snr", 15.0) or 15.0
+    mc_prior_width = bounds["chirp_mass"][1] - bounds["chirp_mass"][0]
+
+    # Scale based on M=50, SNR=15, prior width=4.0 (where n_init ~ 60 was sufficient)
+    scale_factor = (50.0 / m_tot) ** 2 * (snr / 15.0) * (mc_prior_width / 4.0)
+
+    base_n_initial = cfg.get("n_training", 15) * 4
+    n_init = int(base_n_initial * max(1.0, scale_factor))
+    n_init = min(n_init, 2000)
 
     started = time.time()
     diagnostics = None
@@ -711,7 +746,8 @@ def run_surrogate_marginalized_inference(
                     "seed": seed + attempt,
                     "options": {
                         "max_total": cfg.get("max_total", 560),
-                        "n_initial": cfg.get("n_training", 15) * 4,
+                        "n_initial": n_init,
+                        "max_initial": n_init * 2,
                     },
                 },
                 verbose=0,
