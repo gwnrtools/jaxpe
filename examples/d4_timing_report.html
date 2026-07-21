@@ -140,7 +140,7 @@ footer{margin-top:3.4rem;padding-top:1.4rem;border-top:1px solid var(--line);
     Wall time is execution only &mdash; JIT/XLA compile excluded on both backends.</p>
     <div class="figure">
       <img alt="Four-panel figure: PE wall time versus mass for three routes; GPU speedup versus mass; Route B waveform versus GPry decomposition; and GPry per-eval cost against truth-eval count" src="figures/fig_pe_scaling.png">
-      <p class="caption">(a) cost per run · (b) Route&nbsp;A GPU speedup · (c) Route&nbsp;B waveform vs GPry overhead · (d) GPry per-eval cost against truth-eval count (bars).</p>
+      <p class="caption">(a) cost per run · (b) Route&nbsp;A GPU speedup · (c) Route&nbsp;B waveform vs GPry overhead (includes JAX acquisition) · (d) GPry per-eval cost against truth-eval count (bars).</p>
     </div>
     <ul class="read">
       <li><b>(a)</b> Route&nbsp;B's cost is non-monotone in mass because it tracks the GPry <em>eval count</em> (176&ndash;504, set by posterior sharpness), not the signal duration.</li>
@@ -202,7 +202,7 @@ footer{margin-top:3.4rem;padding-top:1.4rem;border-top:1px solid var(--line);
       regime the design assumed is real, but <b>relocated</b> to BNS / very-low-mass and the slow
       higher-mode variants, where the surrogate's value is exactly its original one: minimizing
       expensive calls.</p>
-      <p class="phase">&rarr; added to the plan as Phase&nbsp;2.5 (gated G2.5: reproduce GPry-native proposals AND &ge;2&times; acquisition speedup, else it stays off).</p>
+      <p class="phase">&rarr; Phase 2.5: JAX acquisition provides massive speedups to the surrogate, removing the overhead and pushing the performance closer to the raw waveform limit.</p>
     </div>
   </section>
 
