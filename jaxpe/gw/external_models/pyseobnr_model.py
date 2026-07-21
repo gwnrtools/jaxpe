@@ -99,7 +99,9 @@ class PySEOBNRModel(ExternalModeModel):
             inclination=0.0,
             phi_ref=0.0,
             approximant=self.approximant,
-            mode_array=[list(lm) for lm in self.mode_array],
+            # pyseobnr validates requested modes against a set of (l, m) *tuples*
+            # (SEOBNRv5Base), so pass tuples, not lists.
+            mode_array=[tuple(lm) for lm in self.mode_array],
         )
         if "eccentricity" in params_intrinsic:
             params["eccentricity"] = float(params_intrinsic["eccentricity"])

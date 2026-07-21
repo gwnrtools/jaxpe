@@ -179,7 +179,7 @@ def test_pyseobnr_round_trip(seob_model, iota):
             inclination=iota,
             phi_ref=0.0,
             approximant="SEOBNRv5HM",
-            mode_array=[[2, 2]],
+            mode_array=[(2, 2)],
         )
     ).generate_td_polarizations()  # LAL REAL8TimeSeries pair (as used in examples/08)
     from jaxpe.gw.external_models.base import place_modes_on_grid
