@@ -38,19 +38,45 @@ REFERENCE_DISTANCE_MPC = ex.REFERENCE_DISTANCE_MPC
 DISTANCE_PRIOR_MPC = ex.DISTANCE_PRIOR_MPC
 
 
-def run_direct_blackjax_ns(marginal, names, bounds, inj, seed=11):
+def build_jittable_logp(marginal):
+    """A fully JAX-traceable twin of ``PhaseDistanceMarginalLikelihood.__call__``.
+
+    That ``__call__`` returns a Python float: the *overlaps* are jitted JAX
+    (``marginal._overlaps``), but the phase+distance marginalization uses host scipy
+    (``i0e``/``logsumexp`` over the precomputed distance grid), so it cannot be inlined
+    into a jitted nested sampler. We rebuild the marginalization in ``jax.scipy`` from
+    the same precomputed arrays, so the whole log-likelihood compiles and runs inside
+    the NS step -- the honest apples-to-apples with the JAX acquisition (both fully
+    jitted), instead of GPry's ``pure_callback`` point-by-point escape.
+
+    Reads a few "private" attributes of the marginal on purpose (this is a benchmark
+    that mirrors its internal math); a parity check against ``__call__`` guards it.
+    """
+    from jax.scipy.special import i0e, logsumexp
+
+    u = jnp.asarray(marginal._u)
+    log_pi = jnp.asarray(marginal._log_pi)
+    log_dD = jnp.asarray(marginal._log_dD)
+    dd = float(marginal.dd)
+    overlaps = marginal._overlaps  # jitted JAX (zr, zi, rho2)
+
+    def logp(x):
+        zr, zi, rho2 = overlaps(jnp.asarray(x).ravel())
+        abs_z = jnp.hypot(zr, zi)
+        log_i0 = jnp.log(i0e(u * abs_z)) + u * abs_z
+        integrand = log_pi + log_i0 - 0.5 * u**2 * rho2 + log_dD
+        return logsumexp(integrand) - 0.5 * dd
+
+    return logp
+
+
+def run_direct_blackjax_ns(logp_jax, names, bounds, inj, seed=11):
     """Run the JAX-native BlackJAX nested sampler directly on the marginal likelihood.
 
-    Uses ``JAXInterfaceBlackJAX`` (jaxpe.surrogate.jax_acquisition): the marginal is a
-    pure JAX function, so it is inlined into the jitted NSS step -- no ``pure_callback``
-    point-by-point escape to Python (the stock GPry interface's path, which would make
-    this baseline meaninglessly slow). Closure-based jitting is fine here: unlike the
-    in-loop acquisition there is exactly ONE nested-sampling run, so the step is
-    compiled once.
-
-    Note on eval counting: the likelihood runs inside the compiled step, so host-side
-    call counting is impossible; the decision quantity for Option 0 is wall-clock
-    against the Route-B surrogate wall at the same mass (printed by ``main``).
+    ``logp_jax`` is the jittable twin from ``build_jittable_logp``; it is inlined into
+    the jitted NSS step (``JAXInterfaceBlackJAX``), compiled once (one NS run, no growing
+    training set). Eval counting is impossible inside the compiled step; the Option-0
+    decision quantity is wall-clock vs the Route-B surrogate wall at the same mass.
     """
     from jaxpe.surrogate.jax_acquisition import JAXInterfaceBlackJAX
 
@@ -64,17 +90,16 @@ def run_direct_blackjax_ns(marginal, names, bounds, inj, seed=11):
         precision_criterion=0.01,
     )
 
-    # Compile/execute split: time one marginal call (its own jit) before the NS run;
-    # the NS-step compile itself lands inside the run wall and is reported as part of
-    # it (it happens once).
+    # Compile/execute split: time one logp call (its own jit) before the NS run; the
+    # NS-step compile itself lands inside the run wall (it happens once).
     x0 = jnp.asarray(0.5 * (bounds[:, 0] + bounds[:, 1]))
     t0 = time.perf_counter()
-    jax.block_until_ready(marginal(x0))
+    jax.block_until_ready(logp_jax(x0))
     marginal_compile_seconds = time.perf_counter() - t0
 
     print(f"[direct:{inj.label}] Starting BlackJAX nested sampling...")
     started = time.time()
-    X_MC, y_MC, w_MC, _logZ, _logZstd = ns.run(marginal, param_names=names, seed=seed)
+    X_MC, y_MC, w_MC, _logZ, _logZstd = ns.run(logp_jax, param_names=names, seed=seed)
     wall_seconds = time.time() - started
 
     print(
@@ -157,10 +182,23 @@ def main():
     # Build the bounds array (d, 2)
     bounds_arr = np.array([bounds[n] for n in names])
 
-    # 3. Run BlackJAX NS directly
-    result = run_direct_blackjax_ns(marginal, names, bounds_arr, inj, seed=args.seed)
+    # 3. Build the jittable log-likelihood twin and check it reproduces the host-side
+    #    marginal before trusting the NS run.
+    logp_jax = build_jittable_logp(marginal)
+    rng = np.random.default_rng(0)
+    max_err = 0.0
+    for _ in range(20):
+        xr = bounds_arr[:, 0] + rng.random(len(names)) * (
+            bounds_arr[:, 1] - bounds_arr[:, 0]
+        )
+        max_err = max(max_err, abs(float(logp_jax(jnp.asarray(xr))) - marginal(xr)))
+    print(f"[direct:{inj.label}] jittable-logp vs host marginal max|Δ| = {max_err:.2e}")
+    assert max_err < 1e-6, "jittable logp does not match the host marginal"
 
-    # 4. Posterior vs truth
+    # 4. Run BlackJAX NS directly
+    result = run_direct_blackjax_ns(logp_jax, names, bounds_arr, inj, seed=args.seed)
+
+    # 5. Posterior vs truth
     s = result["samples"]
     w = np.asarray(result["weights"], dtype=float)
     w = w / w.sum()
@@ -172,7 +210,7 @@ def main():
         z = (mean[i] - truth[i]) / std[i] if std[i] > 0 else float("nan")
         print(f"{n:14} {truth[i]:9.4f} {mean[i]:9.4f} {std[i]:9.4f} {z:7.2f}")
 
-    # 5. Option 0 decision readout: same-mass Route-B surrogate wall, if on disk
+    # 6. Option 0 decision readout: same-mass Route-B surrogate wall, if on disk
     for tag in ("surrogate_cpu", "surrogate_jax_cpu"):
         p = (
             Path(__file__).parent.parent
