@@ -966,6 +966,21 @@ cut it, most-impactful first, each with its tradeoff:
   experiment, biggest potential win — and no new GP code.** *Action:* benchmark a direct NS
   (nessai / dynesty / BlackJAX-NS) on the *same* marginal as the Route-B baseline; gate GPry on
   the measured crossover.
+  ***Measured (2026-07, `bin/run_direct_ns.py`, M80 aligned-spin, 4-D).*** *BlackJAX-NSS run
+  **directly** on the marginal, made a fair test by inlining a fully-jitted twin of the
+  marginal into the NS step (a JAX reimplementation of the scipy `i0e`/`logsumexp` distance
+  marginalization, checked equal to the host `__call__` to $3\times10^{-14}$; the stock GPry
+  `pure_callback` path would have escaped to Python per point and lost for a plumbing reason).
+  Result: direct NS **$350$ s**, recovering truth (all $|z|<0.5$), vs Route-B **$258$ s (native
+  NORA) / $177$ s (JAX acquisition)** at the same mass — so **direct NS is $1.4$–$2\times$
+  slower, not faster.** The crossover estimate above was too optimistic for direct NS: it assumed
+  cost $\approx N_{\rm direct}\times t_{\rm wave}$, but at M80 the direct NS is **NS-machinery
+  bound** ($\sim\!10^{5}$ evals of a $4097$-bin two-detector FD overlap $+$ BlackJAX slice
+  sampling $\approx 350$ s), not waveform-bound — the $\sim$sub-ms PhenomD call never dominates.
+  Takeaway: for **cheap-waveform 4-D BBH the surrogate is competitive-to-better**, so Option 0 is
+  not the free win it looked like; its advantage should reappear only where the waveform genuinely
+  dominates the per-eval cost (expensive EOB, or once tuned to far fewer NS evals). Both methods
+  recover the same posterior (a useful exactness cross-check on Route B).*
 - **1 — JAX/BlackJAX acquisition NS (Phase 2.5).** Port the $70$–$77\%$: the acquisition
   optimizes over the GP *predictive* with a cached factorization (fp64 Cholesky *not* re-run per
   eval), so it is `vmap`/GPU-friendly and the consumer-GPU-fp64 objection does not apply. **But
@@ -1001,7 +1016,32 @@ cut it, most-impactful first, each with its tradeoff:
   convergence step runs its own MCMC via `cobaya` (`convergence.py::_sample_mcmc`), which is not
   installed. So Option 2 is not a free config win here — it needs either `cobaya` installed to
   measure `BatchOptimizer`, or a `cobaya`-free convergence path / a lightweight custom L-BFGS
-  acquisition that reuses NORA's convergence. Decision deferred to the user (heavy optional dep).*
+  acquisition that reuses NORA's convergence.*
+  ***Measured with `cobaya` installed — the decisive datum.*** *`cobaya` was installed and
+  NORA vs `BatchOptimizer` timed head-to-head, first on the 2-D Gaussian, then on the real M80
+  aligned-spin injection (4-D). The acquisition win is real and large; the convergence cost is the
+  killer:*
+
+  | measure (M80, 4-D) | NORA (native) | BatchOptimizer |
+  |---|---|---|
+  | acquisition | $413$ s ($3.0\times10^{6}$ evals) | $\mathbf{124}$ s ($1.5\times10^{5}$ evals) — $3.3\times$ / $20\times$ fewer |
+  | GP fit | $117$ s | $78$ s |
+  | **convergence** | $\mathbf{0.1}$ s | $\mathbf{44{,}024}$ s ($12.2$ h) |
+  | **total wall** | $\mathbf{572}$ s | $\mathbf{44{,}283}$ s — $77\times$ *slower* |
+  | posterior $z$ vs truth | $[.18,.32,.49,-.06]$ | $[.16,.30,.53,-.09]$ (same) |
+
+  *So the gradient-multistart acquisition **works exactly as the $\mu$s/point analysis predicted**
+  ($3.3\times$ faster, $20\times$ fewer surrogate evals, identical posterior), but native
+  `BatchOptimizer` is a **net trap at realistic dimension**: NORA reuses its own nested-sampling
+  draw for the convergence criterion for free, whereas `BatchOptimizer` triggers a fresh `cobaya`
+  MCMC on **every** convergence check, which in 4-D at $N\!\sim\!300$ blows up to $12$ h (on the
+  2-D toy this was only $0.01\to10$ s, so the trap is invisible until realistic dimension — exactly
+  why the design says measure first). **Revised Option 2: the lever is not "select `BatchOptimizer`"
+  but "cheap acquisition *and* cheap convergence."** Concretely, pair the gradient-multistart
+  acquisition with a convergence criterion that reuses a cheap MC sample (feed it the acquisition's
+  own multistart optima, or GaussianKL over the GP without a fresh MCMC), or run `BatchOptimizer`
+  with a large `n_points`/looser convergence cadence. That is real work, not a config flag; until
+  then, keep NORA (or the JAX/BlackJAX NORA of Option 1) as the acquisition.*
 - **3 — Cut the eval count $N$ (multifidelity mean + tight bounds; Phase 2).** Fewer evals means
   fewer acquisition iterations *and* a smaller GP, so it attacks **both** the acquisition total
   and the $O(N^3)$ fit. The cheap-model mean gives the GP a head start; cheap-model-derived bounds
@@ -1018,21 +1058,27 @@ cut it, most-impactful first, each with its tradeoff:
   *Tradeoff:* hyperparameters drift as data grows, so periodic full refits are still needed — only
   matters once the fit dominates (high $N$ / high dimension).
 
-*Recommendation (ordered).* **(i)** Measure Option 0 first — a direct-NS baseline on the marginal;
-it may remove the bottleneck entirely for low-D cheap-waveform BBH and pins exactly when GPry is
-worth using, at zero GP-engineering cost. **(ii)** Where GPry *is* warranted (expensive-waveform
-or high-D), do **Option 2 before Option 1** — the per-point measurement shows acquisition is
-overhead-bound ($\sim 85\%$ sampler machinery), so cutting the eval count algorithmically
-(gradient-multistart, no JAX) is both cheaper to build and the larger CPU win; reach for the
-Option 1 JAX port only as a full end-to-end-jitted NS, and only once Option 2's mode-coverage is
-validated. On CPU specifically a predictive-only port is near-useless (see §9); it earns its keep
-mainly on GPU or once the loop is fully jitted. **(iii)** In parallel, Option 3 (multifidelity +
-bounds, Phase 2) to cut $N$, which attacks both terms and is already on the roadmap; try Option 4
-opportunistically (near-free). **(iv)** Only if high-$N$/high-$D$ profiling shows the GP fit
-dominating, add Option 5; defer any fp64-Cholesky-on-GPU port per D4. Throughout, **correctness $>$ speed**: Options 1/2/5 change the
+*Recommendation (ordered) — revised by the 2026-07 measurements.* The three cheap levers were
+measured; the picture changed. **(i) Option 0 (direct NS) is measured *not* to be the free win it
+looked like:** at M80 (4-D, cheap PhenomD) it is $1.4$–$2\times$ slower than Route B, being
+NS-machinery-bound, not waveform-bound (§ this section). Keep it only as (a) an exactness
+cross-check on Route B and (b) the method of choice where the *waveform* genuinely dominates the
+per-eval cost (expensive EOB / higher-$N_{\rm direct}$ regimes) — not as the default for cheap-BBH.
+**(ii) Option 1 (JAX/BlackJAX acquisition, Phase 2.5) is the one that landed:** built, posterior-
+correct, per-iteration recompile fixed, unit-tested, opt-in. On CPU its win is modest (the port is
+predictive-only-useless there); its clean win is the GPU path and removing the Python NS loop.
+**(iii) Option 2 (gradient-multistart acquisition) is measured to be a trap *as configured*:** the
+acquisition itself is $3.3\times$ faster / $20\times$ fewer evals (as predicted), but native
+`BatchOptimizer` triggers a `cobaya` MCMC on every convergence check that explodes to $12$ h in
+4-D — $77\times$ net slower. It becomes viable only paired with a cheap convergence criterion (feed
+it a cheap MC sample instead of a fresh MCMC); that is the highest-value *next* build. **(iv)** In
+parallel, Option 3 (multifidelity + bounds, Phase 2) to cut $N$, which attacks both terms and is
+already on the roadmap; try Option 4 opportunistically (near-free). **(v)** Only if
+high-$N$/high-$D$ profiling shows the GP fit dominating, add Option 5; defer any
+fp64-Cholesky-on-GPU port per D4. Throughout, **correctness $>$ speed**: Options 1/2/5 change the
 surrogate internals and can *silently* bias the posterior, so each is validated against the pinned
-GPry loop before it is trusted — Option 0 is the safe baseline because it carries no surrogate at
-all.
+GPry loop before it is trusted (all three measured variants above recovered the same posterior) —
+Option 0 is the safe baseline because it carries no surrogate at all.
 
 ### Phase 2 — Multifidelity mean (~4–6 d)
 
