@@ -192,7 +192,6 @@ class JAXInterfaceBlackJAX(InterfaceBlackJAX):
     def _ns_loop_and_finalise(self, step_callable, state, param_names, rng_key):
         """Run the NSS outer loop with ``step_callable(step_key, state) -> (state, info)``
         and return ``(X_mc, y_mc, w_mc)``. Shared by ``run`` and ``run_predictive``."""
-        import jax
 
         ns_utils = self.globals["ns_utils"]
         nlive = self.precision_settings["nlive"]
@@ -242,7 +241,6 @@ class JAXInterfaceBlackJAX(InterfaceBlackJAX):
     def run(self, logp_func, param_names=None, out_dir=None, seed=None):
         """Generic fallback: run NSS on an arbitrary JAX ``logp_func`` (closure-based,
         recompiles per call as the closure changes -- see ``run_predictive``)."""
-        import jax
         import jax.numpy as jnp
 
         jax.config.update("jax_enable_x64", True)
@@ -287,7 +285,6 @@ class JAXInterfaceBlackJAX(InterfaceBlackJAX):
         """Build (once) and cache the jitted ``init`` and ``step`` for a given predictive
         signature. Both take the GP-predictive arrays as *arguments*, so the compiled
         artifact is reused across iterations (and different training-set values)."""
-        import jax
 
         cache = self._compiled_runtime_cache
         if cache_key in cache:
@@ -335,7 +332,6 @@ class JAXInterfaceBlackJAX(InterfaceBlackJAX):
         are keyed on the *shapes*/structure, not the values, so a run at the same bucket
         capacity and precision reuses the compiled artifact.
         """
-        import jax
 
         jax.config.update("jax_enable_x64", True)
         ns_utils = self.globals["ns_utils"]
