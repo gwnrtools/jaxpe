@@ -52,7 +52,7 @@ samples = sampler.to_physical(result.samples)
 ```
 
 See `examples/03_gw_injection.py` for the full script and
-`examples/validate_injection_vs_dynesty.py` for the cross-check against
+`examples/09_validate_injection_vs_dynesty.py` for the cross-check against
 bilby+dynesty on the identical likelihood.
 
 ## Practical notes

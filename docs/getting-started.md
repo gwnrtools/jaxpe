@@ -48,7 +48,7 @@ samples = sampler.to_physical(result.samples)
 
 - **Two-detector sky ring**: with H1+L1 only, the time-delay ring makes the sky posterior an extended multimodal ridge; give the sampler generous training loops and global steps, and check `result.global_acceptance` (healthy: ~0.1+ for GW, ~0.8 on unimodal toys) and split R-hat.
 - See `examples/03_gw_injection.py` for a full script.
-- See `examples/validate_injection_vs_dynesty.py` for a cross-check against bilby+dynesty on the identical likelihood.
+- See `examples/09_validate_injection_vs_dynesty.py` for a cross-check against bilby+dynesty on the identical likelihood.
 
 ## Why JAX over PyTorch?
 

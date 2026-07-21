@@ -144,7 +144,7 @@ This experiment successfully recovered the parameters of a simulated non-eccentr
 
 ![GW Injection Posterior Corner Plot](assets/gw_injection_seed42_corner.png)
 
-### 13.2 Validation vs Dynesty (`validate_injection_vs_dynesty.py`)
+### 13.2 Validation vs Dynesty (`09_validate_injection_vs_dynesty.py`)
 To prove the accuracy of `jaxpe`, this experiment overlaid our posterior contours against those produced by the industry-standard `dynesty` nested sampler. The near-perfect agreement confirms the mathematical correctness of our likelihood and sampling algorithms.
 
 **Performance Comparison (CPU)**:
