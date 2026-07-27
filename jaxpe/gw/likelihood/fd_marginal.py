@@ -26,7 +26,7 @@ so ln L(phi_c, D) = Re[e^{s 2i phi_c} u Z] - 1/2 u^2 rho^2 - 1/2 <d|d>. Marginal
 phi_c against a uniform prior gives ln I0(u|Z|); the result depends only on |Z|,
 rho^2 and <d|d> -- never on the sign s. This needs no spherical-harmonic-mode
 decomposition and no FFT, which is why it is cheaper and numerically cleaner than the
-general mode-based marginalizer (:class:`~jaxpe.gw.marginalized.ModesNetworkLikelihood`)
+general mode-based marginalizer (:class:`~jaxpe.gw.ModesNetworkLikelihood`)
 whenever the model is genuinely dominant-mode with a fixed sky.
 
 Guardrail: the factorization is only APPROXIMATE for a higher-mode model. The
@@ -46,8 +46,10 @@ import jax.numpy as jnp
 import numpy as np
 from scipy.special import i0e, logsumexp
 
+from .base import IntrinsicLikelihood
 
-class PhaseDistanceMarginalLikelihood:
+
+class PhaseDistanceMarginalLikelihood(IntrinsicLikelihood):
     """L(theta_int) with coalescence phase (Bessel I0) and distance (quadrature)
     marginalized, for any dominant-(2,2)-mode frequency-domain model.
 
@@ -211,7 +213,7 @@ class PhaseDistanceMarginalLikelihood:
             )
         return worst
 
-    def __call__(self, x):
+    def __call__(self, x) -> float:
         """Log marginal likelihood at intrinsic vector ``x`` (order given by ``names``)."""
         zr, zi, rho2 = self._overlaps(jnp.asarray(np.asarray(x, float).ravel()))
         abs_z = float(np.hypot(float(zr), float(zi)))

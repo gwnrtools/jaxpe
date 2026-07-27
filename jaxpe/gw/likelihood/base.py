@@ -1,11 +1,36 @@
-r"""Frequency-Domain Network Likelihood.
+r"""Abstract bases for the jaxpe likelihoods.
 
-This module computes the likelihood of observing the gravitational-wave strain data
-given a set of proposed waveform parameters.
+This module defines the two roots of the likelihood package:
 
-Motivation & Math
------------------
-Assuming stationary Gaussian noise, the probability of observing noise $\tilde{n}(f)$ is:
+``NetworkLikelihood``
+    The frozen-dataclass base of the *network* likelihoods -- the Whittle
+    likelihood of a detector network sharing one time/frequency grid, mapping a
+    physical-parameter dict to a (differentiable) JAX scalar. All the shared
+    machinery (the constant cache, GMST linearization, detector projection, the
+    Whittle sum, optimal SNR) lives here; concrete subclasses supply exactly one
+    method, :meth:`~NetworkLikelihood.polarizations_fd`, the geocenter FD
+    polarizations on ``self.freqs``. A time-domain model FFTs a windowed waveform
+    (:class:`~jaxpe.gw.likelihood.td.TDNetworkLikelihood`), a frequency-domain
+    model returns them directly
+    (:class:`~jaxpe.gw.likelihood.fd.FDNetworkLikelihood`), and the mode-based
+    likelihood reconstructs them from cached per-mode FD arrays
+    (:class:`~jaxpe.gw.likelihood.modes.ModesNetworkLikelihood`).
+
+``IntrinsicLikelihood``
+    The GPry-facing scalar likelihood over an intrinsic-parameter *vector*:
+    ``x -> float``, having marginalized out some parameters. Unlike a
+    ``NetworkLikelihood`` it is a host-side callable (returns a Python float) and
+    is NOT JAX-traceable end to end -- it composes JAX-jitted inner kernels with
+    host-side quadrature / importance sampling. It shares no implementation with
+    the network likelihoods (different call contract), so it is a thin abstract
+    interface, implemented by
+    :class:`~jaxpe.gw.likelihood.fd_marginal.PhaseDistanceMarginalLikelihood` and
+    :class:`~jaxpe.gw.likelihood.marginalized_intrinsic.MarginalizedIntrinsicLikelihood`.
+
+Whittle likelihood (the network-likelihood math)
+-------------------------------------------------
+Assuming stationary Gaussian noise, the probability of observing noise
+$\tilde{n}(f)$ is:
 $$ p(n) \propto \exp\left( -2 \int_{f_{\min}}^{f_{\max}} \frac{|\tilde{n}(f)|^2}{S_n(f)} df \right) $$
 
 In a GW detection, the data $d$ is the sum of the true signal $h$ and noise $n$: $d = h + n$.
@@ -26,17 +51,18 @@ projects it onto the detectors (antenna patterns and time delays), and computes 
 Whittle log-likelihood sum over frequency bins.
 """
 
+import abc
 from dataclasses import dataclass, field
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ..core.problem import InferenceProblem
-from ..core.priors import JointPrior
-from .conditioning import td_to_fd, time_shift, tukey_window
-from .detectors import EARTH_OMEGA, Detector, antenna_pattern, time_delay_from_geocenter
-from .waveform import WaveformModel
+from ...core.priors import JointPrior
+from ...core.problem import InferenceProblem
+from ..conditioning import time_shift, tukey_window
+from ..detectors import EARTH_OMEGA, Detector, antenna_pattern, time_delay_from_geocenter
+from ..waveform import WaveformModel
 
 
 def project_to_detector(det: Detector, hp_fd, hc_fd, freqs, ra, dec, psi, gmst):
@@ -47,13 +73,19 @@ def project_to_detector(det: Detector, hp_fd, hc_fd, freqs, ra, dec, psi, gmst):
 
 
 @dataclass(frozen=True)
-class TDNetworkLikelihood:
-    """Whittle likelihood for a network of detectors sharing one time/frequency grid.
+class NetworkLikelihood(abc.ABC):
+    """Abstract Whittle likelihood for a network of detectors sharing one grid.
+
+    Concrete subclasses implement only :meth:`polarizations_fd`; everything else
+    (the constant cache, GMST linearization, detector projection, the Whittle sum,
+    optimal SNR, the :class:`InferenceProblem` bundling) is inherited.
 
     Parameters
     ----------
     waveform
-        ``(params, times) -> (h_plus, h_cross)`` at the geocenter.
+        ``(params, times) -> (h_plus, h_cross)`` at the geocenter. Unused by
+        subclasses that reconstruct the polarizations from another source (pass
+        ``None`` there, e.g. the mode-based likelihood).
     detectors, data_fd, psds
         Per-detector geometry, FD data (continuum convention) and one-sided PSDs
         on ``freqs``; PSDs may be np.inf outside the analysis band.
@@ -103,12 +135,13 @@ class TDNetworkLikelihood:
             )
         return self._cache
 
+    @abc.abstractmethod
     def polarizations_fd(self, params: dict):
-        st = self._static()
-        hp, hc = self.waveform(params, st["times"])
-        return td_to_fd(hp, st["dt"], st["window"]), td_to_fd(
-            hc, st["dt"], st["window"]
-        )
+        """Geocenter FD polarizations ``(h_plus, h_cross)`` on ``self.freqs``.
+
+        The single hook that distinguishes the concrete network likelihoods; see
+        the module docstring. Must be JAX-traceable in ``params``.
+        """
 
     def _gmst(self, params):
         return self.gmst_ref + EARTH_OMEGA * (params["geocent_time"] - self.t_ref)
@@ -170,13 +203,19 @@ class TDNetworkLikelihood:
         return InferenceProblem(prior=prior, log_likelihood=self.log_likelihood)
 
 
-@dataclass(frozen=True)
-class FDNetworkLikelihood(TDNetworkLikelihood):
-    """Network likelihood for Frequency Domain waveform models.
-    Overrides polarizations_fd to bypass the time-domain to frequency-domain FFT.
+class IntrinsicLikelihood(abc.ABC):
+    """The GPry-facing scalar likelihood over an intrinsic-parameter vector.
+
+    ``x -> float`` (order given by the concrete class's ``names``), with a subset
+    of parameters already marginalized out. In contrast to
+    :class:`NetworkLikelihood`, an ``IntrinsicLikelihood`` is a host-side callable
+    -- it returns a plain Python float and is NOT differentiable end to end,
+    because it wraps host-side quadrature / importance sampling around JAX-jitted
+    inner kernels. It carries no shared implementation, only this call contract.
     """
 
-    def polarizations_fd(self, params: dict):
-        st = self._static()
-        hp_fd, hc_fd = self.waveform(params, st["freqs"])
-        return hp_fd, hc_fd
+    names: tuple[str, ...]
+
+    @abc.abstractmethod
+    def __call__(self, x) -> float:
+        """Log marginal likelihood at intrinsic vector ``x`` (order given by ``names``)."""

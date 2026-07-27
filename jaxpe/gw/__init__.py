@@ -13,10 +13,19 @@ from .detectors import (
     time_delay_from_geocenter,
 )
 from .external_models import ExternalModeModel, ModeCache, ModesData, reflect_modes
-from .fd_marginal import PhaseDistanceMarginalLikelihood
 from .harmonics import spin_weighted_ylm
-from .likelihood import FDNetworkLikelihood, TDNetworkLikelihood, project_to_detector
-from .marginalized import ModesNetworkLikelihood
+from .likelihood import (
+    BalanceHeuristicAccumulator,
+    FDNetworkLikelihood,
+    IntrinsicLikelihood,
+    LowEffectiveSampleSizeError,
+    MarginalizedIntrinsicLikelihood,
+    ModesNetworkLikelihood,
+    NetworkLikelihood,
+    PhaseDistanceMarginalLikelihood,
+    TDNetworkLikelihood,
+    project_to_detector,
+)
 from .priors import bbh_priors, ebbh_priors
 from .psd import aligo_zdhp_psd, psd_from_file, welch_psd
 from .cbc_models import IMRPhenomD, ESIGMAInspiral, NRSur7dq4, WaveformModel
@@ -38,8 +47,13 @@ __all__ = [
     "aligo_zdhp_psd",
     "psd_from_file",
     "welch_psd",
+    "NetworkLikelihood",
+    "IntrinsicLikelihood",
     "TDNetworkLikelihood",
     "FDNetworkLikelihood",
+    "BalanceHeuristicAccumulator",
+    "MarginalizedIntrinsicLikelihood",
+    "LowEffectiveSampleSizeError",
     "project_to_detector",
     "make_injection",
     "simulate_noise_fd",
