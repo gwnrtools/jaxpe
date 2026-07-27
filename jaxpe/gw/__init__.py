@@ -23,6 +23,7 @@ from .likelihood import (
     ModesNetworkLikelihood,
     NetworkLikelihood,
     PhaseDistanceMarginalLikelihood,
+    RelativeBinningFDLikelihood,
     TDNetworkLikelihood,
     project_to_detector,
 )
@@ -51,6 +52,7 @@ __all__ = [
     "IntrinsicLikelihood",
     "TDNetworkLikelihood",
     "FDNetworkLikelihood",
+    "RelativeBinningFDLikelihood",
     "BalanceHeuristicAccumulator",
     "MarginalizedIntrinsicLikelihood",
     "LowEffectiveSampleSizeError",
