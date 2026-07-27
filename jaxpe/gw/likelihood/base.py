@@ -61,7 +61,12 @@ import numpy as np
 from ...core.priors import JointPrior
 from ...core.problem import InferenceProblem
 from ..conditioning import time_shift, tukey_window
-from ..detectors import EARTH_OMEGA, Detector, antenna_pattern, time_delay_from_geocenter
+from ..detectors import (
+    EARTH_OMEGA,
+    Detector,
+    antenna_pattern,
+    time_delay_from_geocenter,
+)
 from ..waveform import WaveformModel
 
 

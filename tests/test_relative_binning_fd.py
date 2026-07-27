@@ -73,6 +73,7 @@ def _params(**overrides):
 
 # --------------------------------------------------------------------- bin scheme
 
+
 def test_bin_edges_tile_band_monotonically():
     like = _make_like()
     freqs = np.asarray(like.freqs)
@@ -111,6 +112,7 @@ def test_summary_data_shapes(rb_like):
 
 # --------------------------------------------------------------------- correctness
 
+
 def test_exact_at_fiducial(full_like, rb_like):
     """At the fiducial the ratio is identically 1, so the heterodyned likelihood must
     equal the exact one to machine precision (and be ~0 for a zero-noise injection)."""
@@ -146,10 +148,13 @@ def test_parity_over_random_draws(full_like, rb_like):
     for _ in range(25):
         p = _params(
             chirp_mass=INJECTION["chirp_mass"] + rng.uniform(-0.1, 0.1),
-            mass_ratio=np.clip(INJECTION["mass_ratio"] + rng.uniform(-0.03, 0.03), 0.1, 1.0),
+            mass_ratio=np.clip(
+                INJECTION["mass_ratio"] + rng.uniform(-0.03, 0.03), 0.1, 1.0
+            ),
             spin1z=INJECTION["spin1z"] + rng.uniform(-0.05, 0.05),
             spin2z=INJECTION["spin2z"] + rng.uniform(-0.05, 0.05),
-            luminosity_distance=INJECTION["luminosity_distance"] * (1.0 + rng.uniform(-0.1, 0.1)),
+            luminosity_distance=INJECTION["luminosity_distance"]
+            * (1.0 + rng.uniform(-0.1, 0.1)),
             geocent_time=INJECTION["geocent_time"] + rng.uniform(-5e-4, 5e-4),
         )
         exact = float(full_like.log_likelihood(p))
@@ -171,8 +176,12 @@ def test_finer_bins_reduce_error(full_like):
     """More bins -> smaller heterodyning error at a fixed off-fiducial point."""
     p = _params(chirp_mass=25.4)
     exact = float(full_like.log_likelihood(p))
-    coarse = RelativeBinningFDLikelihood.from_likelihood(full_like, INJECTION, epsilon=1.0)
-    fine = RelativeBinningFDLikelihood.from_likelihood(full_like, INJECTION, epsilon=0.1)
+    coarse = RelativeBinningFDLikelihood.from_likelihood(
+        full_like, INJECTION, epsilon=1.0
+    )
+    fine = RelativeBinningFDLikelihood.from_likelihood(
+        full_like, INJECTION, epsilon=0.1
+    )
     err_coarse = abs(float(coarse.log_likelihood(p)) - exact)
     err_fine = abs(float(fine.log_likelihood(p)) - exact)
     assert fine.n_bins > coarse.n_bins
@@ -180,6 +189,7 @@ def test_finer_bins_reduce_error(full_like):
 
 
 # --------------------------------------------------------------------- guards
+
 
 def test_missing_fiducial_raises(full_like):
     with pytest.raises(ValueError, match="fiducial_params is required"):
@@ -208,6 +218,7 @@ def test_non_fd_waveform_raises(full_like):
 
 # --------------------------------------------------------------------- performance
 
+
 def _median_eval_time(fn, p, n=60):
     """Median wall-clock per evaluation, after compilation, forcing device sync."""
     jax.block_until_ready(fn(p))  # warm up: compile + first exec (EXCLUDED from timing)
@@ -227,7 +238,12 @@ def test_relative_binning_much_faster():
     full = _make_like(duration=8.0, sampling_rate=2048.0, f_max=700.0)
     rb = RelativeBinningFDLikelihood.from_likelihood(full, INJECTION)
 
-    n_band = int(np.sum((np.asarray(full.freqs) >= full.f_min) & (np.asarray(full.freqs) <= full.f_max)))
+    n_band = int(
+        np.sum(
+            (np.asarray(full.freqs) >= full.f_min)
+            & (np.asarray(full.freqs) <= full.f_max)
+        )
+    )
     assert rb.n_bins < 0.1 * n_band  # binning genuinely downsamples the band
 
     f_full = jax.jit(full.log_likelihood)

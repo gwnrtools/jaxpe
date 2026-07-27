@@ -37,6 +37,7 @@ def _dense(col):
 
 # --------------------------------------------------------------------- matvecs
 
+
 def test_triangular_matvecs_vs_dense():
     n = 40
     col = _ar1_col(n)
@@ -105,6 +106,7 @@ def test_inverse_matvec_jittable_and_vmapped():
 
 # --------------------------------------------------------------------- ACF from PSD
 
+
 def test_autocorrelation_white_noise_is_diagonal():
     """A flat PSD gives an autocorrelation concentrated at lag 0 (white noise)."""
     n = 256
@@ -133,11 +135,16 @@ def test_autocorrelation_from_colored_psd_is_positive_definite():
     # and the fast inverse round-trips on this covariance
     x = inverse_generator(rho)
     v = np.random.default_rng(5).standard_normal(n)
-    back = np.asarray(inverse_matvec(jnp.asarray(x), toeplitz_matvec(jnp.asarray(rho), jnp.asarray(v))))
+    back = np.asarray(
+        inverse_matvec(
+            jnp.asarray(x), toeplitz_matvec(jnp.asarray(rho), jnp.asarray(v))
+        )
+    )
     assert np.allclose(back, v, atol=1e-6)
 
 
 # --------------------------------------------------------------------- performance
+
 
 def _median_time(fn, *args, n=30):
     jax.block_until_ready(fn(*args))  # warm up: compile + first exec (EXCLUDED)

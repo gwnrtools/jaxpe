@@ -78,9 +78,14 @@ def frequency_bin_edges(
     gamma = np.asarray(gamma, dtype=float)
     f_star = np.where(gamma < 0.0, f_min, f_max)
     # dPsi_max(f): each term is increasing in f, so the sum is monotone increasing.
-    dpsi = 2.0 * np.pi * chi * np.sum(
-        np.sign(gamma)[:, None] * (fb[None, :] / f_star[:, None]) ** gamma[:, None],
-        axis=0,
+    dpsi = (
+        2.0
+        * np.pi
+        * chi
+        * np.sum(
+            np.sign(gamma)[:, None] * (fb[None, :] / f_star[:, None]) ** gamma[:, None],
+            axis=0,
+        )
     )
     dpsi = dpsi - dpsi[0]
     total = float(dpsi[-1])
@@ -204,7 +209,9 @@ class RelativeBinningFDLikelihood(NetworkLikelihood):
             # ratio denominators: index the fiducial grid at the edges (NOT a fresh
             # waveform call), so the summary data and the r=h/h0 denominator use the
             # identical h0 values and stay consistent to machine precision.
-            h0_edge = {name: h0_grid[name][edges] for name in (d.name for d in self.detectors)}
+            h0_edge = {
+                name: h0_grid[name][edges] for name in (d.name for d in self.detectors)
+            }
 
             A0, A1, B0, B1, h0_edges = {}, {}, {}, {}, {}
             half_dd = 0.0
