@@ -253,7 +253,7 @@ def run_surrogate_marginalized_inference(waveform, likelihood, seed=11):
     dozen evaluations and draws a posterior from it.
     """
     from jaxpe.gw.external_models import ModesData
-    from jaxpe.gw.marginalized import (
+    from jaxpe.gw.likelihood import (
         MarginalizedIntrinsicLikelihood,
         ModesNetworkLikelihood,
     )

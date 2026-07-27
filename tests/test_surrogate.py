@@ -19,7 +19,7 @@ import jax.numpy as jnp
 
 from jaxpe.gw import make_injection, spin_weighted_ylm
 from jaxpe.gw.external_models import ModesData, reflect_modes
-from jaxpe.gw.marginalized import (
+from jaxpe.gw.likelihood import (
     MarginalizedIntrinsicLikelihood,
     ModesNetworkLikelihood,
 )
@@ -300,7 +300,7 @@ def esigma_blackbox():
     import jax
 
     from jaxpe.gw import ESIGMAInspiral
-    from jaxpe.gw.marginalized import MarginalizedIntrinsicLikelihood
+    from jaxpe.gw.likelihood import MarginalizedIntrinsicLikelihood
 
     wf = ESIGMAInspiral(
         f_lower=20.0,
@@ -481,7 +481,7 @@ def test_full_marginal_effective_sample_size_extra_rounds(pseudo_blackbox):
 def test_full_marginal_strict_mode_raises(pseudo_blackbox):
     """Strict mode: an unhealable call must raise LowEffectiveSampleSizeError,
     with the failure recorded in the history first (post-mortem evidence)."""
-    from jaxpe.gw.marginalized import LowEffectiveSampleSizeError
+    from jaxpe.gw.likelihood import LowEffectiveSampleSizeError
 
     lik_fixed, like_modes = pseudo_blackbox
     lik = MarginalizedIntrinsicLikelihood(

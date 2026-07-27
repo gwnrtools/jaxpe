@@ -39,7 +39,7 @@ def build_demo_problem(
 
     from jaxpe.gw import make_injection, spin_weighted_ylm
     from jaxpe.gw.external_models import ModesData, reflect_modes
-    from jaxpe.gw.marginalized import (
+    from jaxpe.gw.likelihood import (
         MarginalizedIntrinsicLikelihood,
         ModesNetworkLikelihood,
     )

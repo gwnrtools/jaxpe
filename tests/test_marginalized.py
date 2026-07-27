@@ -24,7 +24,7 @@ import pytest
 
 from jaxpe.gw import make_injection, spin_weighted_ylm
 from jaxpe.gw.external_models import ModeCache, ModesData, reflect_modes
-from jaxpe.gw.marginalized import ModesNetworkLikelihood
+from jaxpe.gw.likelihood import ModesNetworkLikelihood
 
 T_C = 1126259462.4
 DURATION = 8.0
@@ -389,7 +389,7 @@ def test_mixture_density_normalized():
     is bounded, so this tightly validates sampler <-> density consistency --
     exactly the property importance sampling relies on.
     """
-    from jaxpe.gw.marginalized import (
+    from jaxpe.gw.likelihood.importance_sampling import (
         _EXT_PERIODIC,
         _mixture_log_density,
         _mixture_sample,
@@ -578,7 +578,7 @@ def test_balance_heuristic_accumulator_analytic():
     """
     from scipy.special import log_ndtr
 
-    from jaxpe.gw.marginalized import (
+    from jaxpe.gw.likelihood.importance_sampling import (
         BalanceHeuristicAccumulator,
         _mixture_log_density,
         _mixture_sample,
@@ -643,7 +643,7 @@ def test_balance_heuristic_accumulator_analytic():
 def test_balance_heuristic_matrix_bookkeeping():
     """Every proposal must be evaluated at every point, including points that
     arrived BEFORE the proposal existed (the recycling invariant)."""
-    from jaxpe.gw.marginalized import BalanceHeuristicAccumulator
+    from jaxpe.gw.likelihood import BalanceHeuristicAccumulator
 
     calls = []
 

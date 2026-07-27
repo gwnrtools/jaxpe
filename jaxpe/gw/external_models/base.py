@@ -9,7 +9,7 @@ they are opaque, minutes-per-call black boxes. The GPry-fusion design
     theta_int  --(external model, plain Python)-->  {h_lm(t)}  --(JAX)-->  lnL
 
 Everything downstream of the modes (detector projection, extrinsic handling,
-marginalization) is differentiable JAX code in ``jaxpe.gw.marginalized``; everything
+marginalization) is differentiable JAX code in ``jaxpe.gw.likelihood``; everything
 upstream lives here and must NEVER be called inside ``jit``/``grad``.
 
 Conventions
