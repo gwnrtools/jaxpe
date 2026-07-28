@@ -24,6 +24,11 @@ from .marginalized_intrinsic import (
 )
 from .modes import ModesNetworkLikelihood
 from .relative_binning_fd import RelativeBinningFDLikelihood, frequency_bin_edges
+from .relative_binning_td import (
+    RelativeBinningTDLikelihood,
+    td_dense_loglikelihood,
+    time_bin_edges,
+)
 from .td import TDNetworkLikelihood
 
 __all__ = [
@@ -35,6 +40,9 @@ __all__ = [
     "ModesNetworkLikelihood",
     "RelativeBinningFDLikelihood",
     "frequency_bin_edges",
+    "RelativeBinningTDLikelihood",
+    "td_dense_loglikelihood",
+    "time_bin_edges",
     "BalanceHeuristicAccumulator",
     "MarginalizedIntrinsicLikelihood",
     "LowEffectiveSampleSizeError",
