@@ -16,9 +16,11 @@ likelihood, dominant mode **and higher modes**) in
 (`RelativeBinningTDLikelihood` and `RelativeBinningTDLikelihoodHM`). All exact
 at the fiducial and validated against the exact reference to the Zackay
 `beta*(1+|lnL|)` error model, with measured speedups (FD ~12x, TD ~370x / HM ~74x vs
-dense, Gohberg–Semencul `C⁻¹v` ~3300x vs dense solve). **Not started:** RB-2 (FD higher
-modes — blocked: no higher-mode FD waveform model in jaxpe to test against) and the
-RB-4 follow-ons (detector network, t_c marginalization, RB-5 end-to-end PE).
+dense, Gohberg–Semencul `C⁻¹v` ~3300x vs dense solve). The TD **detector network**
+(`RelativeBinningTDNetwork`, sum of per-detector likelihoods) is also implemented and
+tested. **Not started:** RB-2 (FD higher modes — blocked: no higher-mode FD waveform
+model in jaxpe to test against) and the remaining RB-4 follow-ons (t_c marginalization,
+RB-5 end-to-end PE against a production waveform + sampler).
 **Companion notes:** [`gpry_fusion_design.md`](gpry_fusion_design.md) (surrogate route,
 mode-based marginalization — shares the `ModesData` machinery this note reuses).
 

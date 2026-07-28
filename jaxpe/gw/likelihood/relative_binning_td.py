@@ -339,6 +339,40 @@ def td_dense_loglikelihood(trial_mode_full, p, data, acf):
     return -0.5 * float(r @ cinv_r)
 
 
+class RelativeBinningTDNetwork:
+    """A detector network of time-domain heterodyned likelihoods.
+
+    Noise is independent across detectors, so the covariance is block-diagonal and the
+    network log-likelihood is the sum of the per-detector heterodyned likelihoods (each
+    an :class:`RelativeBinningTDLikelihood` or :class:`RelativeBinningTDLikelihoodHM`,
+    built on that detector's data, covariance, and fiducial modes -- which differ by the
+    per-detector time delay for a fixed sky).
+    """
+
+    def __init__(self, detector_likelihoods):
+        self.detectors = list(detector_likelihoods)
+
+    @property
+    def edge_indices(self):
+        """Per-detector bin-edge sample indices (the trial modes are evaluated here)."""
+        return [d.edge_indices for d in self.detectors]
+
+    def log_likelihood(self, trial_mode_edges_per_detector, p_per_detector):
+        """Network lnL: sum of per-detector heterodyned log-likelihoods.
+
+        ``trial_mode_edges_per_detector`` and ``p_per_detector`` are sequences aligned
+        with the detectors passed at construction.
+        """
+        return sum(
+            d.log_likelihood(te, p)
+            for d, te, p in zip(
+                self.detectors, trial_mode_edges_per_detector, p_per_detector
+            )
+        )
+
+    __call__ = log_likelihood
+
+
 def td_dense_loglikelihood_hm(trial_modes_full, p, data, acf):
     """Exact dense multi-mode time-domain log-likelihood (reference for the HM path).
 

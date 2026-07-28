@@ -27,6 +27,7 @@ from .relative_binning_fd import RelativeBinningFDLikelihood, frequency_bin_edge
 from .relative_binning_td import (
     RelativeBinningTDLikelihood,
     RelativeBinningTDLikelihoodHM,
+    RelativeBinningTDNetwork,
     td_dense_loglikelihood,
     td_dense_loglikelihood_hm,
     time_bin_edges,
@@ -44,6 +45,7 @@ __all__ = [
     "frequency_bin_edges",
     "RelativeBinningTDLikelihood",
     "RelativeBinningTDLikelihoodHM",
+    "RelativeBinningTDNetwork",
     "td_dense_loglikelihood",
     "td_dense_loglikelihood_hm",
     "time_bin_edges",

@@ -19,6 +19,7 @@ import jax.numpy as jnp
 from jaxpe.gw.likelihood.relative_binning_td import (
     RelativeBinningTDLikelihood,
     RelativeBinningTDLikelihoodHM,
+    RelativeBinningTDNetwork,
     td_dense_loglikelihood,
     td_dense_loglikelihood_hm,
     time_bin_edges,
@@ -301,3 +302,51 @@ def test_hm_faster_than_dense():
         f"dense={t_dense * 1e3:.3f} ms, binned={t_bin * 1e3:.3f} ms, speedup={t_dense / t_bin:.1f}x"
     )
     assert t_dense / t_bin > 2.0
+
+
+# --------------------------------------------------------------------- network
+
+def test_td_network_equals_summed_dense():
+    """A two-detector network lnL equals the sum of the per-detector dense likelihoods,
+    and is exact at the fiducial."""
+    n = 1024
+    times = np.arange(n) / 1024.0
+    # two detectors: different modes (as if time-delayed), coefficients, noise, data
+    modes_a = _hm_modes(times, MC0)
+    modes_b = _hm_modes(times + 0.5 / 1024.0, MC0)  # a small relative shift
+    acf_a = _ar1_acf(n, r=0.35, sigma2=2.5e-3)
+    acf_b = _ar1_acf(n, r=0.5, sigma2=4.0e-3)
+    pa = np.array([1.3 - 0.4j, 0.6 + 0.5j])
+    pb = np.array([0.9 + 0.2j, 0.5 - 0.3j])
+    stack_a0 = np.stack([modes_a[k] for k in modes_a])
+    stack_b0 = np.stack([modes_b[k] for k in modes_b])
+    data_a = np.real(pa[:, None] * stack_a0).sum(0)
+    data_b = np.real(pb[:, None] * stack_b0).sum(0)
+
+    like_a = RelativeBinningTDLikelihoodHM(modes_a, times, data_a, acf_a, phase_per_bin=1.0)
+    like_b = RelativeBinningTDLikelihoodHM(modes_b, times, data_b, acf_b, phase_per_bin=1.0)
+    net = RelativeBinningTDNetwork([like_a, like_b])
+
+    # exact at fiducial
+    te0 = [
+        _edges_stack(modes_a, like_a.mode_keys, like_a.edge_indices),
+        _edges_stack(modes_b, like_b.mode_keys, like_b.edge_indices),
+    ]
+    binned0 = float(net.log_likelihood([jnp.asarray(t) for t in te0], [pa, pb]))
+    assert abs(binned0) < 1e-4
+
+    # parity off the fiducial: network binned == summed dense
+    for dmc in (-0.02, 0.0, 0.02):
+        ma = _hm_modes(times, MC0 + dmc)
+        mb = _hm_modes(times + 0.5 / 1024.0, MC0 + dmc)
+        te = [
+            jnp.asarray(_edges_stack(ma, like_a.mode_keys, like_a.edge_indices)),
+            jnp.asarray(_edges_stack(mb, like_b.mode_keys, like_b.edge_indices)),
+        ]
+        binned = float(net.log_likelihood(te, [pa, pb]))
+        dense = td_dense_loglikelihood_hm(
+            np.stack([ma[k] for k in like_a.mode_keys]), pa, data_a, acf_a
+        ) + td_dense_loglikelihood_hm(
+            np.stack([mb[k] for k in like_b.mode_keys]), pb, data_b, acf_b
+        )
+        assert abs(binned - dense) < _beta_tol(dense), (dmc, binned, dense)
