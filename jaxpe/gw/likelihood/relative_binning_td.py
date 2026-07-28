@@ -203,6 +203,128 @@ def _bin_reduce(values, bin_id, n_bins):
     return out
 
 
+class RelativeBinningTDLikelihoodHM:
+    """Higher-mode time-domain heterodyned likelihood for one detector.
+
+    Generalizes :class:`RelativeBinningTDLikelihood` to several spherical-harmonic modes
+    (paper Appendix A). The detector strain is a sum over the stored ``m > 0`` modes,
+    ``s(t) = sum_a Re[p_a u_a(t)]`` (``u_a`` the complex mode ``h_{l,m}``, ``p_a`` its
+    complex extrinsic coefficient), and each mode is heterodyned by its own ratio
+    ``r_a = u_a / u_{0,a}`` on a shared set of time bins (chosen from the fastest mode).
+    The log-likelihood keeps the dominant-mode structure per *ordered mode pair*:
+
+        L(d, s) = sum_a Re[p_a Z_a],
+        L(s, s) = sum_{a,b} [ 1/2 Re(p_a p_b G_{ab}) + 1/2 Re(p_a conj(p_b) G'_{ab}) ],
+
+    with ``G_{ab} = h_a^T C^{-1} h_b`` and ``G'_{ab} = h_a^T C^{-1} conj(h_b)`` expanded
+    in the per-mode ratios and the cross-mode summary tensors ``B*_{ab}(b1, b2)``. At the
+    fiducial (all ``r_a = 1``) this is exactly :func:`td_dense_loglikelihood_hm`.
+
+    Parameters
+    ----------
+    fiducial_modes
+        Ordered mapping ``{mode_key: complex u_{0,a}(t)}`` on the analysis grid.
+    times, data, acf, phase_per_bin
+        As in :class:`RelativeBinningTDLikelihood`.
+    """
+
+    def __init__(self, fiducial_modes, times, data, acf, *, phase_per_bin=0.5):
+        keys = tuple(fiducial_modes.keys())
+        u0 = {k: np.asarray(fiducial_modes[k], dtype=complex) for k in keys}
+        t = np.asarray(times, dtype=float)
+        d = np.asarray(data, dtype=float)
+        acf = np.asarray(acf, dtype=float)
+        n = next(iter(u0.values())).shape[0]
+
+        self.mode_keys = keys
+        self.times = t
+        self._x = jnp.asarray(inverse_generator(acf))
+        w = np.asarray(inverse_matvec(self._x, jnp.asarray(d)))
+        self.half_dd = 0.5 * float(d @ w)
+
+        # shared bins from the mode with the largest total phase advance (fastest)
+        ref = max(keys, key=lambda k: float(np.sum(np.abs(np.diff(np.unwrap(np.angle(u0[k])))))))
+        edges = time_bin_edges(u0[ref], phase_per_bin=phase_per_bin)
+        self.edge_indices = edges
+        self.n_bins = int(edges.size - 1)
+        edge_t = t[edges]
+        self.dt_bin = jnp.asarray(np.diff(edge_t))
+        t_c = 0.5 * (edge_t[:-1] + edge_t[1:])
+
+        pts = np.arange(edges[0], edges[-1] + 1)
+        bin_id = np.clip(np.searchsorted(edges, pts, side="right") - 1, 0, self.n_bins - 1)
+        dt = t[pts] - t_c[bin_id]
+        pts_j = jnp.asarray(pts)
+        idx = jnp.asarray(bin_id)
+        dtp = jnp.asarray(dt)
+        nb = self.n_bins
+        onehot = (bin_id[None, :] == np.arange(nb)[:, None]).astype(float)
+        red = jax.vmap(lambda row: jax.ops.segment_sum(row, idx, num_segments=nb))
+
+        # per-mode A summary data, edge samples, and C^{-1}(mode 1_b2), C^{-1}(mode dt 1_b2)
+        self.A0 = jnp.stack([jnp.asarray(_bin_reduce(w[pts] * u0[k][pts], bin_id, nb)) for k in keys])
+        self.A1 = jnp.stack([jnp.asarray(_bin_reduce(w[pts] * u0[k][pts] * dt, bin_id, nb)) for k in keys])
+        self.u0_edges = jnp.stack([jnp.asarray(u0[k][edges]) for k in keys])  # (M, nb+1)
+
+        u0p = {k: jnp.asarray(u0[k][pts]) for k in keys}  # (npts,)
+        v0 = {}
+        v1 = {}
+        for k in keys:
+            v0[k] = self._inv_masked(onehot * u0[k][pts][None, :], pts_j, n)[:, pts_j]
+            v1[k] = self._inv_masked(onehot * (u0[k][pts] * dt)[None, :], pts_j, n)[:, pts_j]
+
+        # cross-mode B tensors, stacked as (M, M, nb, nb) with indices [a, b, b1, b2]
+        def pair(fn):
+            return jnp.stack([jnp.stack([fn(a, b) for b in keys]) for a in keys])
+
+        self.B0 = pair(lambda a, b: red(u0p[a][None, :] * v0[b]).T)
+        self.B1 = pair(lambda a, b: red(u0p[a][None, :] * v1[b]).T)
+        self.B1b = pair(lambda a, b: red((u0p[a] * dtp)[None, :] * v0[b]).T)
+        self.B2 = pair(lambda a, b: red(u0p[a][None, :] * jnp.conj(v0[b])).T)
+        self.B3 = pair(lambda a, b: red(u0p[a][None, :] * jnp.conj(v1[b])).T)
+        self.B3b = pair(lambda a, b: red((u0p[a] * dtp)[None, :] * jnp.conj(v0[b])).T)
+
+    def _inv_masked(self, rows_over_support, pts_j, n):
+        full = jnp.zeros((rows_over_support.shape[0], n), dtype=complex)
+        full = full.at[:, pts_j].set(jnp.asarray(rows_over_support))
+        inv = jax.vmap(
+            lambda v: inverse_matvec(self._x, jnp.real(v))
+            + 1j * inverse_matvec(self._x, jnp.imag(v))
+        )
+        return inv(full)
+
+    def log_likelihood(self, trial_mode_edges, p):
+        """Heterodyned lnL for higher modes.
+
+        ``trial_mode_edges`` has shape ``(M, n_bins + 1)`` (one row per mode, in
+        ``mode_keys`` order); ``p`` has shape ``(M,)`` (per-mode complex coefficients).
+        """
+        r = jnp.asarray(trial_mode_edges) / self.u0_edges  # (M, nb+1)
+        r0 = 0.5 * (r[:, 1:] + r[:, :-1])  # (M, nb)
+        r1 = (r[:, 1:] - r[:, :-1]) / self.dt_bin[None, :]
+        p = jnp.asarray(p) + 0.0j
+
+        z = jnp.sum(r0 * self.A0 + r1 * self.A1, axis=1)  # (M,)
+        l_ds = jnp.real(jnp.sum(p * z))
+
+        g = (
+            jnp.einsum("ai,abij,bj->ab", r0, self.B0, r0)
+            + jnp.einsum("ai,abij,bj->ab", r0, self.B1, r1)
+            + jnp.einsum("ai,abij,bj->ab", r1, self.B1b, r0)
+        )
+        gp = (
+            jnp.einsum("ai,abij,bj->ab", r0, self.B2, jnp.conj(r0))
+            + jnp.einsum("ai,abij,bj->ab", r0, self.B3, jnp.conj(r1))
+            + jnp.einsum("ai,abij,bj->ab", r1, self.B3b, jnp.conj(r0))
+        )
+        pa_pb = p[:, None] * p[None, :]
+        pa_cpb = p[:, None] * jnp.conj(p)[None, :]
+        l_ss = 0.5 * jnp.real(jnp.sum(pa_pb * g)) + 0.5 * jnp.real(jnp.sum(pa_cpb * gp))
+        return -self.half_dd + l_ds - 0.5 * l_ss
+
+    __call__ = log_likelihood
+
+
 def td_dense_loglikelihood(trial_mode_full, p, data, acf):
     """Exact dense time-domain log-likelihood ``-1/2 (d - s)^T C^{-1} (d - s)``.
 
@@ -211,6 +333,21 @@ def td_dense_loglikelihood(trial_mode_full, p, data, acf):
     """
     u = np.asarray(trial_mode_full, dtype=complex)
     s = np.real(np.asarray(p) * u)
+    r = np.asarray(data, dtype=float) - s
+    x = inverse_generator(np.asarray(acf, dtype=float))
+    cinv_r = np.asarray(inverse_matvec(jnp.asarray(x), jnp.asarray(r)))
+    return -0.5 * float(r @ cinv_r)
+
+
+def td_dense_loglikelihood_hm(trial_modes_full, p, data, acf):
+    """Exact dense multi-mode time-domain log-likelihood (reference for the HM path).
+
+    ``trial_modes_full`` is a stack ``(M, N)`` of the trial complex modes and ``p`` an
+    ``(M,)`` array of coefficients; the strain is ``s = sum_a Re[p_a u_a]``.
+    """
+    U = np.asarray(trial_modes_full, dtype=complex)
+    p = np.asarray(p, dtype=complex)
+    s = np.real(p[:, None] * U).sum(axis=0)
     r = np.asarray(data, dtype=float) - s
     x = inverse_generator(np.asarray(acf, dtype=float))
     cinv_r = np.asarray(inverse_matvec(jnp.asarray(x), jnp.asarray(r)))

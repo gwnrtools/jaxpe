@@ -18,7 +18,9 @@ import jax.numpy as jnp
 
 from jaxpe.gw.likelihood.relative_binning_td import (
     RelativeBinningTDLikelihood,
+    RelativeBinningTDLikelihoodHM,
     td_dense_loglikelihood,
+    td_dense_loglikelihood_hm,
     time_bin_edges,
 )
 
@@ -183,3 +185,119 @@ def test_td_relative_binning_faster_than_dense():
         f"dense={t_dense * 1e3:.3f} ms, binned={t_bin * 1e3:.3f} ms, speedup={speedup:.1f}x"
     )
     assert speedup > 2.0, f"expected binned >> dense, got {speedup:.2f}x"
+
+
+# --------------------------------------------------------------------- higher modes
+
+def _hm_modes(times, mc):
+    """Two synthetic modes: a slow '(2,2)' and a faster, weaker '(3,3)'."""
+    return {
+        (2, 2): _chirp_mode(times, mc, k=90.0),
+        (3, 3): 0.4 * _chirp_mode(times, mc, k=135.0),
+    }
+
+
+P_HM = np.array([1.3 - 0.4j, 0.6 + 0.5j])
+
+
+def _setup_hm(n=1024, fs=1024.0):
+    times = np.arange(n) / fs
+    modes0 = _hm_modes(times, MC0)
+    acf = _ar1_acf(n, sigma2=2.5e-3)
+    stack0 = np.stack([modes0[k] for k in modes0])
+    data = np.real(P_HM[:, None] * stack0).sum(axis=0)
+    return times, modes0, acf, data
+
+
+def _edges_stack(modes, keys, edges):
+    return np.stack([modes[k][edges] for k in keys])
+
+
+def test_hm_exact_at_fiducial():
+    times, modes0, acf, data = _setup_hm()
+    like = RelativeBinningTDLikelihoodHM(modes0, times, data, acf, phase_per_bin=1.0)
+    trial = _edges_stack(modes0, like.mode_keys, like.edge_indices)
+    binned = float(like.log_likelihood(jnp.asarray(trial), P_HM))
+    dense = td_dense_loglikelihood_hm(
+        np.stack([modes0[k] for k in like.mode_keys]), P_HM, data, acf
+    )
+    assert abs(binned - dense) < 1e-6, (binned, dense)
+    assert abs(dense) < 1e-4
+
+
+def test_hm_parity_intrinsic():
+    times, modes0, acf, data = _setup_hm()
+    like = RelativeBinningTDLikelihoodHM(modes0, times, data, acf, phase_per_bin=1.0)
+    worst = -np.inf
+    for dmc in (-0.02, -0.01, 0.0, 0.01, 0.02):
+        modes = _hm_modes(times, MC0 + dmc)
+        trial = _edges_stack(modes, like.mode_keys, like.edge_indices)
+        binned = float(like.log_likelihood(jnp.asarray(trial), P_HM))
+        dense = td_dense_loglikelihood_hm(
+            np.stack([modes[k] for k in like.mode_keys]), P_HM, data, acf
+        )
+        worst = max(worst, abs(binned - dense) - _beta_tol(dense))
+    assert worst < 0.0, worst
+
+
+def test_hm_parity_extrinsic():
+    times, modes0, acf, data = _setup_hm()
+    like = RelativeBinningTDLikelihoodHM(modes0, times, data, acf, phase_per_bin=1.0)
+    trial = _edges_stack(modes0, like.mode_keys, like.edge_indices)
+    stack0 = np.stack([modes0[k] for k in like.mode_keys])
+    for p in (P_HM, np.array([1.0 + 0j, 0.0 + 0j]), np.array([0.8 - 0.3j, 1.1 + 0.7j])):
+        binned = float(like.log_likelihood(jnp.asarray(trial), p))
+        dense = td_dense_loglikelihood_hm(stack0, p, data, acf)
+        assert abs(binned - dense) < _beta_tol(dense), (p, binned, dense)
+
+
+def test_hm_single_mode_matches_dominant():
+    """One-mode HM must equal the dominant-mode class on the same data."""
+    times = np.arange(1024) / 1024.0
+    u0 = _chirp_mode(times, MC0)
+    acf = _ar1_acf(1024, sigma2=2.5e-3)
+    data = np.real(P0 * u0)
+    dom = RelativeBinningTDLikelihood(u0, times, data, acf, phase_per_bin=1.0)
+    hm = RelativeBinningTDLikelihoodHM({(2, 2): u0}, times, data, acf, phase_per_bin=1.0)
+    u = _chirp_mode(times, MC0 + 0.02)
+    ed = dom.edge_indices
+    a = float(dom.log_likelihood(jnp.asarray(u[ed]), P0))
+    b = float(hm.log_likelihood(jnp.asarray(u[ed][None, :]), np.array([P0])))
+    assert abs(a - b) < 1e-9, (a, b)
+
+
+def test_hm_faster_than_dense():
+    n = 2048
+    times = np.arange(n) / 2048.0
+    modes0 = _hm_modes(times, MC0)
+    acf = _ar1_acf(n, r=0.4, sigma2=2.5e-3)
+    stack0 = np.stack([modes0[k] for k in modes0])
+    data = np.real(P_HM[:, None] * stack0).sum(axis=0)
+    like = RelativeBinningTDLikelihoodHM(modes0, times, data, acf, phase_per_bin=1.0)
+    modes = _hm_modes(times, MC0 + 0.01)
+    trial = jnp.asarray(_edges_stack(modes, like.mode_keys, like.edge_indices))
+    stack = np.stack([modes[k] for k in like.mode_keys])
+
+    f = jax.jit(like.log_likelihood)
+    v_bin = float(f(trial, P_HM))
+    v_dense = td_dense_loglikelihood_hm(stack, P_HM, data, acf)
+    assert abs(v_bin - v_dense) < _beta_tol(v_dense), (v_bin, v_dense)
+
+    jax.block_until_ready(f(trial, P_HM))
+    ts = []
+    for _ in range(30):
+        t0 = time.perf_counter()
+        jax.block_until_ready(f(trial, P_HM))
+        ts.append(time.perf_counter() - t0)
+    t_bin = float(np.median(ts))
+    td = []
+    for _ in range(5):
+        t0 = time.perf_counter()
+        td_dense_loglikelihood_hm(stack, P_HM, data, acf)
+        td.append(time.perf_counter() - t0)
+    t_dense = float(np.median(td))
+    print(
+        f"\n[TD HM] N={n}, modes={len(like.mode_keys)}, bins={like.n_bins}: "
+        f"dense={t_dense * 1e3:.3f} ms, binned={t_bin * 1e3:.3f} ms, speedup={t_dense / t_bin:.1f}x"
+    )
+    assert t_dense / t_bin > 2.0
