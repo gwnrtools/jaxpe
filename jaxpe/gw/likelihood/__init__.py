@@ -23,7 +23,12 @@ from .marginalized_intrinsic import (
     MarginalizedIntrinsicLikelihood,
 )
 from .modes import ModesNetworkLikelihood
-from .relative_binning_fd import RelativeBinningFDLikelihood, frequency_bin_edges
+from .relative_binning_fd import (
+    RelativeBinningFDLikelihood,
+    RelativeBinningFDLikelihoodHM,
+    fd_dense_loglikelihood_modes,
+    frequency_bin_edges,
+)
 from .relative_binning_td import (
     RelativeBinningTDLikelihood,
     RelativeBinningTDLikelihoodHM,
@@ -42,6 +47,8 @@ __all__ = [
     "FDNetworkLikelihood",
     "ModesNetworkLikelihood",
     "RelativeBinningFDLikelihood",
+    "RelativeBinningFDLikelihoodHM",
+    "fd_dense_loglikelihood_modes",
     "frequency_bin_edges",
     "RelativeBinningTDLikelihood",
     "RelativeBinningTDLikelihoodHM",

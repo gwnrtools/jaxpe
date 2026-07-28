@@ -49,6 +49,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from .base import NetworkLikelihood, project_to_detector
+from .relative_binning_td import _bin_reduce
+from .relative_binning_td import time_bin_edges as _phase_bin_edges
 
 # leading post-Newtonian frequency powers of the phase (bilby's set): chirp mass
 # (-5/3), spin (-2/3), merger-time shift (1), tidal (5/3), and a higher term (7/3).
@@ -307,3 +309,124 @@ class RelativeBinningFDLikelihood(NetworkLikelihood):
             epsilon=epsilon,
             gamma=gamma,
         )
+
+
+class RelativeBinningFDLikelihoodHM:
+    r"""Higher-mode Fourier-domain relative binning, working on FD waveform modes.
+
+    The FD analogue of :class:`~jaxpe.gw.likelihood.relative_binning_td.RelativeBinningTDLikelihoodHM`.
+    Because the frequency-domain noise covariance is **diagonal** (the one-sided PSD),
+    the summary data are **per bin** (single index), with no cross-bin ``B(b1, b2)`` and
+    no Gohberg-Semencul -- just PSD-weighted sums. The strain is ``h(f) = sum_a c_a
+    h_a(f)``; each mode is heterodyned by its own ratio ``r_a = h_a / h_{0,a}`` on shared
+    frequency bins. With the jaxpe inner product ``(x|y) = 4 df Re sum_f x y* / S``,
+
+        ln L = -1/2 (d|d) + Re sum_a conj(c_a) Z_a - 1/2 sum_{a,b} c_a conj(c_b) M_{ab},
+        Z_a = sum_bin [ conj(r0_a) A0_a + conj(r1_a) A1_a ],
+        M_{ab} = sum_bin [ r0_a conj(r0_b) B0_{ab} + (r0_a conj(r1_b) + r1_a conj(r0_b)) B1_{ab} ],
+
+    with ``A0_a(bin) = 4 df sum_{f in bin} d conj(h_{0,a}) / S`` (``A1`` weighted by
+    ``f - f_c``) and ``B0_{ab}(bin) = 4 df sum_{f in bin} h_{0,a} conj(h_{0,b}) / S``
+    (``B1`` weighted by ``f - f_c``). Exact at the fiducial; verified against
+    :func:`fd_dense_loglikelihood_modes`.
+    """
+
+    def __init__(
+        self, fiducial_modes, freqs, data_fd, psd, f_min, f_max, *, phase_per_bin=0.5
+    ):
+        keys = tuple(fiducial_modes.keys())
+        h0 = {k: np.asarray(fiducial_modes[k], dtype=complex) for k in keys}
+        freqs = np.asarray(freqs, dtype=float)
+        d = np.asarray(data_fd, dtype=complex)
+        psd = np.asarray(psd, dtype=float)
+        df = float(freqs[1] - freqs[0])
+
+        self.mode_keys = keys
+        band = np.nonzero((freqs >= f_min) & (freqs <= f_max))[0]
+        inv = np.where((freqs >= f_min) & (freqs <= f_max), 1.0 / psd, 0.0)
+        # 1/2 (d|d) over the full band (theta-independent)
+        self.half_dd = 2.0 * df * float(np.sum((d.real**2 + d.imag**2) * inv))
+
+        # shared bins from the fastest mode's phase advance, within the band+support
+        fb = band
+        ref = max(
+            keys,
+            key=lambda k: float(
+                np.sum(np.abs(np.diff(np.unwrap(np.angle(h0[k][fb])))))
+            ),
+        )
+        loc = _phase_bin_edges(h0[ref][fb], phase_per_bin=phase_per_bin)
+        edges = fb[loc]  # global frequency indices of the bin edges
+        self.edge_indices = edges
+        self.n_bins = int(edges.size - 1)
+        fe = freqs[edges]
+        self.edge_freqs = jnp.asarray(fe)
+        f_c = 0.5 * (fe[:-1] + fe[1:])
+
+        pts = np.arange(edges[0], edges[-1] + 1)
+        bin_id = np.clip(
+            np.searchsorted(edges, pts, side="right") - 1, 0, self.n_bins - 1
+        )
+        f_rel = freqs[pts] - f_c[bin_id]
+        w = 4.0 * df * inv[pts]  # noise weight over the support
+
+        self.h0_edges = jnp.stack(
+            [jnp.asarray(h0[k][edges]) for k in keys]
+        )  # (M, nb+1)
+
+        A0, A1 = [], []
+        for k in keys:
+            g = w * d[pts] * np.conj(h0[k][pts])
+            A0.append(_bin_reduce(g, bin_id, self.n_bins))
+            A1.append(_bin_reduce(g * f_rel, bin_id, self.n_bins))
+        self.A0 = jnp.asarray(np.stack(A0))
+        self.A1 = jnp.asarray(np.stack(A1))
+
+        M = len(keys)
+        B0 = np.zeros((M, M, self.n_bins), dtype=complex)
+        B1 = np.zeros((M, M, self.n_bins), dtype=complex)
+        for a, ka in enumerate(keys):
+            for b, kb in enumerate(keys):
+                g = w * h0[ka][pts] * np.conj(h0[kb][pts])
+                B0[a, b] = _bin_reduce(g, bin_id, self.n_bins)
+                B1[a, b] = _bin_reduce(g * f_rel, bin_id, self.n_bins)
+        self.B0 = jnp.asarray(B0)
+        self.B1 = jnp.asarray(B1)
+
+    def log_likelihood(self, trial_mode_edges, c):
+        """Heterodyned lnL. ``trial_mode_edges`` (M, n_bins+1); ``c`` (M,) coefficients."""
+        r = jnp.asarray(trial_mode_edges) / self.h0_edges  # (M, nb+1)
+        r0 = 0.5 * (r[:, 1:] + r[:, :-1])
+        r1 = (r[:, 1:] - r[:, :-1]) / (self.edge_freqs[1:] - self.edge_freqs[:-1])[
+            None, :
+        ]
+        c = jnp.asarray(c) + 0.0j
+
+        z = jnp.sum(jnp.conj(r0) * self.A0 + jnp.conj(r1) * self.A1, axis=1)  # (M,)
+        l_dh = jnp.real(jnp.sum(jnp.conj(c) * z))
+
+        s0 = jnp.einsum("ai,bi,abi->ab", r0, jnp.conj(r0), self.B0)
+        s1 = jnp.einsum("ai,bi,abi->ab", r0, jnp.conj(r1), self.B1) + jnp.einsum(
+            "ai,bi,abi->ab", r1, jnp.conj(r0), self.B1
+        )
+        m = s0 + s1
+        l_hh = jnp.real(jnp.einsum("a,b,ab->", c, jnp.conj(c), m))
+        return -self.half_dd + l_dh - 0.5 * l_hh
+
+    __call__ = log_likelihood
+
+
+def fd_dense_loglikelihood_modes(
+    trial_modes_full, c, data_fd, psd, freqs, f_min, f_max
+):
+    """Exact dense FD log-likelihood from modes: ``-1/2 (d - h | d - h)``, ``h = sum_a c_a h_a``."""
+    U = np.asarray(trial_modes_full, dtype=complex)
+    c = np.asarray(c, dtype=complex)
+    h = (c[:, None] * U).sum(axis=0)
+    freqs = np.asarray(freqs, dtype=float)
+    df = float(freqs[1] - freqs[0])
+    inv = np.where(
+        (freqs >= f_min) & (freqs <= f_max), 1.0 / np.asarray(psd, float), 0.0
+    )
+    r = np.asarray(data_fd, dtype=complex) - h
+    return -2.0 * df * float(np.sum((r.real**2 + r.imag**2) * inv))

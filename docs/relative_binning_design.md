@@ -16,11 +16,13 @@ likelihood, dominant mode **and higher modes**) in
 (`RelativeBinningTDLikelihood` and `RelativeBinningTDLikelihoodHM`). All exact
 at the fiducial and validated against the exact reference to the Zackay
 `beta*(1+|lnL|)` error model, with measured speedups (FD ~12x, TD ~370x / HM ~74x vs
-dense, Gohberg–Semencul `C⁻¹v` ~3300x vs dense solve). The TD **detector network**
-(`RelativeBinningTDNetwork`, sum of per-detector likelihoods) is also implemented and
-tested. **Not started:** RB-2 (FD higher modes — blocked: no higher-mode FD waveform
-model in jaxpe to test against) and the remaining RB-4 follow-ons (t_c marginalization,
-RB-5 end-to-end PE against a production waveform + sampler).
+dense, Gohberg–Semencul `C⁻¹v` ~3300x vs dense solve). Also implemented and tested:
+**RB-2 FD higher modes** (`RelativeBinningFDLikelihoodHM`, per-mode/per-pair per-bin
+summary data on FD modes with the diagonal covariance), the TD **detector network**
+(`RelativeBinningTDNetwork`), and **t_c support** (a coalescence-time shift samples the
+trial mode at `edge_times − Δt_c`; validated against the dense reference). **Not
+started:** RB-5 end-to-end PE against a production waveform + sampler (needs a
+production higher-mode mode source and sampler/GPry integration).
 **Companion notes:** [`gpry_fusion_design.md`](gpry_fusion_design.md) (surrogate route,
 mode-based marginalization — shares the `ModesData` machinery this note reuses).
 
@@ -318,7 +320,7 @@ two new classes and add to `__all__`.
 | Phase | Scope | Gate |
 |---|---|---|
 | RB-1 ✅ | `relative_binning_fd.py`: Zackay bin scheme + `RelativeBinningFDLikelihood` (dominant mode) | **done** — exact at fiducial; parity to beta·(1+\|lnL\|); ~12x speedup; support-restriction handled (band beyond ringdown cutoff) |
-| RB-2 | FD higher modes (per-mode `A/B`) | HM injection lnL parity vs full-resolution HM likelihood |
+| RB-2 ✅ (modes) | `RelativeBinningFDLikelihoodHM`: per-mode / per-mode-pair per-bin `A`/`B` on FD modes (diagonal covariance — no cross-bin, no G-S) | **done** — exact at fiducial; parity vs dense multi-mode FD likelihood (`fd_dense_loglikelihood_modes`) to beta·(1+\|lnL\|). Works on FD modes directly; a production HM FD mode source is the only missing piece for end-to-end use |
 | RB-3 ✅ | `toeplitz.py`: autocorr + Levinson generators + Gohberg–Semencul matvec (JAX) | **done** — `C⁻¹v` vs dense to 1e-9..1e-11; round-trip; jit+vmap; ~3300x vs dense solve |
 | RB-4 ✅ (dominant + HM) | `relative_binning_td.py`: adaptive time bins + `A0/A1` and `B0/B1/B1b/B2/B3/B3b` summary data + hot path; `RelativeBinningTDLikelihoodHM` for higher modes (per-pair cross-mode tensors, Appendix A) | **done** — exact at fiducial; parity vs dense-Toeplitz (intrinsic/extrinsic/noisy) to `beta·(1+\|lnL\|)`; single-mode HM == dominant; ~370x (dominant) / ~74x (2-mode) speedup. Network, t_c: follow-on |
 | RB-5 | End-to-end PE + validation | P–P p>0.05; JS ~1e-3; measured speedup (~340× @128 s) |

@@ -272,3 +272,97 @@ def test_support_restriction_warns_and_stays_exact():
         rb = RelativeBinningFDLikelihood.from_likelihood(full, INJECTION)
     p = _params()
     assert abs(float(rb.log_likelihood(p)) - float(full.log_likelihood(p))) < 1e-6
+
+
+# ----------------------------------------------------- higher-mode FD (synthetic modes)
+
+from jaxpe.gw.likelihood.relative_binning_fd import (  # noqa: E402
+    RelativeBinningFDLikelihoodHM,
+    fd_dense_loglikelihood_modes,
+)
+
+_FD_FREQS = np.fft.rfftfreq(2048, d=1.0 / 1024.0)  # df = 0.5 Hz, up to 512 Hz
+_FD_FMIN, _FD_FMAX = 20.0, 460.0
+_FD_PSD = 1.0 + (30.0 / np.clip(_FD_FREQS, _FD_FREQS[1], None)) ** 4  # red-tilted
+_C_HM = np.array([1.2 - 0.3j, 0.5 + 0.4j])
+
+
+def _fd_modes(freqs, mc, k=7000.0):
+    fs = np.clip(freqs, freqs[1], None)
+    amp = fs ** (-7.0 / 6.0)
+    amp = amp / amp.max()
+    psi = -k * mc ** (-5.0 / 3.0) * fs ** (-5.0 / 3.0)
+    return {(2, 2): amp * np.exp(1j * psi), (3, 3): 0.3 * amp * np.exp(1.5j * psi)}
+
+
+def _fd_setup():
+    modes0 = _fd_modes(_FD_FREQS, 25.0)
+    stack0 = np.stack([modes0[k] for k in modes0])
+    data = (_C_HM[:, None] * stack0).sum(0)
+    return modes0, data
+
+
+def _fd_edges_stack(modes, keys, edges):
+    return np.stack([modes[k][edges] for k in keys])
+
+
+def test_fd_hm_exact_at_fiducial():
+    modes0, data = _fd_setup()
+    like = RelativeBinningFDLikelihoodHM(
+        modes0, _FD_FREQS, data, _FD_PSD, _FD_FMIN, _FD_FMAX, phase_per_bin=1.0
+    )
+    trial = _fd_edges_stack(modes0, like.mode_keys, like.edge_indices)
+    binned = float(like.log_likelihood(jnp.asarray(trial), _C_HM))
+    dense = fd_dense_loglikelihood_modes(
+        np.stack([modes0[k] for k in like.mode_keys]),
+        _C_HM,
+        data,
+        _FD_PSD,
+        _FD_FREQS,
+        _FD_FMIN,
+        _FD_FMAX,
+    )
+    assert abs(binned - dense) < 1e-6, (binned, dense)
+    assert abs(dense) < 1e-4
+
+
+def test_fd_hm_parity_intrinsic():
+    modes0, data = _fd_setup()
+    like = RelativeBinningFDLikelihoodHM(
+        modes0, _FD_FREQS, data, _FD_PSD, _FD_FMIN, _FD_FMAX, phase_per_bin=1.0
+    )
+    worst = -np.inf
+    for dmc in (-0.3, -0.1, 0.0, 0.1, 0.3):
+        modes = _fd_modes(_FD_FREQS, 25.0 + dmc)
+        trial = _fd_edges_stack(modes, like.mode_keys, like.edge_indices)
+        binned = float(like.log_likelihood(jnp.asarray(trial), _C_HM))
+        dense = fd_dense_loglikelihood_modes(
+            np.stack([modes[k] for k in like.mode_keys]),
+            _C_HM,
+            data,
+            _FD_PSD,
+            _FD_FREQS,
+            _FD_FMIN,
+            _FD_FMAX,
+        )
+        worst = max(worst, abs(binned - dense) - _beta_tol(dense))
+    assert worst < 0.0, worst
+
+
+def test_fd_hm_parity_extrinsic():
+    modes0, data = _fd_setup()
+    like = RelativeBinningFDLikelihoodHM(
+        modes0, _FD_FREQS, data, _FD_PSD, _FD_FMIN, _FD_FMAX, phase_per_bin=1.0
+    )
+    trial = _fd_edges_stack(modes0, like.mode_keys, like.edge_indices)
+    stack0 = np.stack([modes0[k] for k in like.mode_keys])
+    for c in (
+        _C_HM,
+        np.array([1.0 + 0j, 0.0 + 0j]),
+        np.array([0.8 - 0.5j, 1.1 + 0.6j]),
+    ):
+        binned = float(like.log_likelihood(jnp.asarray(trial), c))
+        dense = fd_dense_loglikelihood_modes(
+            stack0, c, data, _FD_PSD, _FD_FREQS, _FD_FMIN, _FD_FMAX
+        )
+        assert abs(binned - dense) < _beta_tol(dense), (c, binned, dense)
