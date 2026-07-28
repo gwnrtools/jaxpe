@@ -30,10 +30,11 @@ from .likelihood import (
 from .priors import bbh_priors, ebbh_priors
 from .psd import aligo_zdhp_psd, psd_from_file, welch_psd
 from .cbc_models import IMRPhenomD, ESIGMAInspiral, NRSur7dq4, WaveformModel
-from .waveform import ToyChirp, mismatch_f32_f64
+from .waveform import ToyChirp, ToyChirpFDHM, mismatch_f32_f64
 
 __all__ = [
     "ToyChirp",
+    "ToyChirpFDHM",
     "WaveformModel",
     "mismatch_f32_f64",
     "Detector",

@@ -98,6 +98,52 @@ class ToyChirp:
         return w * h_plus, w * h_cross
 
 
+class ToyChirpFDHM:
+    r"""Toy frequency-domain higher-mode chirp: analytic SPA-like modes ``h_lm(f)``.
+
+    A pedagogical multi-mode frequency-domain waveform for exercising **higher-mode
+    relative binning** (:class:`~jaxpe.gw.likelihood.relative_binning_fd.RelativeBinningFDLikelihoodHM`).
+    Unlike :class:`ToyChirp` (a ``(params, times) -> (h_+, h_x)`` model), this is a
+    *mode* model: ``(params, freqs) -> {(l, m): h_lm(f)}``, JAX-traceable and evaluable at
+    an arbitrary frequency array (so the trial modes can be generated at the bin edges).
+
+    Each mode is a leading-order stationary-phase chirp
+    ``h_lm(f) = A_lm f^{-7/6} exp(i psi_lm(f))`` with ``psi_lm(f) = (3/128)
+    (pi Mc f)^{-5/3} (m/2)^{8/3}`` -- so different ``m`` evolve at different rates (the
+    *summed* ratio is not smooth, hence per-mode binning is required). The sub-dominant
+    amplitudes scale with the mass asymmetry ``delta = sqrt(1 - 4 eta)``, so the mass
+    ratio is identifiable through the higher modes (it vanishes at equal mass). The modes
+    are at a reference distance/orientation; extrinsic geometry enters through the
+    per-mode coefficients ``c_lm`` used by the likelihood.
+
+    Intrinsic parameters: ``chirp_mass`` [Msun], ``mass_ratio`` (``q <= 1``).
+    """
+
+    def __init__(self, modes=((2, 2), (3, 3)), amp_hm=0.6):
+        self.modes = tuple(modes)
+        self.amp_hm = float(amp_hm)
+
+    def __call__(self, params: dict, freqs: jax.Array) -> dict:
+        mc = params["chirp_mass"] * MTSUN_SI
+        q = params["mass_ratio"]
+        eta = q / (1.0 + q) ** 2
+        delta = jnp.sqrt(jnp.maximum(1.0 - 4.0 * eta, 0.0))  # mass asymmetry
+        pos = freqs > 0.0
+        fs = jnp.where(pos, freqs, 1.0)
+        psi0 = (3.0 / 128.0) * (jnp.pi * mc) ** (-5.0 / 3.0)
+        amp = fs ** (-7.0 / 6.0)
+        out = {}
+        for l, m in self.modes:
+            psi = psi0 * (m / 2.0) ** (8.0 / 3.0) * fs ** (-5.0 / 3.0)
+            if (l, m) == (2, 2):
+                a = amp
+            else:
+                # sub-dominant modes vanish at equal mass and grow with asymmetry
+                a = self.amp_hm * delta * (m / 2.0) ** (2.0 / 3.0) * amp
+            out[(l, m)] = jnp.where(pos, a * jnp.exp(1j * psi), 0.0 + 0.0j)
+        return out
+
+
 def mismatch_f32_f64(waveform: WaveformModel, params: dict, times) -> float:
     """Flat-noise mismatch between float32 and float64 evaluations of ``waveform``.
 

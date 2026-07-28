@@ -366,3 +366,83 @@ def test_fd_hm_parity_extrinsic():
             stack0, c, data, _FD_PSD, _FD_FREQS, _FD_FMIN, _FD_FMAX
         )
         assert abs(binned - dense) < _beta_tol(dense), (c, binned, dense)
+
+
+# ------------------------------------------------ end-to-end FD HM relative-binning PE
+
+
+def test_fd_hm_end_to_end_pe_with_toychirp():
+    """End-to-end higher-mode FD relative-binning PE on a ToyChirpFDHM injection: a 2-D
+    grid posterior over (chirp_mass, mass_ratio) recovers the injection and matches the
+    dense-likelihood posterior (Jensen-Shannon divergence < 1e-3). The mass ratio is
+    constrained through the (3,3) mode (its amplitude scales with mass asymmetry)."""
+    from jaxpe.gw import ToyChirpFDHM, spin_weighted_ylm
+
+    freqs = np.fft.rfftfreq(4096, d=1.0 / 1024.0)  # df = 0.25 Hz, up to 512 Hz
+    fmin, fmax = 20.0, 400.0
+    psd = 1e-3 * (1.0 + (30.0 / np.clip(freqs, freqs[1], None)) ** 4)
+    wf = ToyChirpFDHM(modes=((2, 2), (3, 3)))
+    keys = wf.modes
+    true = {"chirp_mass": 30.0, "mass_ratio": 0.6}
+
+    # extrinsic -> per-mode coefficients c_lm = Y_lm(iota, phi) / D (fixed in this run)
+    iota, phi, dist = 0.9, 1.1, 1.0
+    c = np.array(
+        [
+            complex(np.asarray(spin_weighted_ylm(iota, phi, l, m))) / dist
+            for (l, m) in keys
+        ]
+    )
+
+    def _stack(params, fgrid):
+        m = wf(params, jnp.asarray(fgrid))
+        return np.stack([np.asarray(m[k]) for k in keys])
+
+    stack_true = _stack(true, freqs)
+    data = (c[:, None] * stack_true).sum(0)
+    # rescale coefficients to a target network SNR so the posterior has real structure
+    df = float(freqs[1] - freqs[0])
+    inv = np.where((freqs >= fmin) & (freqs <= fmax), 1.0 / psd, 0.0)
+    snr = np.sqrt(4.0 * df * np.sum((data.real**2 + data.imag**2) * inv))
+    c = c * (25.0 / snr)
+    data = (c[:, None] * stack_true).sum(0)
+
+    fmodes = {k: stack_true[i] for i, k in enumerate(keys)}
+    like = RelativeBinningFDLikelihoodHM(
+        fmodes, freqs, data, psd, fmin, fmax, phase_per_bin=0.5
+    )
+    ef = freqs[like.edge_indices]
+    het_eval = jax.jit(like.log_likelihood)
+
+    mc_grid = np.linspace(29.5, 30.5, 41)
+    q_grid = np.linspace(0.45, 0.80, 41)
+
+    het = np.empty((mc_grid.size, q_grid.size))
+    dense = np.empty_like(het)
+    for i, mc in enumerate(mc_grid):
+        for j, q in enumerate(q_grid):
+            p = {"chirp_mass": mc, "mass_ratio": q}
+            het[i, j] = float(het_eval(jnp.asarray(_stack(p, ef)), c))
+            dense[i, j] = fd_dense_loglikelihood_modes(
+                _stack(p, freqs), c, data, psd, freqs, fmin, fmax
+            )
+
+    def _post(lnl):
+        w = np.exp(lnl - lnl.max())
+        return w / w.sum()
+
+    ph, pd = _post(het), _post(dense)
+    # MAP recovers the injection
+    ih, jh = np.unravel_index(ph.argmax(), ph.shape)
+    assert abs(mc_grid[ih] - true["chirp_mass"]) <= (mc_grid[1] - mc_grid[0]) * 1.5
+    assert abs(q_grid[jh] - true["mass_ratio"]) <= (q_grid[1] - q_grid[0]) * 1.5
+    # heterodyned posterior matches the dense posterior
+    mix = 0.5 * (ph + pd)
+    m = ph > 0
+    js = 0.5 * np.sum(ph[m] * np.log(ph[m] / mix[m])) + 0.5 * np.sum(
+        pd[m] * np.log(pd[m] / mix[m])
+    )
+    assert js < 1e-3, js
+    # the run is a genuine speedup: far fewer bins than band points
+    n_band = int(np.sum((freqs >= fmin) & (freqs <= fmax)))
+    assert like.n_bins < 0.2 * n_band
