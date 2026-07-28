@@ -323,7 +323,7 @@ two new classes and add to `__all__`.
 | RB-2 ✅ (modes) | `RelativeBinningFDLikelihoodHM`: per-mode / per-mode-pair per-bin `A`/`B` on FD modes (diagonal covariance — no cross-bin, no G-S) | **done** — exact at fiducial; parity vs dense multi-mode FD likelihood (`fd_dense_loglikelihood_modes`) to beta·(1+\|lnL\|). Works on FD modes directly; a production HM FD mode source is the only missing piece for end-to-end use |
 | RB-3 ✅ | `toeplitz.py`: autocorr + Levinson generators + Gohberg–Semencul matvec (JAX) | **done** — `C⁻¹v` vs dense to 1e-9..1e-11; round-trip; jit+vmap; ~3300x vs dense solve |
 | RB-4 ✅ (dominant + HM) | `relative_binning_td.py`: adaptive time bins + `A0/A1` and `B0/B1/B1b/B2/B3/B3b` summary data + hot path; `RelativeBinningTDLikelihoodHM` for higher modes (per-pair cross-mode tensors, Appendix A) | **done** — exact at fiducial; parity vs dense-Toeplitz (intrinsic/extrinsic/noisy) to `beta·(1+\|lnL\|)`; single-mode HM == dominant; ~370x (dominant) / ~74x (2-mode) speedup. Network, t_c: follow-on |
-| RB-5 | End-to-end PE + validation | P–P p>0.05; JS ~1e-3; measured speedup (~340× @128 s) |
+| RB-5 ◐ (posterior-level) | End-to-end PE + validation | **partial** — synthetic posterior-recovery test done (`test_td_posterior_recovery_vs_dense`): the heterodyned and dense-likelihood posteriors over an intrinsic parameter agree in mean/width, both peak at truth, and their **JS divergence < 1e-3** (the paper's acceptance level). Full production PE (real HM waveform + sampler + P–P over many injections) remains |
 
 **Risks:** (i) **Waveform-at-bin-edges** — the speedup needs modes evaluable at
 arbitrary (non-uniform) times. `NRSur7dq4`/JaxNRSur support this; EOB/expensive models

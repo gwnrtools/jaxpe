@@ -207,6 +207,58 @@ def test_td_relative_binning_faster_than_dense():
     assert speedup > 2.0, f"expected binned >> dense, got {speedup:.2f}x"
 
 
+# --------------------------------------------------------------------- posterior recovery
+
+
+def test_td_posterior_recovery_vs_dense():
+    """RB-5-style validation: the heterodyned *posterior* over an intrinsic parameter
+    matches the dense-likelihood posterior -- both peak at the truth with the same width
+    (the paper's acceptance criterion is agreement at the posterior level, not just
+    pointwise lnL)."""
+    times, u0, acf, data = _setup()  # zero-noise injection at MC0
+    like = RelativeBinningTDLikelihood(u0, times, data, acf, phase_per_bin=0.5)
+    edges = like.edge_indices
+    grid = np.linspace(MC0 - 0.06, MC0 + 0.06, 121)
+    lnl_het = np.array(
+        [
+            float(like.log_likelihood(jnp.asarray(_chirp_mode(times, mc)[edges]), P0))
+            for mc in grid
+        ]
+    )
+    lnl_dense = np.array(
+        [td_dense_loglikelihood(_chirp_mode(times, mc), P0, data, acf) for mc in grid]
+    )
+
+    def _moments(lnl):
+        w = np.exp(lnl - lnl.max())
+        w = w / w.sum()
+        mean = float(np.sum(w * grid))
+        std = float(np.sqrt(np.sum(w * (grid - mean) ** 2)))
+        return mean, std, w
+
+    m_h, s_h, w_h = _moments(lnl_het)
+    m_d, s_d, w_d = _moments(lnl_dense)
+    # both posteriors peak at the injected truth
+    assert abs(m_h - MC0) < 0.2 * s_d and abs(m_d - MC0) < 0.2 * s_d, (
+        m_h,
+        m_d,
+        MC0,
+        s_d,
+    )
+    # heterodyned and dense posteriors agree in mean and width
+    assert abs(m_h - m_d) < 0.05 * s_d, (m_h, m_d, s_d)
+    assert abs(s_h - s_d) < 0.05 * s_d, (s_h, s_d)
+    # and pointwise: Jensen-Shannon divergence between the two posteriors is tiny
+    mix = 0.5 * (w_h + w_d)
+
+    def _kl(p, q):
+        m = p > 0
+        return float(np.sum(p[m] * np.log(p[m] / q[m])))
+
+    js = 0.5 * _kl(w_h, mix) + 0.5 * _kl(w_d, mix)
+    assert js < 1e-3, js
+
+
 # --------------------------------------------------------------------- coalescence time
 
 
