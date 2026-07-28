@@ -46,11 +46,14 @@ def _ar1_acf(n, r=0.35, sigma2=1.0):
 
 def _chirp_mode_tc(t, mc, tc, k=90.0):
     """Time-covariant synthetic (2,2) mode: a function of (t - tc) only, so a t_c shift
-    is exactly ``u(t; tc + d) = u(t - d; tc)``. Support is the time window tau in (0.1, 0.9)."""
+    is exactly ``u(t; tc + d) = u(t - d; tc)``. Support is the time window tau in (0.1, 0.9).
+    """
     t = np.asarray(t, dtype=float)
     tau = tc - t
     x = (tau - 0.1) / 0.8
-    env = np.where((x > 0.0) & (x < 1.0), np.sin(np.pi * np.clip(x, 0.0, 1.0)) ** 2, 0.0)
+    env = np.where(
+        (x > 0.0) & (x < 1.0), np.sin(np.pi * np.clip(x, 0.0, 1.0)) ** 2, 0.0
+    )
     phase = -k * np.maximum(tau, 1e-3) ** 0.625 * mc ** (-0.625)
     return env * np.exp(1j * phase)
 
@@ -141,8 +144,12 @@ def test_finer_bins_reduce_error():
     dense = td_dense_loglikelihood(u, P0, data, acf)
     coarse = RelativeBinningTDLikelihood(u0, times, data, acf, phase_per_bin=3.0)
     fine = RelativeBinningTDLikelihood(u0, times, data, acf, phase_per_bin=0.3)
-    err_coarse = abs(float(coarse.log_likelihood(jnp.asarray(u[coarse.edge_indices]), P0)) - dense)
-    err_fine = abs(float(fine.log_likelihood(jnp.asarray(u[fine.edge_indices]), P0)) - dense)
+    err_coarse = abs(
+        float(coarse.log_likelihood(jnp.asarray(u[coarse.edge_indices]), P0)) - dense
+    )
+    err_fine = abs(
+        float(fine.log_likelihood(jnp.asarray(u[fine.edge_indices]), P0)) - dense
+    )
     assert fine.n_bins > coarse.n_bins
     assert err_fine <= err_coarse + 1e-9
 
@@ -157,6 +164,7 @@ def test_jittable():
 
 
 # --------------------------------------------------------------------- performance
+
 
 def test_td_relative_binning_faster_than_dense():
     """Heterodyned lnL (bin-edge modes + precomputed summary data) is much faster than
@@ -201,6 +209,7 @@ def test_td_relative_binning_faster_than_dense():
 
 # --------------------------------------------------------------------- coalescence time
 
+
 def test_tc_shift_parity():
     """A coalescence-time shift enters only through where the trial mode is sampled
     (edge_times - dt_c). Validate the heterodyned lnL against the dense reference for a
@@ -216,7 +225,14 @@ def test_tc_shift_parity():
     edge_t = np.asarray(like.edge_times)
 
     # dt_c == 0 recovers the fiducial exactly
-    assert abs(float(like.log_likelihood(jnp.asarray(_chirp_mode_tc(edge_t, MC0, tc0)), P0))) < 1e-4
+    assert (
+        abs(
+            float(
+                like.log_likelihood(jnp.asarray(_chirp_mode_tc(edge_t, MC0, tc0)), P0)
+            )
+        )
+        < 1e-4
+    )
 
     for dtc in (-0.004, -0.002, 0.002, 0.004):  # a few samples of shift
         # trial mode with shifted t_c, sampled at the (fixed) bin edges
@@ -229,6 +245,7 @@ def test_tc_shift_parity():
 
 
 # --------------------------------------------------------------------- higher modes
+
 
 def _hm_modes(times, mc):
     """Two synthetic modes: a slow '(2,2)' and a faster, weaker '(3,3)'."""
@@ -299,7 +316,9 @@ def test_hm_single_mode_matches_dominant():
     acf = _ar1_acf(1024, sigma2=2.5e-3)
     data = np.real(P0 * u0)
     dom = RelativeBinningTDLikelihood(u0, times, data, acf, phase_per_bin=1.0)
-    hm = RelativeBinningTDLikelihoodHM({(2, 2): u0}, times, data, acf, phase_per_bin=1.0)
+    hm = RelativeBinningTDLikelihoodHM(
+        {(2, 2): u0}, times, data, acf, phase_per_bin=1.0
+    )
     u = _chirp_mode(times, MC0 + 0.02)
     ed = dom.edge_indices
     a = float(dom.log_likelihood(jnp.asarray(u[ed]), P0))
@@ -346,6 +365,7 @@ def test_hm_faster_than_dense():
 
 # --------------------------------------------------------------------- network
 
+
 def test_td_network_equals_summed_dense():
     """A two-detector network lnL equals the sum of the per-detector dense likelihoods,
     and is exact at the fiducial."""
@@ -363,8 +383,12 @@ def test_td_network_equals_summed_dense():
     data_a = np.real(pa[:, None] * stack_a0).sum(0)
     data_b = np.real(pb[:, None] * stack_b0).sum(0)
 
-    like_a = RelativeBinningTDLikelihoodHM(modes_a, times, data_a, acf_a, phase_per_bin=1.0)
-    like_b = RelativeBinningTDLikelihoodHM(modes_b, times, data_b, acf_b, phase_per_bin=1.0)
+    like_a = RelativeBinningTDLikelihoodHM(
+        modes_a, times, data_a, acf_a, phase_per_bin=1.0
+    )
+    like_b = RelativeBinningTDLikelihoodHM(
+        modes_b, times, data_b, acf_b, phase_per_bin=1.0
+    )
     net = RelativeBinningTDNetwork([like_a, like_b])
 
     # exact at fiducial

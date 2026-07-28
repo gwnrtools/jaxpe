@@ -113,7 +113,9 @@ class RelativeBinningTDLikelihood:
         n = u0.shape[0]
 
         self.times = t
-        self._x = jnp.asarray(inverse_generator(acf))  # C^{-1} generator (Levinson, once)
+        self._x = jnp.asarray(
+            inverse_generator(acf)
+        )  # C^{-1} generator (Levinson, once)
 
         # w = C^{-1} d and the theta-independent 1/2 <d|d>
         w = np.asarray(inverse_matvec(self._x, jnp.asarray(d)))
@@ -128,7 +130,9 @@ class RelativeBinningTDLikelihood:
         t_c = 0.5 * (edge_t[:-1] + edge_t[1:])  # bin reference (center) times
 
         pts = np.arange(edges[0], edges[-1] + 1)  # supported samples
-        bin_id = np.clip(np.searchsorted(edges, pts, side="right") - 1, 0, self.n_bins - 1)
+        bin_id = np.clip(
+            np.searchsorted(edges, pts, side="right") - 1, 0, self.n_bins - 1
+        )
         dt = t[pts] - t_c[bin_id]  # (t_j - t_c(bin j)) over the support
         u0_s = u0[pts]
 
@@ -142,7 +146,9 @@ class RelativeBinningTDLikelihood:
         # the conjugate-mode tensors reuse these solves.
         pts_j = jnp.asarray(pts)
         onehot = (bin_id[None, :] == np.arange(self.n_bins)[:, None]).astype(float)
-        v0 = self._inverse_of_masked(onehot * u0_s[None, :], pts_j, n)[:, pts_j]  # (nb, npts)
+        v0 = self._inverse_of_masked(onehot * u0_s[None, :], pts_j, n)[
+            :, pts_j
+        ]  # (nb, npts)
         v1 = self._inverse_of_masked(onehot * (u0_s * dt)[None, :], pts_j, n)[:, pts_j]
 
         u0p = jnp.asarray(u0_s)  # (npts,)
@@ -243,17 +249,24 @@ class RelativeBinningTDLikelihoodHM:
         self.half_dd = 0.5 * float(d @ w)
 
         # shared bins from the mode with the largest total phase advance (fastest)
-        ref = max(keys, key=lambda k: float(np.sum(np.abs(np.diff(np.unwrap(np.angle(u0[k])))))))
+        ref = max(
+            keys,
+            key=lambda k: float(np.sum(np.abs(np.diff(np.unwrap(np.angle(u0[k])))))),
+        )
         edges = time_bin_edges(u0[ref], phase_per_bin=phase_per_bin)
         self.edge_indices = edges
         self.n_bins = int(edges.size - 1)
         edge_t = t[edges]
-        self.edge_times = jnp.asarray(edge_t)  # sample the trial modes here (t_c shifts these)
+        self.edge_times = jnp.asarray(
+            edge_t
+        )  # sample the trial modes here (t_c shifts these)
         self.dt_bin = jnp.asarray(np.diff(edge_t))
         t_c = 0.5 * (edge_t[:-1] + edge_t[1:])
 
         pts = np.arange(edges[0], edges[-1] + 1)
-        bin_id = np.clip(np.searchsorted(edges, pts, side="right") - 1, 0, self.n_bins - 1)
+        bin_id = np.clip(
+            np.searchsorted(edges, pts, side="right") - 1, 0, self.n_bins - 1
+        )
         dt = t[pts] - t_c[bin_id]
         pts_j = jnp.asarray(pts)
         idx = jnp.asarray(bin_id)
@@ -263,16 +276,27 @@ class RelativeBinningTDLikelihoodHM:
         red = jax.vmap(lambda row: jax.ops.segment_sum(row, idx, num_segments=nb))
 
         # per-mode A summary data, edge samples, and C^{-1}(mode 1_b2), C^{-1}(mode dt 1_b2)
-        self.A0 = jnp.stack([jnp.asarray(_bin_reduce(w[pts] * u0[k][pts], bin_id, nb)) for k in keys])
-        self.A1 = jnp.stack([jnp.asarray(_bin_reduce(w[pts] * u0[k][pts] * dt, bin_id, nb)) for k in keys])
-        self.u0_edges = jnp.stack([jnp.asarray(u0[k][edges]) for k in keys])  # (M, nb+1)
+        self.A0 = jnp.stack(
+            [jnp.asarray(_bin_reduce(w[pts] * u0[k][pts], bin_id, nb)) for k in keys]
+        )
+        self.A1 = jnp.stack(
+            [
+                jnp.asarray(_bin_reduce(w[pts] * u0[k][pts] * dt, bin_id, nb))
+                for k in keys
+            ]
+        )
+        self.u0_edges = jnp.stack(
+            [jnp.asarray(u0[k][edges]) for k in keys]
+        )  # (M, nb+1)
 
         u0p = {k: jnp.asarray(u0[k][pts]) for k in keys}  # (npts,)
         v0 = {}
         v1 = {}
         for k in keys:
             v0[k] = self._inv_masked(onehot * u0[k][pts][None, :], pts_j, n)[:, pts_j]
-            v1[k] = self._inv_masked(onehot * (u0[k][pts] * dt)[None, :], pts_j, n)[:, pts_j]
+            v1[k] = self._inv_masked(onehot * (u0[k][pts] * dt)[None, :], pts_j, n)[
+                :, pts_j
+            ]
 
         # cross-mode B tensors, stacked as (M, M, nb, nb) with indices [a, b, b1, b2]
         def pair(fn):
