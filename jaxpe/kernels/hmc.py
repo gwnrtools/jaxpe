@@ -34,18 +34,26 @@ vmaps cleanly in JAX (unlike NUTS-style dynamic trees). A per-dimension ``scale`
 plays the role of $\sqrt{M^{-1}}$ (square root of the inverse mass diagonal):
 momenta are drawn as $p \sim \mathcal{N}(0, \text{diag}(1/d^2))$ and the kinetic
 energy is $K(p) = \frac{1}{2} ||d * p||^2$.
+
+For strongly correlated targets, ``scale`` may instead be a **lower-triangular
+Cholesky factor** $L$ with $M^{-1} = L L^T$ (e.g. ``chol(ensemble_cov(samples))``):
+momenta are drawn as $p = L^{-T} v$, $v \sim \mathcal{N}(0, I)$ (so $p \sim
+\mathcal{N}(0, M)$), the position update uses $M^{-1} p = L (L^T p)$, and the kinetic
+energy is $K(p) = \frac{1}{2} ||L^T p||^2$. The diagonal case is recovered exactly
+for $L = \text{diag}(d)$.
 """
 
 from typing import ClassVar
 
 import jax
 import jax.numpy as jnp
+from jax.scipy.linalg import solve_triangular
 
 from .base import Kernel, KernelState, LogProbFn, mh_accept
 
 
 class HMC(Kernel):
-    """
+    r"""
     Hamiltonian Monte Carlo Kernel.
 
     Proposes new states by numerically integrating Hamilton's equations using the
@@ -59,32 +67,46 @@ class HMC(Kernel):
         The number of leapfrog steps per proposal. The total integration time is
         $\epsilon \times \text{n\_leapfrog}$.
     scale : jax.Array | None, default=None
-        The diagonal of the inverse mass matrix $\sqrt{M^{-1}}$. If None, defaults to
-        the identity matrix ($d=1$).
+        Square root of the inverse mass matrix $\sqrt{M^{-1}}$: either its diagonal
+        (shape ``(n_dim,)``), or a dense lower-triangular Cholesky factor $L$ with
+        $M^{-1} = L L^T$ (shape ``(n_dim, n_dim)``). If None, the identity is used.
     """
 
     needs_gradient: ClassVar[bool] = True
     step_size: jax.Array
     n_leapfrog: int = 10
-    scale: jax.Array | None = None  # (n_dim,) ~ sqrt(inverse mass) diagonal
+    scale: jax.Array | None = None  # (n_dim,) diag or (n_dim, n_dim) lower-tri chol
 
     def __init__(self, step_size: float, n_leapfrog: int = 10, scale=None):
         self.step_size = jnp.asarray(step_size)
         self.n_leapfrog = n_leapfrog
         self.scale = None if scale is None else jnp.asarray(scale)
 
+    def _mass_ops(self):
+        """(momentum draw from N(0, M), inverse-mass matvec, sqrt(M^-1)^T matvec)."""
+        d = self.scale
+        if d is None:
+            return (lambda v: v), (lambda p: p), (lambda p: p)
+        if d.ndim == 1:
+            return (lambda v: v / d), (lambda p: d**2 * p), (lambda p: d * p)
+        return (
+            lambda v: solve_triangular(d.T, v, lower=False),
+            lambda p: d @ (d.T @ p),
+            lambda p: d.T @ p,
+        )
+
     def step(self, key, state: KernelState, logp_fn: LogProbFn):
         key_mom, key_acc = jax.random.split(key)
-        d = 1.0 if self.scale is None else self.scale
+        draw, m_inv, half_t = self._mass_ops()
         eps = self.step_size
         grad_fn = jax.value_and_grad(logp_fn)
 
-        p0 = jax.random.normal(key_mom, state.x.shape, state.x.dtype) / d
+        p0 = draw(jax.random.normal(key_mom, state.x.shape, state.x.dtype))
 
         def leapfrog(carry, _):
             x, p, grad = carry
             p = p + 0.5 * eps * grad
-            x = x + eps * d**2 * p
+            x = x + eps * m_inv(p)
             _, grad = grad_fn(x)
             p = p + 0.5 * eps * grad
             return (x, p, grad), None
@@ -94,8 +116,8 @@ class HMC(Kernel):
         )
         logp_new = logp_fn(x_new)
 
-        kinetic0 = 0.5 * jnp.sum((d * p0) ** 2)
-        kinetic1 = 0.5 * jnp.sum((d * p_new) ** 2)
+        kinetic0 = 0.5 * jnp.sum(half_t(p0) ** 2)
+        kinetic1 = 0.5 * jnp.sum(half_t(p_new) ** 2)
         proposal = KernelState(x=x_new, log_prob=logp_new, grad=grad_new)
         log_ratio = logp_new - state.log_prob + kinetic0 - kinetic1
         return mh_accept(key_acc, state, proposal, log_ratio)

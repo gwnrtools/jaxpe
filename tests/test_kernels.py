@@ -40,6 +40,8 @@ KERNELS = [
     RandomWalk(step_size=0.35),
     MALA(step_size=0.5),
     HMC(step_size=0.35, n_leapfrog=8),
+    # dense mass matrix M^-1 = L L^T: near-ideal preconditioning, large steps possible
+    HMC(step_size=0.9, n_leapfrog=8, scale=np.linalg.cholesky(COV)),
     # exact constant metric: near-ideal preconditioning, large steps possible
     MMALA(step_size=1.2, metric_fn=lambda x: COV_INV),
     # constant dense proposal covariance (dense-mass MALA path)
@@ -50,7 +52,7 @@ KERNELS = [
 @pytest.mark.parametrize(
     "kernel",
     KERNELS,
-    ids=["RandomWalk", "MALA", "HMC", "MMALA-metric", "MMALA-cov"],
+    ids=["RandomWalk", "MALA", "HMC", "HMC-dense", "MMALA-metric", "MMALA-cov"],
 )
 def test_kernel_recovers_gaussian_moments(kernel):
     key = jax.random.PRNGKey(0)
@@ -72,6 +74,41 @@ def test_kernel_recovers_gaussian_moments(kernel):
     assert np.all(
         np.abs(cov_est - np.asarray(COV)) < cov_tol
     ), f"cov error\n{cov_est - np.asarray(COV)}"
+
+
+def test_hmc_dense_mass_matches_diagonal_case():
+    """A diagonal Cholesky factor must reproduce the vector-scale HMC step exactly."""
+    d = jnp.asarray(STD)
+    k_diag = HMC(step_size=0.3, n_leapfrog=6, scale=d)
+    k_dense = HMC(step_size=0.3, n_leapfrog=6, scale=jnp.diag(d))
+    key = jax.random.PRNGKey(7)
+    x = jnp.asarray(MEAN + 0.3)
+    s_diag = k_diag.init(x, logp)
+    s_dense = k_dense.init(x, logp)
+    out_diag, info_diag = k_diag.step(key, s_diag, logp)
+    out_dense, info_dense = k_dense.step(key, s_dense, logp)
+    np.testing.assert_allclose(out_diag.x, out_dense.x, rtol=1e-12)
+    np.testing.assert_allclose(
+        info_diag.log_accept_ratio, info_dense.log_accept_ratio, rtol=1e-9, atol=1e-12
+    )
+
+
+def test_hmc_dense_mass_improves_acceptance_on_correlated_target():
+    """With the target's Cholesky as mass, HMC at a large step accepts far more."""
+    key = jax.random.PRNGKey(8)
+    x0 = jax.random.normal(key, (32, N_DIM)) + MEAN
+    eps = 0.9
+    _, _, _, info_plain = run_chains(
+        key, HMC(step_size=eps, n_leapfrog=8), logp, x0, 300
+    )
+    _, _, _, info_dense = run_chains(
+        key,
+        HMC(step_size=eps, n_leapfrog=8, scale=np.linalg.cholesky(COV)),
+        logp,
+        x0,
+        300,
+    )
+    assert jnp.mean(info_dense.accepted) > jnp.mean(info_plain.accepted) + 0.2
 
 
 def test_mala_preconditioner_improves_acceptance():
