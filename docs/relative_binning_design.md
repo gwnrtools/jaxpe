@@ -6,13 +6,19 @@ nav_order: 102
 
 # Design Note: Relative Binning in jaxpe (Fourier- and Time-Domain)
 
-**Status:** design drafted 2026-07; decisions D-RB1..4 accepted. **Phase RB-1
-(Fourier-domain, dominant mode) implemented** in
-[`relative_binning_fd.py`](../jaxpe/gw/likelihood/relative_binning_fd.py) +
-[`tests/test_relative_binning_fd.py`](../tests/test_relative_binning_fd.py) (exact at
-the fiducial; parity with `FDNetworkLikelihood` to the Zackay beta error model;
-measured ~12x faster at 8 s / 2048 Hz, 5441 band points -> 62 bins). RB-2..5 not
-started.
+**Status:** design drafted 2026-07; decisions D-RB1..4 accepted. **Implemented:**
+RB-1 (FD, dominant mode) in
+[`relative_binning_fd.py`](../jaxpe/gw/likelihood/relative_binning_fd.py); RB-3
+(Toeplitz/Gohberg–Semencul infrastructure) in
+[`toeplitz.py`](../jaxpe/gw/likelihood/toeplitz.py); RB-4 (TD heterodyned
+likelihood, dominant mode) in
+[`relative_binning_td.py`](../jaxpe/gw/likelihood/relative_binning_td.py). All exact
+at the fiducial and validated against the exact reference to the Zackay
+`beta*(1+|lnL|)` error model, with measured speedups (FD ~12x, TD ~370x vs dense,
+Gohberg–Semencul `C⁻¹v` ~3300x vs dense solve). **Not started:** RB-2 (FD higher
+modes — blocked: no higher-mode FD waveform model in jaxpe to test against) and the
+RB-4 follow-ons (per-mode HM Appendix-A tensors, detector network, t_c
+marginalization, RB-5 end-to-end PE).
 **Companion notes:** [`gpry_fusion_design.md`](gpry_fusion_design.md) (surrogate route,
 mode-based marginalization — shares the `ModesData` machinery this note reuses).
 
@@ -311,8 +317,8 @@ two new classes and add to `__all__`.
 |---|---|---|
 | RB-1 ✅ | `relative_binning_fd.py`: Zackay bin scheme + `RelativeBinningFDLikelihood` (dominant mode) | **done** — exact at fiducial; parity to beta·(1+\|lnL\|); ~12x speedup; support-restriction handled (band beyond ringdown cutoff) |
 | RB-2 | FD higher modes (per-mode `A/B`) | HM injection lnL parity vs full-resolution HM likelihood |
-| RB-3 | `toeplitz.py`: autocorr + Levinson generators + Gohberg–Semencul matvec (JAX) | `C⁻¹v` vs dense `np.linalg.solve` to 1e-10 on small N; `O(N log N)` scaling reproduced (paper Fig. 8) |
-| RB-4 | `RelativeBinningTDLikelihood` (HM): adaptive bins + per-mode `A`/`B` summary data + hot path | lnL vs dense-Toeplitz to setup tol; bin-sufficiency check (App. C) |
+| RB-3 ✅ | `toeplitz.py`: autocorr + Levinson generators + Gohberg–Semencul matvec (JAX) | **done** — `C⁻¹v` vs dense to 1e-9..1e-11; round-trip; jit+vmap; ~3300x vs dense solve |
+| RB-4 ✅ (dominant) | `relative_binning_td.py`: adaptive time bins + `A0/A1`, `B0/B1/B2/B3/B3b` summary data + hot path | **done** — exact at fiducial; parity vs dense-Toeplitz (intrinsic/extrinsic/noisy) to `beta·(1+\|lnL\|)`; ~370x speedup. HM Appendix-A tensors, network, t_c: follow-on |
 | RB-5 | End-to-end PE + validation | P–P p>0.05; JS ~1e-3; measured speedup (~340× @128 s) |
 
 **Risks:** (i) **Waveform-at-bin-edges** — the speedup needs modes evaluable at
