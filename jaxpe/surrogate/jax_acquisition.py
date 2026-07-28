@@ -1,3 +1,15 @@
+"""JAX-native Gaussian Process acquisition functions for GPry.
+
+This module provides pure JAX implementations of Gaussian Process predictive
+functions (mean and covariance) and interfaces them with BlackJAX's Nested
+Sampling algorithms. This circumvents the slow per-iteration compilation that
+would otherwise occur when GPry dynamically grows its training set.
+
+By extracting the GP state as explicit JAX arrays and passing them to padded
+JIT-compiled closures, the acquisition sampler achieves massive speedups
+(especially on GPU) while remaining fully integrated with GPry's active learning.
+"""
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -176,6 +188,19 @@ class JAXInterfaceBlackJAX(InterfaceBlackJAX):
 
     The closure-based ``run`` (below) is retained as a generic fallback for an arbitrary
     ``logp_func``; the pipeline uses ``run_predictive``.
+
+    Parameters
+    ----------
+    dim : int
+        The dimensionality of the parameter space.
+    bounds : tuple
+        The prior bounds on the parameters.
+    param_names : list of str, optional
+        The names of the parameters being sampled.
+    precision_settings : dict, optional
+        Settings governing the Nested Sampling stopping criteria and iterations.
+    ns_kwargs : dict, optional
+        Additional keyword arguments to configure the BlackJAX NS sampler.
     """
 
     def _resolve_param_names(self, param_names):

@@ -31,6 +31,16 @@ class Prior(eqx.Module):
 
 
 class Uniform(Prior):
+    """A uniform prior distribution on the interval [low, high].
+
+    Parameters
+    ----------
+    low : float
+        Lower bound of the uniform distribution.
+    high : float
+        Upper bound of the uniform distribution.
+    """
+
     low: float
     high: float
 
@@ -47,7 +57,17 @@ class Uniform(Prior):
 
 
 class LogUniform(Prior):
-    """p(x) proportional to 1/x on [low, high], low > 0."""
+    """A log-uniform prior distribution where p(x) is proportional to 1/x.
+
+    The distribution is supported on the interval [low, high].
+
+    Parameters
+    ----------
+    low : float
+        Lower bound of the distribution. Must be strictly positive (> 0).
+    high : float
+        Upper bound of the distribution.
+    """
 
     low: float
     high: float
@@ -67,7 +87,20 @@ class LogUniform(Prior):
 
 
 class PowerLaw(Prior):
-    """p(x) proportional to x**alpha on [low, high]; alpha must not be -1 (use LogUniform)."""
+    """A power-law prior distribution where p(x) is proportional to x**alpha.
+
+    The distribution is supported on the interval [low, high].
+    Note: alpha must not be -1; for that case, use :class:`LogUniform`.
+
+    Parameters
+    ----------
+    alpha : float
+        The spectral index of the power law.
+    low : float
+        Lower bound of the distribution.
+    high : float
+        Upper bound of the distribution.
+    """
 
     alpha: float
     low: float
@@ -94,7 +127,18 @@ class PowerLaw(Prior):
 
 
 class Sine(Prior):
-    """p(x) proportional to sin(x) on [low, high] within [0, pi] (e.g. inclination)."""
+    """A prior distribution proportional to sin(x).
+
+    Commonly used for angles like inclination where the solid angle goes as sin(x) dx.
+    The support is [low, high] and must be contained within [0, pi].
+
+    Parameters
+    ----------
+    low : float, default=0.0
+        Lower bound of the distribution.
+    high : float, default=pi
+        Upper bound of the distribution.
+    """
 
     low: float = 0.0
     high: float = jnp.pi
@@ -116,7 +160,18 @@ class Sine(Prior):
 
 
 class Cosine(Prior):
-    """p(x) proportional to cos(x) on [low, high] within [-pi/2, pi/2] (e.g. declination)."""
+    """A prior distribution proportional to cos(x).
+
+    Commonly used for angles like declination where the solid angle goes as cos(x) dx.
+    The support is [low, high] and must be contained within [-pi/2, pi/2].
+
+    Parameters
+    ----------
+    low : float, default=-pi/2
+        Lower bound of the distribution.
+    high : float, default=pi/2
+        Upper bound of the distribution.
+    """
 
     low: float = -jnp.pi / 2
     high: float = jnp.pi / 2
@@ -138,6 +193,16 @@ class Cosine(Prior):
 
 
 class Gaussian(Prior):
+    """A standard Gaussian (Normal) prior distribution.
+
+    Parameters
+    ----------
+    mu : float, default=0.0
+        Mean of the Gaussian distribution.
+    sigma : float, default=1.0
+        Standard deviation of the Gaussian distribution.
+    """
+
     mu: float = 0.0
     sigma: float = 1.0
 
@@ -154,7 +219,16 @@ class Gaussian(Prior):
 
 
 class Fixed(Prior):
-    """A parameter pinned to a constant (delta prior); still occupies a slot for simplicity."""
+    """A parameter pinned to a constant value (a delta prior).
+
+    This prior still occupies a slot in the parameter vector for simplicity of
+    array operations, but its bijection is the identity and it has zero density.
+
+    Parameters
+    ----------
+    value : float
+        The constant value to which the parameter is pinned.
+    """
 
     value: float
 

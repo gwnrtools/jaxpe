@@ -30,6 +30,11 @@ class Bijection(eqx.Module):
 
 
 class Identity(Bijection):
+    """The identity map f(y) = y.
+
+    This bijection leaves the coordinate unchanged and has a zero log-Jacobian.
+    """
+
     def forward(self, y):
         return y
 
@@ -41,7 +46,17 @@ class Identity(Bijection):
 
 
 class Affine(Bijection):
-    """x = loc + scale * y (scale > 0)."""
+    """An affine transformation mapping y to x = loc + scale * y.
+
+    Used to shift and scale the unconstrained coordinate.
+
+    Parameters
+    ----------
+    loc : float
+        The shift or location parameter.
+    scale : float
+        The scale multiplier. Must be strictly positive (> 0).
+    """
 
     loc: float
     scale: float
@@ -57,7 +72,18 @@ class Affine(Bijection):
 
 
 class Interval(Bijection):
-    """x = low + (high - low) * sigmoid(y), mapping R onto (low, high)."""
+    """A bounded transformation mapping the real line R onto the open interval (low, high).
+
+    The mapping is defined by x = low + (high - low) * sigmoid(y), where sigmoid
+    is the logistic function.
+
+    Parameters
+    ----------
+    low : float
+        The lower bound of the physical interval.
+    high : float
+        The upper bound of the physical interval.
+    """
 
     low: float
     high: float
