@@ -248,6 +248,7 @@ class RelativeBinningTDLikelihoodHM:
         self.edge_indices = edges
         self.n_bins = int(edges.size - 1)
         edge_t = t[edges]
+        self.edge_times = jnp.asarray(edge_t)  # sample the trial modes here (t_c shifts these)
         self.dt_bin = jnp.asarray(np.diff(edge_t))
         t_c = 0.5 * (edge_t[:-1] + edge_t[1:])
 

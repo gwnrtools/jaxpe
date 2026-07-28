@@ -44,6 +44,17 @@ def _ar1_acf(n, r=0.35, sigma2=1.0):
     return sigma2 * r ** np.arange(n)
 
 
+def _chirp_mode_tc(t, mc, tc, k=90.0):
+    """Time-covariant synthetic (2,2) mode: a function of (t - tc) only, so a t_c shift
+    is exactly ``u(t; tc + d) = u(t - d; tc)``. Support is the time window tau in (0.1, 0.9)."""
+    t = np.asarray(t, dtype=float)
+    tau = tc - t
+    x = (tau - 0.1) / 0.8
+    env = np.where((x > 0.0) & (x < 1.0), np.sin(np.pi * np.clip(x, 0.0, 1.0)) ** 2, 0.0)
+    phase = -k * np.maximum(tau, 1e-3) ** 0.625 * mc ** (-0.625)
+    return env * np.exp(1j * phase)
+
+
 P0 = 1.3 - 0.4j  # fiducial extrinsic coefficient
 MC0 = 1.0
 
@@ -186,6 +197,35 @@ def test_td_relative_binning_faster_than_dense():
         f"dense={t_dense * 1e3:.3f} ms, binned={t_bin * 1e3:.3f} ms, speedup={speedup:.1f}x"
     )
     assert speedup > 2.0, f"expected binned >> dense, got {speedup:.2f}x"
+
+
+# --------------------------------------------------------------------- coalescence time
+
+def test_tc_shift_parity():
+    """A coalescence-time shift enters only through where the trial mode is sampled
+    (edge_times - dt_c). Validate the heterodyned lnL against the dense reference for a
+    trial whose t_c differs from the fiducial's."""
+    n = 1024
+    fs = 1024.0
+    times = np.arange(n) / fs
+    tc0 = 0.95  # merger near the end; support window sits inside the grid
+    u0 = _chirp_mode_tc(times, MC0, tc0)
+    acf = _ar1_acf(n, sigma2=2.5e-3)
+    data = np.real(P0 * u0)
+    like = RelativeBinningTDLikelihood(u0, times, data, acf, phase_per_bin=1.0)
+    edge_t = np.asarray(like.edge_times)
+
+    # dt_c == 0 recovers the fiducial exactly
+    assert abs(float(like.log_likelihood(jnp.asarray(_chirp_mode_tc(edge_t, MC0, tc0)), P0))) < 1e-4
+
+    for dtc in (-0.004, -0.002, 0.002, 0.004):  # a few samples of shift
+        # trial mode with shifted t_c, sampled at the (fixed) bin edges
+        trial_edges = _chirp_mode_tc(edge_t, MC0, tc0 + dtc)
+        binned = float(like.log_likelihood(jnp.asarray(trial_edges), P0))
+        # dense reference: the same shifted mode at full time resolution
+        u_full = _chirp_mode_tc(times, MC0, tc0 + dtc)
+        dense = td_dense_loglikelihood(u_full, P0, data, acf)
+        assert abs(binned - dense) < _beta_tol(dense), (dtc, binned, dense)
 
 
 # --------------------------------------------------------------------- higher modes
