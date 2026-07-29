@@ -418,10 +418,24 @@ elementwise work over 126 points; HLO instruction count is not time.
 Two further facts kill the "it's all inspiral for a BNS anyway" shortcut: of the 126
 bin edges, only 93 lie below the phase transition f1 = 1305 Hz and 79 below the
 amplitude transition f3 = 1015 Hz. A correct partition therefore has to evaluate two
-regions with a gather/scatter, not one. The change remains sound engineering and
-fully general — the partition is derivable from the prior's mass support at setup,
-so it is not a BNS specialisation — but it is a ~6 % change to a 4000-line waveform
-module, and it is not the route to 4 minutes.
+regions with a gather/scatter, not one.
+
+**Ruled out, not deferred.** Optimizations may not alter the physics of the
+templates — no dropping waveform content, no reduced-frequency-content
+approximations, no reduced precision in the template evaluation. The partition
+sketched above would have been numerically exact (it skips branches whose heaviside
+weight is identically zero, and the region membership is derived from the prior's
+mass support, not from the source), but it edits the waveform module for ~6 %, and
+that is not a trade worth making against this constraint. The same constraint is why
+[float32](#what-did-not-work-measured-do-not-retry) is rejected on correctness
+grounds rather than merely noted as risky. **Every timing on this page evaluates the
+full three-region IMRPhenomD in float64.**
+
+The speedups that did land are all *sampler-side* — where the chains are, how far the
+proposals reach, what the step size is adapted against — and none of them touch the
+likelihood or the waveform. In particular the flow supplies Metropolis–Hastings
+proposals, so the target density is preserved exactly however good or bad the flow
+is; a poor flow costs efficiency, never correctness.
 
 #### Where the time actually goes
 

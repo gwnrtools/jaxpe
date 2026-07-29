@@ -496,7 +496,13 @@ def run_pe(problem, y_map, cov0, args, timings):
 
     t0 = time.perf_counter()
     key, k_make, k_fit = jax.random.split(key, 3)
-    flow = make_flow(k_make, n_dim, interval=8.0)
+    # RQ-spline interval: outside it the transform is the IDENTITY, so the far
+    # tails are proposed as-if Gaussian. The eta -> 1/4 and spin -> 0 pileups
+    # give Exponential(~1) tails in unconstrained space, and those tails are the
+    # measured laggard -- spin1z is the last direction to clear the Rhat gate in
+    # every run. Raising 5 -> 8 already helped (see the ledger); exposed here so
+    # the rest of the range is testable rather than assumed.
+    flow = make_flow(k_make, n_dim, interval=args.flow_interval)
     flow, losses = fit_flow(
         k_fit, flow, flow_train_set(k_fit), n_epochs=args.flow_epochs, batch_size=512
     )
@@ -519,13 +525,14 @@ def run_pe(problem, y_map, cov0, args, timings):
     # stationary distribution at all, and production then starts from equilibrated
     # chains with a flow good enough to decorrelate them in a single block.
     t0 = time.perf_counter()
+    n_global_equil = getattr(args, "n_global_equil", None) or args.n_global
     logp0 = jax.vmap(logp)(y0)
     eq_accs = []
     eq_spread = []
     for rnd in range(args.equil_rounds):
         key, k_eq, k_fit = jax.random.split(key, 3)
         y0, logp0, gys, glps, eq_acc = _global_block(
-            flow, k_eq, y0, logp0, logp, args.n_global
+            flow, k_eq, y0, logp0, logp, n_global_equil
         )
         eq_accs.append(float(eq_acc))
         # Keep only draws that are actually in the posterior bulk before using them
@@ -676,7 +683,7 @@ def run_pe(problem, y_map, cov0, args, timings):
         else f"; re-tuned step_size -> {float(kernel.step_size):.3g} (acc {acc_rt:.2f})"
     )
     print(
-        f"equilibration: {len(eq_accs)} discarded flow rounds x {args.n_global}, "
+        f"equilibration: {len(eq_accs)} discarded flow rounds x {n_global_equil}, "
         f"acceptance {' -> '.join(f'{a:.2f}' for a in eq_accs)}{retune_note}  "
         f"[{timings['equilibration']:.1f}s]"
     )
@@ -852,6 +859,7 @@ def main():
         help="Robbins-Monro gain for warmup step-size adaptation",
     )
     ap.add_argument("--flow-acc-target", type=float, default=0.65)
+    ap.add_argument("--flow-interval", type=float, default=8.0)
     ap.add_argument(
         "--reference",
         action="store_true",
@@ -863,6 +871,12 @@ def main():
     ap.add_argument("--production-steps", type=int, default=25)
     ap.add_argument("--thin", type=int, default=2)
     ap.add_argument("--n-global", type=int, default=1200)
+    # Equilibration and production both spend flow proposals, but for different
+    # reasons -- equilibration to TRAIN the flow and spread the chains, production
+    # to accumulate near-independent draws for Rhat. Tying them to one knob makes
+    # any sweep of the production count silently pay for it twice in setup, so the
+    # equilibration count is separable (defaults to --n-global for continuity).
+    ap.add_argument("--n-global-equil", type=int, default=None)
     # A safety stop only -- --max-minutes is the real budget guard. It was 40, which
     # a 1.35+1.25 Msun source hit at Rhat 1.0107 and so reported as NOT converged
     # despite being ~2 blocks short; a cap that turns "needs a bit longer" into
