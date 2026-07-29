@@ -637,8 +637,13 @@ Measured warm and in situ, a 6.6 s production block at the shipped configuration
 | flow refit, amortized over 4 blocks | ~0.4 s |
 | **sum** | **~6.3 s** (measured block: 6.6 s) |
 
-The budget closes to within ~5 %, so **there is no unaccounted overhead left to
-remove**. The earlier "~2 s per block unexplained" was an artefact of costing the
+The budget closes to within ~5 % at *this* configuration. **A later test showed that
+is weaker evidence than it looks:** halving `--production-steps` 25 -> 12 should have
+removed ~1.8 s of local HMC per block by this decomposition, and block cost fell only
+6.6 -> 6.4 s (while the block count rose 25 -> 30, so the change is a clear net loss
+at 5.27 min). A sum that balances at one point is not a validated decomposition -- it
+does not predict scaling, and it should not have been presented as proof that no
+overhead remains. The earlier "~2 s per block unexplained" was an artefact of costing the
 local block with a standalone `vmap(grad(loglike))` at 3.228 ms/gradient; the sampler
 differentiates `log_posterior` (likelihood + prior + sigmoid Jacobian) *inside a
 scan*, which measures 4.496 ms/gradient. Two lessons repeat here: a component must be
