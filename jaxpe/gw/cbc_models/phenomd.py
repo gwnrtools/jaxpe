@@ -3117,6 +3117,32 @@ _QNM_A_MAX = float(QNMData_a[-1])  # 1.0
 _QNM_SCALE = (_QNM_N - 1) / (_QNM_A_MAX - _QNM_A_MIN)
 
 
+def _value_and_deriv(fn, x):
+    r"""``(fn(x), dfn/dx)`` for a scalar argument, computed in forward mode.
+
+    Mathematically identical to ``jax.value_and_grad(fn)(x)`` here -- for a
+    scalar-to-scalar map the JVP with unit tangent *is* the derivative -- but it
+    composes far more cheaply with the outer differentiation that samplers apply
+    to the whole waveform.
+
+    PhenomD needs derivatives *internally*, to match the inspiral / intermediate /
+    ringdown pieces with C(1) continuity. Written with ``value_and_grad`` those
+    become reverse-mode graphs, so a sampler's own reverse-mode gradient with
+    respect to the source parameters differentiates through them a second time --
+    reverse-over-reverse, which XLA expands enormously. Measured on the phase:
+    the value graph is ~600 HLO instructions and its parameter-gradient was
+    ~13600 (a 22x blow-up, where plain reverse mode costs 2-4x). Forward mode
+    inside, reverse mode outside, is the cheap composition and leaves the
+    computed numbers unchanged.
+    """
+    return jax.jvp(fn, (x,), (jnp.ones_like(x),))
+
+
+def _deriv(fn, x):
+    """``dfn/dx`` alone, forward mode. See :func:`_value_and_deriv`."""
+    return _value_and_deriv(fn, x)[1]
+
+
 def _qnm_interp(x, table):
     """Linear interp on the uniform QNMData_a grid in O(1) index arithmetic."""
     t = (x - _QNM_A_MIN) * _QNM_SCALE
@@ -4099,8 +4125,10 @@ def get_IIa_Amp(
 
     # For this region, we also need to calculate the the values and derivatives
     # of the Ins and IIb regions
-    v1, d1 = jax.value_and_grad(get_inspiral_Amp)(f1 * M_s, theta, coeffs)
-    v3, d3 = jax.value_and_grad(get_IIb_Amp)(f3 * M_s, theta, coeffs, f_RD, f_damp)
+    v1, d1 = _value_and_deriv(lambda x: get_inspiral_Amp(x, theta, coeffs), f1 * M_s)
+    v3, d3 = _value_and_deriv(
+        lambda x: get_IIb_Amp(x, theta, coeffs, f_RD, f_damp), f3 * M_s
+    )
 
     # Here we need the delta solutions
     delta0 = get_delta0(f1 * M_s, f2 * M_s, f3 * M_s, v1, coeffs[3], v3, d1, d3)
@@ -4186,11 +4214,11 @@ def Phase(
     # ==> phi_IIa'(f1*M_s) + beta1_correction = phi_Ins'(f1*M_s)
     # ==> beta1_correction = phi_Ins'(f1*M_s) - phi_IIa'(f1*M_s)
     # ==> beta0 = phi_Ins(f1*M_s) - phi_IIa(f1*M_s) - beta1_correction*(f1*M_s)
-    phi_Ins_f1, dphi_Ins_f1 = jax.value_and_grad(get_inspiral_phase)(
-        f1 * M_s, theta, coeffs
+    phi_Ins_f1, dphi_Ins_f1 = _value_and_deriv(
+        lambda x: get_inspiral_phase(x, theta, coeffs), f1 * M_s
     )
-    phi_IIa_f1, dphi_IIa_f1 = jax.value_and_grad(get_IIa_raw_phase)(
-        f1 * M_s, theta, coeffs
+    phi_IIa_f1, dphi_IIa_f1 = _value_and_deriv(
+        lambda x: get_IIa_raw_phase(x, theta, coeffs), f1 * M_s
     )
 
     beta1_correction = dphi_Ins_f1 - dphi_IIa_f1
@@ -4206,9 +4234,10 @@ def Phase(
     # ==> phi_IIb'(f2*M_s) + a1_correction = phi_IIa'(f2*M_s)
     # ==> a1_correction = phi_IIa'(f2*M_s) - phi_IIb'(f2*M_s)
     # ==> a0 = phi_IIa(f2*M_s) - phi_IIb(f2*M_s) - beta1_correction*(f2*M_s)
-    phi_IIa_f2, dphi_IIa_f2 = jax.value_and_grad(phi_IIa_func)(f2 * M_s)
-    phi_IIb_f2, dphi_IIb_f2 = jax.value_and_grad(get_IIb_raw_phase)(
-        f2 * M_s, theta, coeffs, f_RD, f_damp, Rholm, Taulm
+    phi_IIa_f2, dphi_IIa_f2 = _value_and_deriv(phi_IIa_func, f2 * M_s)
+    phi_IIb_f2, dphi_IIb_f2 = _value_and_deriv(
+        lambda x: get_IIb_raw_phase(x, theta, coeffs, f_RD, f_damp, Rholm, Taulm),
+        f2 * M_s,
     )
 
     a1_correction = dphi_IIa_f2 - dphi_IIb_f2
@@ -4357,7 +4386,9 @@ def _gen_IMRPhenomD(
     # Shift phase so that peak amplitude matches t = 0
     transition_freqs = get_transition_frequencies(theta_intrinsic, coeffs[5], coeffs[6])
     _, _, _, f4, f_RD, f_damp = transition_freqs
-    t0 = jax.grad(get_IIb_raw_phase)(f4 * M_s, theta_intrinsic, coeffs, f_RD, f_damp)
+    t0 = _deriv(
+        lambda x: get_IIb_raw_phase(x, theta_intrinsic, coeffs, f_RD, f_damp), f4 * M_s
+    )
 
     # Lets call the amplitude and phase now
     Psi = Phase(f, theta_intrinsic, coeffs, transition_freqs)
