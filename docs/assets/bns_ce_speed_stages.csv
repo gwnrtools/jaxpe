@@ -16,3 +16,7 @@ flow spline interval 8 -> 32 (seed 7),40.61,42.90,77.35,480.85,642.73,55,1.0094,
 ensemble-covariance metric (local acc 0.00),40.58,42.52,75.91,124.27,284.10,13,1.0094,12327,0,REJECTED: flow-only sampler
 cycled narrow(8)+wide(32) kernels (seed 42),40.10,47.83,58.07,246.95,393.85,26,1.0097,11448,1,wide component acc 0.02; contributes nothing
 warmup 5 blocks -> 2 (seed 42),40.30,31.81,72.06,353.92,499.06,41,1.0100,8383,1,saves 11 s; costs 140 s via a worse initial flow
+per-block overhead fix (SHIPPED - seed 42),40.12,42.25,71.69,208.19,363.09,25,1.0099,19919,1,identity-preserving; same block 25 and ESS
+flow 8 -> 4 layers (seed 42),40.10,40.71,59.17,157.21,297.91,24,1.0100,19006,1,VERIFIED WIN: block count held at 24
+flow 8 -> 4 layers (seed 7),40.21,39.91,53.40,204.86,339.22,31,1.0097,7178,1,same config seed 7; faster at both seeds
+flow 2 layers / width 32 (seed 42),40.15,39.75,51.18,192.73,324.62,33,1.0097,8921,1,capacity degrades: 24 -> 33 blocks; 4 layers is the knee

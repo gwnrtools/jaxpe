@@ -502,7 +502,13 @@ def run_pe(problem, y_map, cov0, args, timings):
     # measured laggard -- spin1z is the last direction to clear the Rhat gate in
     # every run. Raising 5 -> 8 already helped (see the ledger); exposed here so
     # the rest of the range is testable rather than assumed.
-    flow = make_flow(k_make, n_dim, interval=args.flow_interval)
+    flow = make_flow(
+        k_make,
+        n_dim,
+        interval=args.flow_interval,
+        flow_layers=args.flow_layers,
+        nn_width=args.flow_width,
+    )
     flow, losses = fit_flow(
         k_fit, flow, flow_train_set(k_fit), n_epochs=args.flow_epochs, batch_size=512
     )
@@ -512,7 +518,13 @@ def run_pe(problem, y_map, cov0, args, timings):
     flow_wide = None
     if args.flow_interval_wide > 0.0:
         key, k_makew, k_fitw = jax.random.split(key, 3)
-        flow_wide = make_flow(k_makew, n_dim, interval=args.flow_interval_wide)
+        flow_wide = make_flow(
+            k_makew,
+            n_dim,
+            interval=args.flow_interval_wide,
+            flow_layers=args.flow_layers,
+            nn_width=args.flow_width,
+        )
         flow_wide, losses_w = fit_flow(
             k_fitw,
             flow_wide,
@@ -752,15 +764,21 @@ def run_pe(problem, y_map, cov0, args, timings):
             k_loc, kernel, logp, y0, args.production_steps, thin=args.thin
         )
         y0, logp0 = states.x, states.log_prob
-        kept.append(np.asarray(ys))
+        # ONE device->host transfer per array per block. These were previously
+        # fetched up to three times each (kept, diag, diag_glob), and the global
+        # block is ~2.4 MB, so the duplicates were pure copy plus a sync point.
+        ys_np = np.asarray(ys)
+        kept.append(ys_np)
         kept_lp.append(np.asarray(lps))
 
         if flow_wide is None:
             y0, logp0, gys, glps, g_acc = _global_block(
                 flow, k_glob, y0, logp0, logp, args.n_global
             )
-            kept.append(np.asarray(gys))
-            kept_lp.append(np.asarray(glps))
+            gys = np.asarray(gys)
+            glps = np.asarray(glps)
+            kept.append(gys)
+            kept_lp.append(glps)
         else:
             # CYCLE two independence-MH kernels instead of picking one spline
             # interval. Measured: a wide interval reaches the Exponential(~1)
@@ -800,17 +818,22 @@ def run_pe(problem, y_map, cov0, args, timings):
         # pieces are concatenated: re-concatenating the whole kept stack every
         # block is O(n^2) over the run and was costing seconds per block by the
         # time the series was long.
-        diag.append(_decimate(np.asarray(ys), DIAG_PER_BLOCK // 4))
-        diag.append(_decimate(np.asarray(gys), DIAG_PER_BLOCK))
-        diag_glob.append(_decimate(np.asarray(gys), DIAG_PER_BLOCK))
-        ally = np.concatenate(diag)
-        phys = np.asarray(to_phys(jnp.asarray(ally.reshape(-1, n_dim)))).reshape(
-            ally.shape
-        )
-        glob = np.concatenate(diag_glob)
-        phys_glob = np.asarray(to_phys(jnp.asarray(glob.reshape(-1, n_dim)))).reshape(
-            glob.shape
-        )
+        # Map each block to PHYSICAL space once, on arrival, and stash the mapped
+        # piece. Previously to_phys ran over the whole accumulated decimated stack
+        # every block -- O(n^2) across a run, re-transforming samples that had
+        # already been transformed up to 25 times. to_phys is elementwise, so
+        # transform-then-concatenate is identical to concatenate-then-transform.
+        def _phys(a):
+            return np.asarray(to_phys(jnp.asarray(a.reshape(-1, n_dim)))).reshape(
+                a.shape
+            )
+
+        g_dec = _decimate(gys, DIAG_PER_BLOCK)  # decimated once, used twice
+        diag.append(_phys(_decimate(ys_np, DIAG_PER_BLOCK // 4)))
+        diag.append(_phys(g_dec))
+        diag_glob.append(diag[-1])  # same physical array, not a second transform
+        phys = np.concatenate(diag)
+        phys_glob = np.concatenate(diag_glob)
         rhat = split_rhat(rank_normalized(phys_glob))
         rhat_raw = split_rhat(rank_normalized(phys))
         ess = effective_sample_size(phys)
@@ -917,6 +940,18 @@ def main():
     )
     ap.add_argument("--flow-acc-target", type=float, default=0.65)
     ap.add_argument("--flow-interval", type=float, default=8.0)
+    # The global block is ~3.4 s of an ~8.3 s production block, and only 0.6 s of
+    # that is the likelihood -- the rest is the flow's two passes per step
+    # (sample + log_prob). Measured warm, per 1200-step block: 8 layers/width 64
+    # = 3.38 s, 4/64 = 2.00 s, 4/32 = 1.64 s, 2/64 = 1.31 s. 8 coupling layers is
+    # generous for a 4-dim posterior, so this is exposed to trade capacity for
+    # speed -- but a weaker flow means worse proposals, so it must be judged end
+    # to end (block COUNT), never on per-block cost alone.
+    # 4 is the measured knee: 8 -> 4 holds the block count (24 vs 25) and is
+    # faster at both seeds, but 2 layers/width 32 degrades capacity and costs
+    # 33 blocks against 24, so the cheaper-block/more-blocks trade returns below 4.
+    ap.add_argument("--flow-layers", type=int, default=4)
+    ap.add_argument("--flow-width", type=int, default=64)
     # > 0 enables a SECOND flow at this wider interval, cycled with the narrow one
     # in production. Measured motivation: a single wide flow reaches the boundary
     # tails and cuts blocks 25 -> 8, but collapses acceptance to ~0.1 and makes the

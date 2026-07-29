@@ -562,6 +562,43 @@ Two lessons, both general:
   and a configuration whose spread spans 3.9–10.7 min has no usable worst case even
   though its best case is the fastest ever measured on this problem.
 
+### The flow was oversized: 8 → 4 coupling layers, 6.59 → 5.31 min
+
+Profiling `_global_block` *warm* exposed a cost pool that had been mis-attributed all
+round. A 1200-step global block costs **3.38 s**, of which only **0.61 s** is the
+likelihood — the rest is the flow's *two* passes per step (`sample` and `log_prob`).
+Earlier accounting costed that block at 0.72 s from the likelihood figure alone, which
+is exactly the ~45 % of each production block that kept coming up unaccounted for and
+was twice written off as kernel-launch overhead.
+
+(The first attempt at this profile was wrong and is worth recording: `n_steps` is a
+static argument, so warming up at 10 steps does not warm the 1200-step trace, and the
+numbers carried ~1.3 s of compilation each.)
+
+| flow | warm 1200-step block | per step |
+|---|---|---|
+| 8 layers / width 64 | 3.384 s | 2.820 ms |
+| 4 / 64 | 2.000 s | 1.667 ms |
+| 4 / 32 | 1.639 s | 1.366 ms |
+| 2 / 64 | 1.307 s | 1.089 ms |
+| *likelihood alone* | *0.612 s* | *0.510 ms* |
+
+Eight coupling layers is generous for a **4-dimensional** posterior, and halving them
+is the only change in this whole round that is a *pure win* rather than a trade —
+every other knob bought cheaper blocks and paid for it in more of them:
+
+| flow | seed 42 | seed 7 | mean | spread |
+|---|---|---|---|---|
+| 8 layers | 6.05 min (25 blocks) | 7.12 min (32) | 6.59 min | 1.18× |
+| **4 layers (shipped)** | **4.97 min (24 blocks)** | **5.65 min (31)** | **5.31 min** | 1.14× |
+| 2 layers / width 32 | 5.41 min (33 blocks) | — | — | — |
+
+Faster at *both* seeds, block count unchanged, global acceptance actually improving
+(0.40 → 0.59), and no variance inflation — unlike the interval widening, which bought
+its best case with a 2.75× spread. **4 layers is the knee:** at 2 layers/width 32 the
+capacity genuinely degrades and the block count jumps 24 → 33, so the
+cheaper-block/more-blocks trade returns on the far side.
+
 ### Why 4 minutes was not reached
 
 Unlike the retracted argument above, this is an accounting of measured levers rather
@@ -593,11 +630,19 @@ That leaves only the code-level levers, both measured:
 |---|---|---|
 | sampler configuration | 0 s | swept exhaustively, table above |
 | PhenomD 3-region partition | ≤ 21 s | ~6 %, and **ruled out** — alters the waveform module |
-| per-block overhead (diagnostics, refit, transfers) | ≤ 30 s | measured, diffuse, no single hotspot |
-| **best case with the permitted lever only** | **~370 s = 6.2 min** | still > 4 min |
+| per-block overhead (diagnostics, refit, transfers) | **8 s, implemented** | estimated at ~30 s; the estimate was 4× too high |
+| **shipped, all permitted levers applied** | **363 s = 6.05 min** | still > 4 min |
 
-With the template-physics constraint in force, the only permitted code lever is the
-~30 s of per-block overhead, which leaves ~6.2 min. Closing the remaining 130 s would
+With the template-physics constraint in force, the only permitted code lever was the
+per-block overhead. It is now implemented -- one device->host transfer per array per
+block instead of three, each block mapped to physical space once on arrival instead
+of re-transforming the whole accumulated stack every block (an O(n^2) over the run),
+and the global block decimated once rather than twice. All three are
+identity-preserving, and the run still converges at exactly block 25 with Rhat 1.0099
+and min ESS 19919, which is the check that the refactor changed only speed. It is
+worth **8 s** (371 -> 363 s), not the ~30 s estimated: the transfers and the repeated
+transform were real but were about a quarter of the residual, the rest being
+kernel-launch and `scan` overhead inside the sampling loops. Closing the remaining 130 s would
 have to come out of equilibration (72.7 s) or warmup (33.7 s), and both are now
 measured load-bearing in both directions. So on this hardware, with this waveform and
 this convergence gate, **4 minutes is not reachable** by configuration or by any code
