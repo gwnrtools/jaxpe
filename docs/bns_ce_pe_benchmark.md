@@ -624,6 +624,32 @@ The recurring error is treating a measurement as a property of the *problem* whe
 was a property of the *configuration it was taken in* — worth stating because it is
 the single most productive check applied in this whole exercise.
 
+#### The production block budget, closed
+
+Repeated attempts to find a hidden overhead pool ended by closing the budget instead.
+Measured warm and in situ, a 6.6 s production block at the shipped configuration is:
+
+| component | measured |
+|---|---|
+| local HMC — `run_chains`, 25 steps × L=32 = 800 gradients | **3.597 s** |
+| global flow block — 1200 independence-MH steps | 2.000 s |
+| diagnostics — rank-R̂ ×2 + Geyer ESS, on the real backend | ~0.30 s |
+| flow refit, amortized over 4 blocks | ~0.4 s |
+| **sum** | **~6.3 s** (measured block: 6.6 s) |
+
+The budget closes to within ~5 %, so **there is no unaccounted overhead left to
+remove**. The earlier "~2 s per block unexplained" was an artefact of costing the
+local block with a standalone `vmap(grad(loglike))` at 3.228 ms/gradient; the sampler
+differentiates `log_posterior` (likelihood + prior + sigmoid Jacobian) *inside a
+scan*, which measures 4.496 ms/gradient. Two lessons repeat here: a component must be
+timed in the context that actually runs it, and diagnostics measured under
+`JAX_PLATFORMS=cpu` do not bound diagnostics running on the GPU.
+
+The consequence is structural: **local HMC is 55 % of every block, and it is the
+waveform gradient itself** — not machinery around it. With trajectory length already
+at its measured knee (L = 32; 16 and 96 are both worse) and the template physics
+fixed by constraint, that 3.6 s is irreducible here.
+
 ### Why 4 minutes was not reached
 
 Unlike the retracted argument above, this is an accounting of measured levers rather
