@@ -567,18 +567,41 @@ Two lessons, both general:
 Unlike the retracted argument above, this is an accounting of measured levers rather
 than an extrapolation from an assumed trajectory length. Starting from 371 s:
 
+Every sampler-side knob has now been moved in both directions where both exist, and
+every one is worse than the shipped configuration:
+
+| knob | tried | best alternative | why it loses |
+|---|---|---|---|
+| trajectory length L | 16, 96 | 7.01 min | block cost falls less than block count rises |
+| flow proposals/block | 600, 2400 | 6.54 min | same trade, both directions |
+| equilibration rounds | 3 | 7.68 min | undertrained flow costs 107 s to save 17 s |
+| chains | 256 | 7.17 min | preamble scales with chains, benefit does not |
+| mass matrix | 3 ensemble variants | 8.39 min | ensemble is 40× over-dispersed in Mc |
+| flow spline interval | 16, 32 | 7.18 min mean | best case 3.87 min, worst 10.71 — a lottery |
+| cycled narrow+wide kernels | interval 8+32 | 6.56 min | wide component accepts at 0.02 |
+| warmup blocks | 2 | 8.32 min | saves 11 s, costs 140 s via a worse initial flow |
+
+The last row is the pattern in miniature: **both halves of the preamble are
+load-bearing.** Cutting equilibration starves the flow of refits; cutting warmup
+starves it of its initial training set (fit loss 0.206 → 0.681, step size stranded at
+0.226 with acceptance 0.94). The preamble is not overhead to be trimmed — it is what
+makes production converge in 25 blocks instead of 41.
+
+That leaves only the code-level levers, both measured:
+
 | lever | measured value | status |
 |---|---|---|
-| sampler configuration (L, globals, equil rounds, chains, metric) | 0 s | swept; every direction is worse |
-| PhenomD 3-region partition | ≤ 21 s | measured ceiling, ~6 % |
-| per-block overhead (diagnostics, refit, transfers) | ≤ 30 s | measured, diffuse |
-| **best case if both code levers land** | **320 s = 5.3 min** | still > 4 min |
+| sampler configuration | 0 s | swept exhaustively, table above |
+| PhenomD 3-region partition | ≤ 21 s | ~6 %, and **ruled out** — alters the waveform module |
+| per-block overhead (diagnostics, refit, transfers) | ≤ 30 s | measured, diffuse, no single hotspot |
+| **best case with the permitted lever only** | **~370 s = 6.2 min** | still > 4 min |
 
-Closing the remaining 80 s would have to come out of equilibration (72.7 s) or warmup
-(33.7 s), and both are measured to be load-bearing — cutting equilibration from 5
-rounds to 3 saved 17 s and cost 107 s. So on this hardware, with this waveform and
-this convergence gate, 4 minutes is not reachable by configuration or by the
-identified code changes.
+With the template-physics constraint in force, the only permitted code lever is the
+~30 s of per-block overhead, which leaves ~6.2 min. Closing the remaining 130 s would
+have to come out of equilibration (72.7 s) or warmup (33.7 s), and both are now
+measured load-bearing in both directions. So on this hardware, with this waveform and
+this convergence gate, **4 minutes is not reachable** by configuration or by any code
+change that respects the constraint.
 
 What would change that, in rough order of leverage: a GPU with real f64 throughput
 (the T2000 is a consumer part at 1/32 rate, and this problem cannot use f32 — see
