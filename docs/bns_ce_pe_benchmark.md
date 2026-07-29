@@ -92,6 +92,16 @@ python bin/run_bns_ce_pe.py --outdir examples/output/bns_ce_rb_hmc
 
 (first invocation populates `~/.cache/jaxpe_xla`; subsequent ones are compile-free).
 
+![Convergence of the three GPU runs against the 20-minute budget: rank-normalized split-Rhat of the global subseries, and Geyer min ESS, versus total elapsed wall clock](assets/bns_ce_convergence.png)
+
+Both panels are plotted against **total** elapsed wall clock, not production time, so
+the budget line means what it says. Run 3 crosses the R̂ = 1.01 gate at 15.4 min with
+ESS already 15× the target; run 1 needs 24.7 min for the same R̂; run 2 — the variant
+that froze the flow — plateaus at R̂ ≈ 1.05 and never converges, despite accumulating
+ESS at a healthy rate. That divergence between R̂ and ESS is the signature of the
+failure: the frozen proposal kept producing samples, but not ones that moved chains
+between the boundary tails.
+
 ### What the last round of optimization changed
 
 - **Persistent XLA compilation cache** (`jax_compilation_cache_dir`). Compilation
@@ -113,13 +123,34 @@ python bin/run_bns_ce_pe.py --outdir examples/output/bns_ce_rb_hmc
 
 ### Posterior
 
+![Corner plot of the BNS/CE posterior over chirp mass, eta, spin1z and spin2z, with the injection marked in orange](assets/bns_ce_corner.png)
+
 Median chirp mass 1.2187730 M☉ (truth 1.2187707), η piled against its 0.25 prior
-edge, both spins consistent with zero. The chirp-mass marginal is **one-sided about
-the truth by construction, not biased**: the injection sits exactly on the η = 0.25
-prior boundary, and Mc–η are ~97 % anti-correlated, so truncating η from above
-truncates Mc from below. The spin1z–spin2z panel shows the expected χ_eff
-degeneracy triangle (only the mass-weighted sum is measured; positive-support priors
-cut the rest).
+edge, both spins consistent with zero. Chirp mass is drawn as an offset from the
+injected value because its posterior is only ~10⁻⁶ M☉ wide — a 1-part-in-10⁶
+measurement, which is what SNR 607 over a ~1000 s inspiral buys.
+
+The chirp-mass marginal is **one-sided about the truth by construction, not
+biased**: the injection sits exactly on the η = 0.25 prior boundary, and Mc–η are
+~97 % anti-correlated (visible as the thin diagonal ridge), so truncating η from
+above truncates Mc from below. The spin panels show the expected χ_eff degeneracy
+triangle — only the mass-weighted spin combination is measured, so the individual
+spins slide along the anti-diagonal until the positive-support priors cut them off.
+
+### Regenerating the figures
+
+```bash
+python bin/make_bns_ce_figures.py     # reads examples/output/bns_ce_rb_hmc/
+```
+
+[`bin/make_bns_ce_figures.py`](../bin/make_bns_ce_figures.py) rebuilds both figures
+from the run artefacts, so every number on the axes traces back to a measurement
+rather than to this page. The convergence series is cached to
+[`docs/assets/bns_ce_convergence.csv`](assets/bns_ce_convergence.csv) — the raw
+stdout logs fall under the repo's `*.log` ignore, so that CSV is the committed
+evidence and the left-hand figure regenerates from a clean checkout. The corner plot
+needs `samples.npz` (1.04M × 4 float64, ~40 MB, deliberately untracked); rerun the PE
+to regenerate it.
 
 ## Notes / known benign details
 
