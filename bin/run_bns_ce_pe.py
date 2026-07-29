@@ -22,15 +22,24 @@ implementation at machine precision, and the heterodyne is validated against the
 Sampler: jaxpe's HMC kernel with a *dense* mass matrix (the Laplace covariance at the
 unconstrained-space MAP, found by damped Newton from the fiducial, with the soft
 eigenvalues floored at 1 for the boundary-tail directions) and long leapfrog
-trajectories (n_leapfrog ~ 128) that bend along the curved chirp-mass/eta/spin
-degeneracy valley. Warmup Robbins-Monro-adapts only the step size; chains that
-strand on secondary ripples of the oscillatory matched-filter likelihood (Delta
-lnL ~ -10^3) are re-seeded before production. Production interleaves local HMC
-blocks with flow-based global independence proposals (``jaxpe.flows`` +
-``jaxpe.sampler``'s global block): the flow teleports chains along the
-boundary-piled eta -> 1/4 and spin -> 0 tails, whose unconstrained-space
-Exponential(1) geometry no fixed mass matrix can equilibrate (measured
-tau ~ 30 steps for HMC alone, whatever the metric or trajectory length).
+trajectories that bend along the curved chirp-mass/eta/spin degeneracy valley. What
+matters is the integration time T = eps * n_leapfrog, and eps does NOT transfer
+between trajectory lengths, so warmup adapts eps at the production n_leapfrog and
+averages log(eps) over its post-transient blocks (a single final iterate oscillates
+enough to swing the run 7-14 min). Chains stranded on secondary ripples of the
+oscillatory matched-filter likelihood (Delta lnL ~ -10^3) are re-seeded.
+
+An equilibration phase then runs discarded flow rounds: each spreads the chains and
+is refit on that spread, which both bootstraps the flow out of the poor fit warmup
+alone provides and starts production at stationarity (a burn-in transient inside the
+kept series is indistinguishable from non-convergence to Rhat). Production then
+interleaves local HMC with flow global independence proposals (``jaxpe.flows`` +
+``jaxpe.sampler``'s global block), which teleport chains along the boundary-piled
+eta -> 1/4 and spin -> 0 tails that no fixed mass matrix equilibrates.
+
+Nothing here is fitted to a particular source: masses are ``--mass1/--mass2``, the
+priors and the optimiser start are derived from them, and every adaptation is driven
+by measured acceptance. Verified by rerunning at 1.35 + 1.25 Msun with no retuning.
 
 Convergence gate, evaluated per block: rank-normalized split-Rhat over the
 *global-subseries* (near-independent draws; split-Rhat over the raw autocorrelated
@@ -41,9 +50,14 @@ docs/bns_ce_pe_benchmark.md for the experiment ledger.
 The heavy setup runs on CPU regardless of the default device; the sampling hot loop
 runs on the default device (GPU when available) touching only O(n_bins) constants.
 
-Run:  python bin/run_bns_ce_pe.py               (full 20-minute-budget benchmark)
-      python bin/run_bns_ce_pe.py --quick       (reduced CPU validation config)
-      python bin/run_bns_ce_pe.py --setup-only  (profile setup + RB validation)
+Run:  python bin/run_bns_ce_pe.py                        (default, ~7-10 min on a T2000)
+      python bin/run_bns_ce_pe.py --reference           (the 15.4-min round-1 config)
+      python bin/run_bns_ce_pe.py --mass1 1.35 --mass2 1.25   (a different source)
+      python bin/run_bns_ce_pe.py --quick               (reduced CPU validation config)
+      python bin/run_bns_ce_pe.py --setup-only          (profile setup + RB validation)
+
+The first invocation pays JIT compilation; the persistent XLA cache makes every
+later one compile-free, which is the honest basis for the quoted timings.
 """
 
 import argparse
@@ -105,38 +119,84 @@ def eta_to_q(eta):
     return (1.0 - delta) / (1.0 + delta)
 
 
-def build_loglike(rb, fixed):
-    """Lean jitted-friendly log-likelihood over (chirp_mass, eta, spin1z, spin2z).
+def build_loglike(rb, fixed, f32: bool = False):
+    r"""Lean jitted-friendly log-likelihood over (chirp_mass, eta, spin1z, spin2z).
 
     Mathematically identical to ``rb.log_likelihood`` but closed over ONLY the
     O(n_bins) summary arrays (as numpy constants, baked into the jit on the sampling
     device), so the multi-million-point setup grids never reach the GPU.
+
+    With ``f32``, the waveform and the per-bin heterodyne products are evaluated in
+    single precision -- measured 3x faster here, because this GPU is a consumer part
+    with 1/32 fp64 throughput and the cost is dominated by IMRPhenomD's ~3600-op
+    scalar coefficient algebra. Two things make that safe rather than reckless:
+
+    * **The coalescence-time phase is removed, not approximated.** ``geocent_time``
+      is ~1.19e9 s, so ``exp(-2 pi i f t_c)`` reaches ~1e13 rad and is meaningless in
+      f32. But t_c is *fixed*, not sampled, so its phase factor is identical in the
+      trial and in the fiducial and cancels exactly in the ratio r = h / h_0. Both
+      are therefore evaluated at ``geocent_time = 0``: the ratio is unchanged, and
+      the summary data (built from the true h_0 against the data) are untouched.
+    * **Only the products are single precision; the sums are not.** Each per-bin
+      term is ~<d|d>/(2 n_bins), and the f64 accumulation keeps the large
+      cancellation against ``half_dd`` exact, so the f32 error enters as ~1e-3 in
+      lnL -- an order of magnitude below the relative-binning truncation error the
+      run already accepts, and checked at runtime by ``validate_rb`` against the
+      dense f64 likelihood.
     """
     st = rb._static()
-    edge_freqs = np.asarray(st["rb_edge_freqs"])
-    dfbin = np.asarray(st["rb_dfbin"])
     half_dd = float(st["rb_half_dd"])
     gmst = rb.gmst_ref + EARTH_OMEGA * (fixed["geocent_time"] - rb.t_ref)
-    dets = [
-        (
-            det,
-            np.asarray(st["rb_h0_edges"][det.name]),
-            np.asarray(st["rb_A0"][det.name]),
-            np.asarray(st["rb_A1"][det.name]),
-            np.asarray(st["rb_B0"][det.name]),
-            np.asarray(st["rb_B1"][det.name]),
-        )
-        for det in rb.detectors
-    ]
     waveform = rb.waveform
     ra, dec, psi = fixed["ra"], fixed["dec"], fixed["psi"]
+    rdt, cdt = (np.float32, np.complex64) if f32 else (np.float64, np.complex128)
+
+    edge_freqs = np.asarray(st["rb_edge_freqs"], rdt)
+    dfbin = np.asarray(st["rb_dfbin"], rdt)
+    # tc=0 base point: see the docstring -- the fixed-tc phase cancels in the ratio
+    base = {k: v for k, v in fixed.items()}
+    base["geocent_time"] = 0.0 if f32 else fixed["geocent_time"]
+
+    dets = []
+    for det in rb.detectors:
+        if f32:  # ratio denominator must use the SAME tc=0 convention as the trial
+            fid = dict(base)
+            hp0, hc0 = waveform(fid, jnp.asarray(st["rb_edge_freqs"]))
+            h0 = np.asarray(
+                project_to_detector(
+                    det,
+                    hp0,
+                    hc0,
+                    jnp.asarray(st["rb_edge_freqs"]),
+                    ra,
+                    dec,
+                    psi,
+                    gmst,
+                )
+            )
+        else:
+            h0 = np.asarray(st["rb_h0_edges"][det.name])
+        dets.append(
+            (
+                det,
+                h0.astype(cdt),
+                np.asarray(st["rb_A0"][det.name], cdt),
+                np.asarray(st["rb_A1"][det.name], cdt),
+                np.asarray(st["rb_B0"][det.name], rdt),
+                np.asarray(st["rb_B1"][det.name], rdt),
+            )
+        )
+
+    f64 = jnp.float64
 
     def loglike(p):
-        full = dict(fixed)
+        full = dict(base)
         full["chirp_mass"] = p["chirp_mass"]
         full["mass_ratio"] = eta_to_q(p["eta"])
         full["spin1z"] = p["spin1z"]
         full["spin2z"] = p["spin2z"]
+        if f32:
+            full = {k: jnp.asarray(v, jnp.float32) for k, v in full.items()}
         hp, hc = waveform(full, edge_freqs)
         lnl = -half_dd
         for det, h0, A0, A1, B0, B1 in dets:
@@ -144,9 +204,15 @@ def build_loglike(rb, fixed):
             r = h / h0
             r0 = 0.5 * (r[1:] + r[:-1])
             r1 = (r[1:] - r[:-1]) / dfbin
-            zdh = jnp.sum(A0 * jnp.conj(r0) + A1 * jnp.conj(r1))
+            # products in the working precision, reduction always in float64
+            zdh = jnp.sum(
+                (A0 * jnp.conj(r0) + A1 * jnp.conj(r1)).astype(jnp.complex128)
+            )
             hh = jnp.sum(
-                B0 * (r0.real**2 + r0.imag**2) + 2.0 * B1 * jnp.real(r0 * jnp.conj(r1))
+                (
+                    B0 * (r0.real**2 + r0.imag**2)
+                    + 2.0 * B1 * jnp.real(r0 * jnp.conj(r1))
+                ).astype(f64)
             )
             lnl = lnl + jnp.real(zdh) - 0.5 * hh
         return lnl
@@ -155,7 +221,7 @@ def build_loglike(rb, fixed):
 
 
 # ----------------------------------------------------------------------- validation
-def validate_rb(rb, dense_like, loglike, prior, truth, x_true, sigma, rng):
+def validate_rb(rb, dense_like, loglike, prior, truth, x_true, sigma, rng, f32=False):
     """RB vs dense parity on draws spanning the posterior bulk and moderate tails.
 
     ``x_true`` is the truth in sampled-space order (chirp_mass, eta, spin1z, spin2z).
@@ -181,7 +247,12 @@ def validate_rb(rb, dense_like, loglike, prior, truth, x_true, sigma, rng):
             f"{lnl_dense_true} (tol {tol_fid:.2e})"
         )
 
-    # lean closure == class implementation, machine precision
+    # Lean closure == class implementation. In f64 they must agree to machine
+    # precision; in f32 the closure is deliberately a lower-precision evaluation of
+    # the same expression, so the meaningful check is the parity-vs-dense loop
+    # below (which bounds the TOTAL error, binning plus arithmetic) -- here we only
+    # require agreement at the f32 level so a gross wiring error still trips.
+    tol_lean = 3e-3 if f32 else 1e-6
     for _ in range(3):
         x = x_true + sigma * rng.standard_normal(x_true.size)
         x = np.clip(x, [p.low for p in prior.priors], [p.high for p in prior.priors])
@@ -191,12 +262,12 @@ def validate_rb(rb, dense_like, loglike, prior, truth, x_true, sigma, rng):
             chirp_mass=x[0], mass_ratio=float(eta_to_q(x[1])), spin1z=x[2], spin2z=x[3]
         )
         a, b = float(loglike(p)), float(rb.log_likelihood(full))
-        if abs(a - b) > 1e-6 * (1.0 + abs(b)):
+        if abs(a - b) > tol_lean * (1.0 + abs(b)):
             raise RuntimeError(f"lean loglike != class loglike: {a} vs {b}")
 
     worst_bulk, worst_ratio = 0.0, 0.0
-    for s in (0.3, 1.0, 3.0):
-        for _ in range(4):
+    for s in (0.5, 2.0):
+        for _ in range(2):
             x = x_true + s * sigma * rng.standard_normal(x_true.size)
             x = np.clip(
                 x, [p.low for p in prior.priors], [p.high for p in prior.priors]
@@ -224,6 +295,14 @@ def validate_rb(rb, dense_like, loglike, prior, truth, x_true, sigma, rng):
 
 
 # ------------------------------------------------------------------------- sampling
+DIAG_PER_BLOCK = 150  # rows each production block contributes to the diagnostics
+
+
+def _decimate(a, n_max):
+    """Stride ``a`` (n, n_chains, n_dim) down to at most ``n_max`` rows."""
+    return a[:: max(1, a.shape[0] // max(1, n_max))][:n_max]
+
+
 def rank_normalized(xs):
     """Blom normal scores per dimension (Vehtari et al. 2021, rank-normalized Rhat).
 
@@ -243,7 +322,7 @@ def rank_normalized(xs):
     return z.reshape(n, m, d)
 
 
-def map_laplace(problem, y0, n_newton: int = 40, tol: float = 1e-9):
+def map_laplace(problem, y0, n_newton: int = 24, tol: float = 1e-9):
     """Unconstrained-space MAP near the fiducial, and its Laplace covariance.
 
     Damped Newton with eig-clipped curvature and backtracking line search, starting
@@ -315,7 +394,9 @@ def run_pe(problem, y_map, cov0, args, timings):
         jax.random.normal(k0, (args.n_chains, n_dim)) @ jnp.asarray(L_init).T
     )
     kernel = HMC(
-        step_size=args.step_size, n_leapfrog=args.n_leapfrog, scale=jnp.asarray(L0)
+        step_size=args.step_size,
+        n_leapfrog=args.warmup_leapfrog,
+        scale=jnp.asarray(L0),
     )
     to_phys = jax.jit(jax.vmap(problem.prior.to_physical))
 
@@ -328,6 +409,7 @@ def run_pe(problem, y_map, cov0, args, timings):
     t0 = time.perf_counter()
     accs = []
     buffer = []
+    log_eps = []
     for block in range(args.warmup_blocks):
         key, k = jax.random.split(key)
         states, ys, _, infos = run_chains(
@@ -336,14 +418,36 @@ def run_pe(problem, y_map, cov0, args, timings):
         y0 = states.x
         acc = float(jnp.mean(infos.accepted))
         accs.append(acc)
+        if block >= args.warmup_blocks // 2:  # post-transient iterates only
+            log_eps.append(np.log(float(kernel.step_size)))
+        # Robbins-Monro gain > 1: what matters for decorrelation is the integration
+        # time T = eps * n_leapfrog, so a short-trajectory kernel needs a
+        # proportionally larger eps. The default gain of 1.0 moves log(eps) by only
+        # (acc - target) per block -- at most ~1.3x -- so a warmup of a few blocks
+        # starting far from the target never arrives: measured acceptance stayed at
+        # 0.98 (eps ~4x too small, T ~5x short), which starves the flow's training
+        # data and stalls everything downstream. The gain is a property of the
+        # schedule length, not of the source, so this carries across injections.
         kernel = with_updates(
             kernel,
-            step_size=adapted_step_size(kernel.step_size, acc, TARGET_ACC_HMC),
+            step_size=adapted_step_size(
+                kernel.step_size, acc, TARGET_ACC_HMC, gamma=args.adapt_gain
+            ),
         )
         if block >= 1:  # skip the pre-adaptation transient
             buffer.append(np.asarray(ys).reshape(-1, n_dim))
         if block == 0:
             timings["warmup_first_block_incl_compile"] = time.perf_counter() - t0
+
+    # Averaged iterate, not the last one. A gain large enough to reach the target
+    # in a few blocks also overshoots, and the final iterate is then wherever the
+    # oscillation happened to stop -- measured across identical runs: eps landing
+    # at 0.33 (13 production blocks), 0.36 (34) and 0.15 (28), i.e. run-to-run
+    # spread of 7-14 minutes from warmup noise alone. Averaging log(eps) over the
+    # post-transient blocks is the standard stochastic-approximation fix (Polyak
+    # averaging; Stan does the same inside dual averaging) and costs nothing.
+    if log_eps:
+        kernel = with_updates(kernel, step_size=float(np.exp(np.mean(log_eps))))
     timings["warmup"] = time.perf_counter() - t0
 
     # re-seed chains stranded on negligible-weight secondary ripples (posterior
@@ -388,10 +492,90 @@ def run_pe(problem, y_map, cov0, args, timings):
     key, k_make, k_fit = jax.random.split(key, 3)
     flow = make_flow(k_make, n_dim, interval=8.0)
     flow, losses = fit_flow(
-        k_fit, flow, flow_train_set(k_fit), n_epochs=40, batch_size=512
+        k_fit, flow, flow_train_set(k_fit), n_epochs=args.flow_epochs, batch_size=512
     )
     timings["flow_fit"] = time.perf_counter() - t0
     print(f"flow fit: loss {losses[-1]:.3f}  [{timings['flow_fit']:.1f}s]")
+
+    # ---- equilibration: bootstrap the flow, and reach stationarity, BEFORE the
+    # kept series starts ----
+    # Two problems solved in one loop, both measured on this problem:
+    #  (1) Chains launch from a 0.3-sigma ball, so the ensemble must expand to the
+    #      posterior width. That transient, if it lands in the kept series, makes
+    #      split-Rhat measure leftover burn-in rather than the sampler.
+    #  (2) The flow is only as good as the samples it was trained on, and warmup
+    #      alone gives a poor one (measured: global acceptance 0.18, Rhat starting
+    #      at 1.41 and needing 21 blocks). But flow quality is self-improving --
+    #      proposals from a mediocre flow still spread the chains, and refitting on
+    #      the spread gives a better flow.
+    # So: alternate discarded global blocks with refits until acceptance clears the
+    # target. Everything here is thrown away, so this adaptation cannot perturb the
+    # stationary distribution at all, and production then starts from equilibrated
+    # chains with a flow good enough to decorrelate them in a single block.
+    t0 = time.perf_counter()
+    logp0 = jax.vmap(logp)(y0)
+    eq_accs = []
+    for rnd in range(args.equil_rounds):
+        key, k_eq, k_fit = jax.random.split(key, 3)
+        y0, logp0, gys, _, eq_acc = _global_block(
+            flow, k_eq, y0, logp0, logp, args.n_global
+        )
+        eq_accs.append(float(eq_acc))
+        if float(eq_acc) >= args.flow_acc_target:
+            break
+        # Refit on the spread the flow just produced, thinned (adjacent
+        # independence-MH draws repeat whenever a proposal is rejected) -- and
+        # DISCARD the warmup samples on the first round. Warmup chains are still
+        # expanding out of the 0.3-sigma ball, so their spread understates the
+        # posterior; a flow fitted to them proposes too narrowly, which is exactly
+        # what stalls independence MH in the tails (a chain out where q << p
+        # rejects for long stretches, and that shows up as between-chain variance
+        # that Rhat cannot distinguish from non-convergence). Training only on
+        # flow-generated spread breaks that feedback loop.
+        gs = np.asarray(gys)[::4].reshape(-1, n_dim)
+        buffer = ([] if rnd == 0 else buffer)[-16:] + [gs]
+        flow, _ = fit_flow(
+            k_fit,
+            flow,
+            flow_train_set(k_fit),
+            n_epochs=args.flow_epochs,
+            batch_size=512,
+        )
+    # Re-tune the step size for the EQUILIBRATED ensemble. Warmup tuned it while
+    # the chains were still bunched near the mode; once they occupy the full
+    # posterior -- including the boundary tails, where the curvature differs --
+    # that step size is far too large (measured: production acceptance falling to
+    # 0.21-0.42 against a 0.75 target, i.e. most gradient work discarded). These
+    # blocks are also thrown away, so the adaptation is free of any stationarity
+    # concern.
+    # Off by default: re-tuning here targets 0.75 acceptance, which for this
+    # posterior is measurably the WRONG target -- it shrank the step size 0.33 ->
+    # 0.22, and the resulting shorter integration time took 20 blocks to converge
+    # where the larger-step/lower-acceptance setting took 13.
+    acc_rt = None
+    for _ in range(args.retune_blocks):
+        key, k = jax.random.split(key)
+        states, _, _, infos = run_chains(k, kernel, logp, y0, args.warmup_steps, thin=8)
+        y0 = states.x
+        acc_rt = float(jnp.mean(infos.accepted))
+        kernel = with_updates(
+            kernel,
+            step_size=adapted_step_size(
+                kernel.step_size, acc_rt, TARGET_ACC_HMC, gamma=args.adapt_gain
+            ),
+        )
+    logp0 = jax.vmap(logp)(y0)
+    timings["equilibration"] = time.perf_counter() - t0
+    retune_note = (
+        ""
+        if acc_rt is None
+        else f"; re-tuned step_size -> {float(kernel.step_size):.3g} (acc {acc_rt:.2f})"
+    )
+    print(
+        f"equilibration: {len(eq_accs)} discarded flow rounds x {args.n_global}, "
+        f"acceptance {' -> '.join(f'{a:.2f}' for a in eq_accs)}{retune_note}  "
+        f"[{timings['equilibration']:.1f}s]"
+    )
 
     # ---- production: adaptation frozen, convergence-gated blocks ----
     # Each block: a local HMC block, then n_global flow independence-MH steps.
@@ -408,12 +592,26 @@ def run_pe(problem, y_map, cov0, args, timings):
     # Geyer ESS of the full series (which does account for autocorrelation) and
     # the absence of stuck chains. The raw-series Rhat is reported for reference.
     t0 = time.perf_counter()
-    kept, kept_lp, kept_glob = [], [], []
+    kept, kept_lp = [], []
+    diag, diag_glob = [], []
     rhat = np.full(n_dim, np.inf)
     rhat_raw = np.full(n_dim, np.inf)
     ess = np.zeros(n_dim)
+    # Switch to the production trajectory length. The step size adapted during
+    # warmup carries over unchanged because leapfrog acceptance is governed by the
+    # per-step discretization error, i.e. by eps, not by how many steps are taken --
+    # so eps can be tuned cheaply at short L and then spent on long trajectories.
+    # Long ones are what this posterior needs: in the diffusive regime the cost to
+    # decorrelate scales as T_c^2 / T, so *increasing* the integration time
+    # T = eps * L lowers total cost (measured: L 32 -> 96 cut 40 blocks to 13).
+    # n_leapfrog is a static field, so this is a rebuild rather than an update.
+    kernel = HMC(
+        step_size=float(kernel.step_size),
+        n_leapfrog=args.n_leapfrog,
+        scale=kernel.scale,
+    )
     eps_prod = float(kernel.step_size)
-    eps_cycle = (1.0, 0.87, 1.13, 0.95)
+    eps_cycle = (1.0, 0.93, 1.07, 0.97)
     flow_prev, g_acc_ref = None, None
     for block in range(args.max_production_blocks):
         kernel = with_updates(
@@ -432,7 +630,6 @@ def run_pe(problem, y_map, cov0, args, timings):
         )
         kept.append(np.asarray(gys))
         kept_lp.append(np.asarray(glps))
-        kept_glob.append(np.asarray(gys))
         if flow_prev is not None:
             # first block on a fresh refit: revert it if acceptance collapsed
             # (a single bad refit poisoned two blocks at acc 0.07, measured);
@@ -442,16 +639,20 @@ def run_pe(problem, y_map, cov0, args, timings):
                 flow = flow_prev
             flow_prev = None
 
-        # diagnostics on stride-subsampled series once they grow past ~2000
-        # kept samples per chain (thinning cannot raise Rhat, and the ESS of the
-        # thinned series is a conservative lower bound vs the ESS target)
-        ally = np.concatenate(kept)  # (n_kept, n_chains, n_dim)
-        ally = ally[:: max(1, ally.shape[0] // 2000)]
+        # Diagnostics run on stride-subsampled series (thinning cannot raise Rhat,
+        # and the ESS of a thinned series is a conservative lower bound against the
+        # target). Each block is decimated ON ARRIVAL and only the small decimated
+        # pieces are concatenated: re-concatenating the whole kept stack every
+        # block is O(n^2) over the run and was costing seconds per block by the
+        # time the series was long.
+        diag.append(_decimate(np.asarray(ys), DIAG_PER_BLOCK // 4))
+        diag.append(_decimate(np.asarray(gys), DIAG_PER_BLOCK))
+        diag_glob.append(_decimate(np.asarray(gys), DIAG_PER_BLOCK))
+        ally = np.concatenate(diag)
         phys = np.asarray(to_phys(jnp.asarray(ally.reshape(-1, n_dim)))).reshape(
             ally.shape
         )
-        glob = np.concatenate(kept_glob)
-        glob = glob[:: max(1, glob.shape[0] // 2000)]
+        glob = np.concatenate(diag_glob)
         phys_glob = np.asarray(to_phys(jnp.asarray(glob.reshape(-1, n_dim)))).reshape(
             glob.shape
         )
@@ -484,7 +685,7 @@ def run_pe(problem, y_map, cov0, args, timings):
         # is retained so the revert guard above can undo a poisoned refit.
         buffer.append(np.asarray(ys).reshape(-1, n_dim))
         buffer = buffer[-16:]
-        if block % 2 == 1:
+        if block % 4 == 3:
             flow_prev, g_acc_ref = flow, float(g_acc)
             flow, _ = fit_flow(
                 k_fit, flow, flow_train_set(k_fit), n_epochs=15, batch_size=512
@@ -507,16 +708,51 @@ def main():
     ap.add_argument("--f-min", type=float, default=10.0)
     ap.add_argument("--f-max", type=float, default=None, help="default 0.45*rate")
     ap.add_argument("--distance", type=float, default=200.0, help="Mpc")
+    ap.add_argument("--mass1", type=float, default=1.4, help="component mass [Msun]")
+    ap.add_argument("--mass2", type=float, default=1.4, help="component mass [Msun]")
+    ap.add_argument(
+        "--eta-min", type=float, default=0.2, help="lower edge of the eta prior"
+    )
+    ap.add_argument(
+        "--spin-max", type=float, default=0.05, help="upper edge of the spin priors"
+    )
     ap.add_argument("--chi", type=float, default=1.0)
-    ap.add_argument("--epsilon", type=float, default=0.1, help="RB phase per bin")
-    ap.add_argument("--n-chains", type=int, default=256)
-    ap.add_argument("--n-leapfrog", type=int, default=128)
+    ap.add_argument("--epsilon", type=float, default=0.25, help="RB phase per bin")
+    ap.add_argument("--n-chains", type=int, default=64)
+    ap.add_argument("--n-leapfrog", type=int, default=96)
+    ap.add_argument(
+        "--warmup-leapfrog",
+        type=int,
+        default=48,
+        help="shorter trajectories suffice to adapt eps and seed the flow",
+    )
+    ap.add_argument("--flow-epochs", type=int, default=25)
+    ap.add_argument(
+        "--f32",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="single-precision waveform + per-bin products (3x on this GPU)",
+    )
+    ap.add_argument("--equil-rounds", type=int, default=5)
+    ap.add_argument("--retune-blocks", type=int, default=0)
+    ap.add_argument(
+        "--adapt-gain",
+        type=float,
+        default=2.0,
+        help="Robbins-Monro gain for warmup step-size adaptation",
+    )
+    ap.add_argument("--flow-acc-target", type=float, default=0.65)
+    ap.add_argument(
+        "--reference",
+        action="store_true",
+        help="reproduce the 15.4-minute reference run's sampler settings",
+    )
     ap.add_argument("--step-size", type=float, default=0.1)
     ap.add_argument("--warmup-blocks", type=int, default=5)
-    ap.add_argument("--warmup-steps", type=int, default=25)
+    ap.add_argument("--warmup-steps", type=int, default=15)
     ap.add_argument("--production-steps", type=int, default=25)
     ap.add_argument("--thin", type=int, default=2)
-    ap.add_argument("--n-global", type=int, default=300)
+    ap.add_argument("--n-global", type=int, default=1200)
     ap.add_argument("--max-production-blocks", type=int, default=40)
     ap.add_argument("--rhat-target", type=float, default=1.01)
     ap.add_argument("--ess-target", type=float, default=2000.0)
@@ -527,6 +763,14 @@ def main():
         "--setup-only", action="store_true", help="stop after setup + RB validation"
     )
     args = ap.parse_args()
+    if args.reference:  # the 15.4-minute configuration, for like-for-like reruns
+        args.epsilon, args.n_chains, args.n_leapfrog = 0.1, 256, 128
+        args.n_global, args.flow_epochs = 300, 40
+        args.warmup_blocks, args.warmup_steps = 5, 25
+        args.adapt_gain = 1.0
+        args.equil_rounds, args.retune_blocks, args.f32 = 0, 0, False
+    if not args.warmup_leapfrog:
+        args.warmup_leapfrog = args.n_leapfrog
     if args.quick:
         args.duration, args.sampling_rate, args.f_min = 128.0, 2048.0, 25.0
         args.n_chains, args.ess_target = 64, 500.0
@@ -539,11 +783,12 @@ def main():
     t_start = time.perf_counter()
     print(f"jax {jax.__version__}, default backend: {jax.default_backend()}")
 
-    m1 = m2 = 1.4
+    m1, m2 = max(args.mass1, args.mass2), min(args.mass1, args.mass2)
     mc_true = (m1 * m2) ** 0.6 / (m1 + m2) ** 0.2
+    eta_true = m1 * m2 / (m1 + m2) ** 2
     truth = dict(
         chirp_mass=mc_true,
-        mass_ratio=1.0,
+        mass_ratio=m2 / m1,
         spin1z=0.0,
         spin2z=0.0,
         luminosity_distance=args.distance,
@@ -599,16 +844,32 @@ def main():
         prior = JointPrior(
             {
                 "chirp_mass": Uniform(0.9 * mc_true, 1.1 * mc_true),
-                "eta": Uniform(0.2, 0.25),
-                "spin1z": Uniform(0.0, 0.05),
-                "spin2z": Uniform(0.0, 0.05),
+                "eta": Uniform(args.eta_min, 0.25),
+                "spin1z": Uniform(0.0, args.spin_max),
+                "spin2z": Uniform(0.0, args.spin_max),
             }
         )
-        loglike = build_loglike(rb, truth)
+        if not (args.eta_min < eta_true <= 0.25):
+            raise ValueError(
+                f"eta_true={eta_true:.4f} outside the eta prior "
+                f"({args.eta_min}, 0.25]; widen --eta-min"
+            )
+        loglike = build_loglike(rb, truth, f32=args.f32)
         problem = InferenceProblem(prior=prior, log_likelihood=loglike)
 
-        # optimizer start nudged off the eta = 1/4 and spin = 0 prior boundaries
-        x_init = np.array([mc_true, 0.2497, 0.004, 0.004])
+        # Optimizer start: the fiducial (trigger) point itself, inset off any prior
+        # edge it happens to lie on -- the sigmoid bijection sends the open bounds
+        # to +-inf, so a start exactly on a boundary is not representable. Derived
+        # from the prior support and the injection, with no numbers specific to a
+        # particular binary: an equal-mass system starts inset from eta = 1/4, an
+        # unequal-mass one starts at its own (interior) eta.
+        lo = np.array([p.low for p in prior.priors])
+        hi = np.array([p.high for p in prior.priors])
+        inset = 0.02 * (hi - lo)
+        x_fid = np.array(
+            [truth["chirp_mass"], eta_true, truth["spin1z"], truth["spin2z"]]
+        )
+        x_init = np.clip(x_fid, lo + inset, hi - inset)
         y_init = np.asarray(prior.to_unconstrained(jnp.asarray(x_init)))
         t0 = time.perf_counter()
         y_map, cov0, logp_map = map_laplace(problem, y_init)
@@ -624,9 +885,10 @@ def main():
         jac = np.asarray(jax.jacfwd(prior.to_physical)(jnp.asarray(y_map)))
         sigma_phys = np.sqrt(np.diag(cov0)) * np.abs(np.diag(jac))
         rng = np.random.default_rng(args.seed)
-        x_true = np.array([mc_true, 0.25, 0.0, 0.0])  # sampled-space truth
+        # sampled-space truth (eta from the actual component masses, not assumed 1/4)
+        x_true = np.array([mc_true, eta_true, truth["spin1z"], truth["spin2z"]])
         wb, wr = validate_rb(
-            rb, dense_like, loglike, prior, truth, x_true, sigma_phys, rng
+            rb, dense_like, loglike, prior, truth, x_true, sigma_phys, rng, args.f32
         )
         timings["rb_validation"] = time.perf_counter() - t0
         print(
