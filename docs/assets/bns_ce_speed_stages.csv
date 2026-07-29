@@ -9,5 +9,6 @@ equilibration 5 rounds -> 3,41.08,43.62,55.15,319.84,460.66,37,1.0098,20529,1,sa
 256 chains instead of 64,40.72,64.76,100.32,223.12,430.02,17,1.0098,22597,1,25 -> 17 blocks but preamble scales; net loss
 flow globals doubled (1200 -> 2400),40.68,43.30,92.69,237.21,414.84,20,1.0094,18331,1,fewer blocks but costlier; net loss
 flow spline interval 8 -> 16,40.44,43.67,80.24,121.77,286.95,14,1.0099,18493,1,reaches the Exponential tails; 25 -> 14 blocks
-flow spline interval 8 -> 32,40.60,43.28,79.80,67.77,232.24,8,1.0093,7686,1,UNDER 4 MIN; local acc 0.78-0.86; JS 3.8e-3 vs reference
+flow spline interval 8 -> 32 (seed 42),40.60,43.28,79.80,67.77,232.24,8,1.0093,7686,0,NOT REPRODUCIBLE: seed 7 needs 55 blocks
+flow spline interval 8 -> 32 (seed 7),40.61,42.90,77.35,480.85,642.73,55,1.0094,7183,0,same config as above; 2.8x the reference time
 ensemble-covariance metric (local acc 0.00),40.58,42.52,75.91,124.27,284.10,13,1.0094,12327,0,REJECTED: flow-only sampler

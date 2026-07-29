@@ -466,6 +466,50 @@ But per-block cost rose in step, so production came out a wash, and the whole 59
 loss is *preamble*: warmup and equilibration run a fixed number of steps, so their
 cost scales with chains while their benefit does not.
 
+### Flow proposal *reach*: a large mean gain that buys unacceptable variance
+
+The sweep above tested how *many* flow proposals to make, in both directions, and
+never how far they *reach*. The flow is an RQ-spline coupling flow, and outside its
+`interval` the transform is the **identity** — so with the round-1 value of 8.0 the
+far tails were proposed as if Gaussian, while the η → 1/4 and χ → 0 pileups make them
+Exponential(~1) in unconstrained space. That mismatch is visible in every log: R̂
+reaches 1.0121 by block 2 and then grinds ~18 blocks on spin1z alone.
+
+Widening it works, and dramatically — on one seed:
+
+| interval | blocks | production | total (seed 42) |
+|---|---|---|---|
+| 8 | 25 | 213 s | 6.19 min |
+| 16 | 14 | 122 s | 4.78 min |
+| 32 | 8 | 68 s | **3.87 min** |
+
+**That 3.87 min does not survive a change of random seed.** The identical
+configuration at seed 7 takes **55 blocks and 10.71 min** — 2.8× the reference. The
+two-seed mean (7.3 min) is *worse* than the interval-8 configuration it appeared to
+beat, so the headline number was a lottery win, not a result:
+
+| `--flow-interval 32` | blocks | total |
+|---|---|---|
+| seed 42 | 8 | 3.87 min |
+| seed 7 | 55 | 10.71 min |
+
+The mechanism is the same one that produced the gain. Widening the interval lets the
+flow reach genuinely distant tail states, so an accepted global move is worth far
+more — but acceptance collapses (0.55 at interval 8 → 0.36 at 16 → 0.09–0.14 at 32),
+and at 0.1 acceptance whether the run converges in 8 blocks or 55 depends on whether
+useful tail jumps land early. Interval 8 reproduced to ±0.05 min across three runs
+precisely *because* its acceptance was healthy.
+
+Two lessons, both general:
+
+- **A single-seed timing is not a measurement** when the sampler's acceptance is low.
+  This page's other headline numbers were each reproduced 2–3 times; this one was
+  committed before its own queued reproduction returned, and the check overturned it.
+- **Mean and variance trade against each other here.** The useful framing is not
+  "which interval is fastest" but "which interval is fastest *at an acceptable worst
+  case*", and a configuration whose spread spans 3.9–10.7 min has no usable worst
+  case even though its best case is the fastest ever measured on this problem.
+
 ### Why 4 minutes was not reached
 
 Unlike the retracted argument above, this is an accounting of measured levers rather
