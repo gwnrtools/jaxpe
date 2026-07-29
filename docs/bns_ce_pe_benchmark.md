@@ -599,6 +599,31 @@ its best case with a 2.75× spread. **4 layers is the knee:** at 2 layers/width 
 capacity genuinely degrades and the block count jumps 24 → 33, so the
 cheaper-block/more-blocks trade returns on the far side.
 
+#### One stale negative retracted, one non-result
+
+The equilibration measurement above (5 rounds → 3 costs 107 s) was taken under the
+**8-layer** flow, so it was re-run under the 4-layer one. The old failure mechanism is
+gone: block-1 global acceptance is now **0.60**, against 0.38 before. A smaller flow
+trains adequately in 3 rounds, and the 107 s penalty does not reproduce.
+
+| | 5 rounds | 3 rounds |
+|---|---|---|
+| equilibration | 59.2 s | 44.0 s |
+| production | 157.2 s (24 blocks) | 165.1 s (25 blocks) |
+| total | 297.9 s | 289.7 s |
+
+But the *net* is 8 s — 2.7 %, well inside the ~15 % resolution limit for single-seed
+comparisons established above — because the extra production block eats most of the
+equilibration saving. So: the old negative is **retracted** (a 100+ s effect, clearly
+resolvable), while "3 rounds is better than 5" is **not resolved** by this data. The
+default stays at 5, which is the value verified at two seeds.
+
+This is the third stale negative overturned by re-measuring under changed conditions
+(after "short trajectories starve the flow", and the flow-capacity assumption itself).
+The recurring error is treating a measurement as a property of the *problem* when it
+was a property of the *configuration it was taken in* — worth stating because it is
+the single most productive check applied in this whole exercise.
+
 ### Why 4 minutes was not reached
 
 Unlike the retracted argument above, this is an accounting of measured levers rather

@@ -20,3 +20,4 @@ per-block overhead fix (SHIPPED - seed 42),40.12,42.25,71.69,208.19,363.09,25,1.
 flow 8 -> 4 layers (seed 42),40.10,40.71,59.17,157.21,297.91,24,1.0100,19006,1,VERIFIED WIN: block count held at 24
 flow 8 -> 4 layers (seed 7),40.21,39.91,53.40,204.86,339.22,31,1.0097,7178,1,same config seed 7; faster at both seeds
 flow 2 layers / width 32 (seed 42),40.15,39.75,51.18,192.73,324.62,33,1.0097,8921,1,capacity degrades: 24 -> 33 blocks; 4 layers is the knee
+equil 3 rounds under the 4-layer flow (seed 42),40.15,39.96,43.96,165.07,289.68,25,1.0099,10571,1,old 107 s penalty is gone; 8 s net is within noise
