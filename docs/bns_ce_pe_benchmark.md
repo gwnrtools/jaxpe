@@ -493,22 +493,54 @@ beat, so the headline number was a lottery win, not a result:
 | seed 42 | 8 | 3.87 min |
 | seed 7 | 55 | 10.71 min |
 
-The mechanism is the same one that produced the gain. Widening the interval lets the
-flow reach genuinely distant tail states, so an accepted global move is worth far
-more — but acceptance collapses (0.55 at interval 8 → 0.36 at 16 → 0.09–0.14 at 32),
-and at 0.1 acceptance whether the run converges in 8 blocks or 55 depends on whether
-useful tail jumps land early. Interval 8 reproduced to ±0.05 min across three runs
-precisely *because* its acceptance was healthy.
+Interval 16 behaves the same way — 4.78 min at seed 42, **9.58 min (48 blocks) at
+seed 7** — so the full picture across two intervals and two seeds is:
+
+| interval | seed 42 | seed 7 | mean |
+|---|---|---|---|
+| 16 | 4.78 min | 9.58 min | 7.2 min |
+| 32 | 3.87 min | 10.71 min | 7.3 min |
+
+Neither beats interval 8's 6.16 min on the mean, and both have a worst case around
+10 min. The mechanism is the same one that produced the apparent gain: widening the
+interval lets the flow reach genuinely distant tail states, so an accepted global
+move is worth far more — but acceptance collapses with it (0.55 at interval 8 → 0.36
+at 16 → 0.09–0.14 at 32), and at ~0.1 acceptance whether the run converges in 8
+blocks or 55 depends on whether useful tail jumps land early.
+
+**The control, and the matched-seed result.** The interval-8 runs quoted at
+6.14/6.16/6.19 min were all at the *same* seed (42) and all converged at block 25, so
+that spread measures GPU/timing nondeterminism, not seed robustness. Running the
+default at seed 7 supplies the missing control — 7.12 min, 32 blocks — and makes the
+comparison matched:
+
+| interval | seed 42 | seed 7 | mean | spread |
+|---|---|---|---|---|
+| **8 (default)** | 6.19 min | 7.12 min | **6.66 min** | **1.15×** |
+| 16 | 4.78 min | 9.58 min | 7.18 min | 2.00× |
+| 32 | 3.87 min | 10.71 min | 7.29 min | 2.75× |
+
+The default wins on the mean *and* has a 1.15× spread against 2.0–2.75×. So the
+variance belongs to the widened interval, not to the problem: at healthy acceptance
+(0.48–0.58 at interval 8, seed 7) the run is stable across seeds, and it is the
+collapse to ~0.1 acceptance that turns the run into a lottery. Widening the interval
+is therefore a genuine negative result, not merely an unlucky measurement.
+
+**This also corrects the headline.** "6.16 min" is a seed-42 number. Stated
+honestly across the two seeds measured, the final configuration converges in
+**6.2–7.1 min (mean 6.66)**, and every configuration comparison earlier on this page
+that rests on single-seed timings inherits that same caveat — differences smaller
+than ~15 % between two single-seed runs are not resolved by the data.
 
 Two lessons, both general:
 
 - **A single-seed timing is not a measurement** when the sampler's acceptance is low.
-  This page's other headline numbers were each reproduced 2–3 times; this one was
-  committed before its own queued reproduction returned, and the check overturned it.
+  This page's headline number was committed before its own queued reproduction
+  returned, and the check overturned it.
 - **Mean and variance trade against each other here.** The useful framing is not
-  "which interval is fastest" but "which interval is fastest *at an acceptable worst
-  case*", and a configuration whose spread spans 3.9–10.7 min has no usable worst
-  case even though its best case is the fastest ever measured on this problem.
+  "which interval is fastest" but "which is fastest *at an acceptable worst case*",
+  and a configuration whose spread spans 3.9–10.7 min has no usable worst case even
+  though its best case is the fastest ever measured on this problem.
 
 ### Why 4 minutes was not reached
 
