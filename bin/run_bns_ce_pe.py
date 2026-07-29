@@ -924,7 +924,12 @@ def main():
         default=False,
         help="single-precision waveform + per-bin products (3x on this GPU)",
     )
-    ap.add_argument("--equil-rounds", type=int, default=5)
+    # 3, not 5. Under the eager-init overhead in run_chains this looked like an
+    # 8 s difference ("within noise", so 5 was kept); with that overhead removed
+    # the gap is 3.42 vs 4.01 min at the same seed -- cheaper equilibration
+    # (34.7 vs 44.6 s) AND fewer production blocks (25 vs 31). A third stale
+    # measurement taken in a regime a fixed cost dominated.
+    ap.add_argument("--equil-rounds", type=int, default=3)
     ap.add_argument(
         "--ensemble-metric",
         action=argparse.BooleanOptionalAction,
@@ -966,7 +971,13 @@ def main():
     ap.add_argument("--step-size", type=float, default=0.5)
     ap.add_argument("--warmup-blocks", type=int, default=5)
     ap.add_argument("--warmup-steps", type=int, default=15)
-    ap.add_argument("--production-steps", type=int, default=25)
+    # 12, not 25. This LOST under the eager-init overhead in run_chains (5.27 min
+    # vs 4.83), because a 2.25 s fixed cost per call meant halving the steps could
+    # only ever save 0.65 s of a 6.6 s block -- the test was rigged against itself.
+    # With the overhead removed, measured over three seeds (42/7/13):
+    #   ps=25: 3.42 / 4.38 / 3.43 min  (25 / 38 / 25 blocks)  worst 4.38
+    #   ps=12: 3.49 / 2.95 / 2.89 min  (25 / 22 / 21 blocks)  worst 3.49
+    ap.add_argument("--production-steps", type=int, default=12)
     ap.add_argument("--thin", type=int, default=2)
     ap.add_argument("--n-global", type=int, default=1200)
     # Equilibration and production both spend flow proposals, but for different

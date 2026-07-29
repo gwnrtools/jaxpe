@@ -124,8 +124,17 @@ def mh_accept(key, state: KernelState, proposal: KernelState, log_accept_ratio):
 
 
 @partial(jax.jit, static_argnames=("kernel_static", "logp_fn", "n_steps", "thin"))
-def _run_chains_jit(kernel_params, kernel_static, key, states, logp_fn, n_steps, thin):
+def _run_chains_jit(kernel_params, kernel_static, key, x0, logp_fn, n_steps, thin):
     kernel = eqx.combine(kernel_params, kernel_static)
+
+    # Chain initialisation happens INSIDE the jit. It used to run as a bare
+    # `jax.vmap(kernel.init)` in the caller, i.e. eagerly: every op of the target's
+    # gradient graph dispatched one at a time. For a GW likelihood that graph is
+    # ~3600 instructions, and the measured cost was 2.215 s per call against 0.004 s
+    # for the same work jitted -- a 550x difference, and a fixed cost paid on EVERY
+    # run_chains call regardless of n_steps. In the BNS/CE benchmark that was ~2.25 s
+    # x 33 calls ~ 74 s, larger than the actual gradient work in a block.
+    states = jax.vmap(lambda x: kernel.init(x, logp_fn))(x0)
 
     def one_step(states, key):
         keys = jax.random.split(key, states.x.shape[0])
@@ -184,6 +193,5 @@ def run_chains(
         - log_probs: The history of log-probabilities at those positions.
         - infos.accepted: The per-block mean acceptance rate.
     """
-    states = jax.vmap(lambda x: kernel.init(x, logp_fn))(x0)
     params, static = eqx.partition(kernel, eqx.is_array)
-    return _run_chains_jit(params, static, key, states, logp_fn, n_steps, thin)
+    return _run_chains_jit(params, static, key, x0, logp_fn, n_steps, thin)

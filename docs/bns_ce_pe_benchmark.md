@@ -655,7 +655,58 @@ waveform gradient itself** — not machinery around it. With trajectory length a
 at its measured knee (L = 32; 16 and 96 are both worse) and the template physics
 fixed by constraint, that 3.6 s is irreducible here.
 
-### Why 4 minutes was not reached
+### GOAL MET: 3.11 min mean, 3.49 min worst case, by one library bug fix
+
+`run_chains` initialised its chains with a bare `jax.vmap(kernel.init)` **outside**
+the jit, so every op of the target's gradient graph was dispatched eagerly, once per
+call. For a GW likelihood that graph is ~3600 instructions:
+
+| chain init, 64 chains | |
+|---|---|
+| eager `vmap` (as shipped) | **2.215 s** |
+| the same work jitted | **0.004 s** |
+
+A 550x difference, paid on *every* `run_chains` call regardless of `n_steps` -- ~33
+calls per run (5 warmup + 3 re-tune + 25 production), so ~74 s of a ~290 s run. The
+fix moves initialisation inside `_run_chains_jit`, which already took `logp_fn` as a
+static argname, so there is no extra jit cache and no recompilation. All 13 kernel
+tests pass. **It is a library fix: every sampler in jaxpe benefits, not just this
+benchmark, and it touches nothing in the templates.**
+
+Verified over three seeds at the shipped defaults:
+
+| seed | blocks | Rhat | min ESS | total |
+|---|---|---|---|---|
+| 42 | 25 | 1.0092 | 9463 | 3.49 min |
+| 7 | 22 | 1.0097 | 14795 | 2.95 min |
+| 13 | 21 | 1.0095 | 18919 | 2.89 min |
+| | | | **mean** | **3.11 min** |
+
+Posterior validated against the 15.4-minute reference: worst JS 5.2e-3 against a
+1e-2 tolerance, with truth recovery (+1.84 / -1.86 / +1.02 / +0.97 sigma) matching
+the reference signature. That JS sits marginally *above* the 4.6e-3 run-to-run floor,
+i.e. it is the same order as sampler noise rather than comfortably below it.
+Generality holds: 1.35 + 1.25 Msun converges with no retuning (41 blocks, ~5.0 min
+warm -- the configuration carries over, the wall clock does not, as documented above).
+
+**The bug was also corrupting the measurements that shaped this page.** Three
+conclusions were drawn in a regime where its 2.25 s fixed cost dominated, and all
+three reverse once it is removed:
+
+| conclusion, drawn under the bug | after the fix |
+|---|---|
+| `--production-steps` 12 loses (5.27 vs 4.83 min) | *wins*: 3.11 vs 3.74 min mean over 3 seeds |
+| equilibration 3 vs 5 rounds is "within noise" (8 s) | 3 rounds wins by 35 s; now the default |
+| the block budget "closes", so no overhead remains | 2.25 s/block of eager dispatch was inside what the sum labelled gradient work |
+
+Halving `--production-steps` could only ever save 0.65 s of a 6.6 s block while a
+fixed 2.25 s was charged per call -- that test was rigged against itself. The general
+lesson, and the most productive check in this whole exercise: **a measurement is a
+property of the configuration it was taken in, not of the problem.** Re-testing stale
+negatives after conditions changed overturned seven results here, including the one
+that met the goal.
+
+### Superseded: why 4 minutes looked unreachable
 
 Unlike the retracted argument above, this is an accounting of measured levers rather
 than an extrapolation from an assumed trajectory length. Starting from 371 s:

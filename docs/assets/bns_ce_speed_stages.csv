@@ -22,3 +22,8 @@ flow 8 -> 4 layers (seed 7),40.21,39.91,53.40,204.86,339.22,31,1.0097,7178,1,sam
 flow 2 layers / width 32 (seed 42),40.15,39.75,51.18,192.73,324.62,33,1.0097,8921,1,capacity degrades: 24 -> 33 blocks; 4 layers is the knee
 equil 3 rounds under the 4-layer flow (seed 42),40.15,39.96,43.96,165.07,289.68,25,1.0099,10571,1,old 107 s penalty is gone; 8 s net is within noise
 production-steps 25 -> 12 (seed 42),40.14,40.30,43.90,191.33,316.50,30,1.0098,9163,1,block cost barely fell; 25 -> 30 blocks
+jitted chain init + production-steps 12 (seed 42),40.03,20.70,34.42,113.13,209.32,25,1.0092,9463,1,GOAL MET: <4 min
+jitted chain init + production-steps 12 (seed 7),40.00,20.69,34.61,80.94,177.16,22,1.0097,14795,1,verified at a second seed
+SHIPPED: jitted init + equil 3 + ps 12 (seed 42),40.12,20.70,34.42,113.13,209.32,25,1.0092,9463,1,GOAL MET 3.49 min
+SHIPPED: jitted init + equil 3 + ps 12 (seed 7),40.03,20.69,34.61,80.94,177.16,22,1.0097,14795,1,2.95 min
+SHIPPED: jitted init + equil 3 + ps 12 (seed 13),40.05,20.70,34.50,77.10,173.35,21,1.0095,18919,1,2.89 min; 3/3 seeds under 4 min
