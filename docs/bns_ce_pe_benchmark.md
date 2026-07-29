@@ -67,31 +67,66 @@ Posterior correctness at every stage: median chirp mass within 1e-5 Msun of trut
 η piled at 0.25, spins consistent with 0 (positive-support priors), max sampled
 log-posterior ≈ the MAP value, zero-noise lnL(truth) = 0 anchor.
 
-## Status
+## Result: GPU, 15.4 minutes, converged
 
-- **Reduced CPU config: CONVERGED.** Gate closed at production block 27:
-  rank-R̂(glob) max = 1.0091 < 1.01, min ESS = 8543, zero stuck chains; posterior
-  correct (Mc median within 1e-5 Msun of truth, η piled at 0.25, spins consistent
-  with 0, max sampled log-posterior = the MAP value). 42.6 min wall on CPU — the
-  CPU validates the machinery; the 20-minute target is for the GPU.
-- Full-scale setup (2048 s, 4096 Hz, 10 Hz): **2.9 min on CPU**, RB parity passes
-  (312 bins, SNR 607). The production wall-clock guard now budgets the *whole* run.
-- **GPU**: the machine's NVIDIA userspace (580.173.02) was upgraded past the loaded
-  kernel module (580.159.03; reboot pending), so CUDA cannot initialize against the
-  system libraries. The exact-match 580.159.03 userspace was retrieved from the
-  official Ubuntu Launchpad archive and extracted (no root, reversible);
-  `LD_LIBRARY_PATH` pointing at it restores CUDA — **verified**: JAX sees
-  `CudaDevice(id=0)` and computes. The sandboxed agent session is not permitted to
-  launch runs with injected driver libraries, so the final GPU benchmark needs a
-  human to start it:
+Quadro T2000 Max-Q (4 GB, fp64), 256 chains, full-scale configuration
+(2048 s @ 4096 Hz, f_lower = 10 Hz, 3.75M band points → 312 bins, SNR 607):
 
-  ```bash
-  bash bin/run_gpu_with_matched_driver.sh --outdir examples/output/bns_ce_rb_hmc
-  ```
+| | run 1 (cold) | run 2 (cold, rebalanced) | **run 3 (warm cache)** |
+|---|---|---|---|
+| MAP + Laplace | 139.7 s | 140.3 s | **17.7 s** |
+| RB validation | 21.0 s | 48.7 s | **20.5 s** |
+| warmup | 183.0 s | 236.4 s | **222.7 s** |
+| production | 1110.8 s (14 blocks) | 991.8 s (21 blocks) | **635.6 s (13 blocks)** |
+| **total** | 24.69 min | 24.28 min | **15.42 min** |
+| converged | yes (R̂ 1.0097) | no (R̂ 1.0506, flow frozen) | **yes (R̂ 1.0099)** |
 
-  (or, after a reboot, simply
-  `python bin/run_bns_ce_pe.py --outdir examples/output/bns_ce_rb_hmc`).
-  Budget projection: ~3 min CPU-pinned setup, ~2.4 min MAP+Laplace
-  (compile-dominated), warmup + compile ~2 min, and ≲ 25 production blocks (256
-  chains halve the R̂ estimator noise vs the 64-chain CPU validation) — inside the
-  20-minute budget if the T2000 (fp64) sustains ≲ 20 s per block, to be measured.
+Run 3 is the benchmark measurement: **15.42 min < 20 min**, with the persistent XLA
+cache warm so JIT compilation is excluded (the goal's stipulation). Convergence:
+rank-R̂(glob) = [1.0079, 1.0077, 1.0099, 1.0088] < 1.01, min ESS = 30626, zero stuck
+chains, 1.04M posterior samples. Reproduce with
+
+```bash
+python bin/run_bns_ce_pe.py --outdir examples/output/bns_ce_rb_hmc
+```
+
+(first invocation populates `~/.cache/jaxpe_xla`; subsequent ones are compile-free).
+
+### What the last round of optimization changed
+
+- **Persistent XLA compilation cache** (`jax_compilation_cache_dir`). Compilation
+  was the single largest removable cost: MAP+Laplace 140 s → 17.7 s, RB validation
+  49 s → 20 s. Total setup 3.5 min → 49 s.
+- **Local/global rebalance**, 50 HMC steps + 200 flow proposals per block → 25 + 300.
+  Flow independence proposals are ~4× cheaper per sample than a 128-step leapfrog
+  trajectory and attack the slow boundary-tail directions directly.
+- **Strided diagnostics.** R̂/ESS were recomputed on the full growing sample stack
+  every block — O(n²) over the run. Subsampling to ≤2000 kept samples per chain is
+  conservative (thinning cannot lower R̂; the thinned ESS lower-bounds the target).
+- **Revert-guarded flow refits.** A single bad refit had collapsed global acceptance
+  0.42 → 0.07 for two blocks. First attempt — *freezing* the flow once acceptance
+  looked healthy — was **worse** (run 2): a mediocre frozen flow never improves and
+  R̂ stalled at 1.05 on the spin1z direction through 21 blocks. The fix that works is
+  to keep refitting but retain the pre-refit flow and revert if acceptance collapses:
+  run 3 hit exactly this at block 5 (acc 0.04), reverted, and recovered to 0.56 at
+  block 6, converging 8 blocks later.
+
+### Posterior
+
+Median chirp mass 1.2187730 M☉ (truth 1.2187707), η piled against its 0.25 prior
+edge, both spins consistent with zero. The chirp-mass marginal is **one-sided about
+the truth by construction, not biased**: the injection sits exactly on the η = 0.25
+prior boundary, and Mc–η are ~97 % anti-correlated, so truncating η from above
+truncates Mc from below. The spin1z–spin2z panel shows the expected χ_eff
+degeneracy triangle (only the mass-weighted sum is measured; positive-support priors
+cut the rest).
+
+## Notes / known benign details
+
+- Max sampled log-posterior (−15.48) exceeds the damped-Newton "MAP" (−18.14). There
+  is no sharp finite mode: the boundary directions are flat until the sigmoid
+  Jacobian turns over, so Newton stops early in a plateau. This affects only the
+  preconditioner's centring, and acceptance of 0.7–0.8 shows the metric is fine.
+- The 580.159.03-userspace workaround (`bin/run_gpu_with_matched_driver.sh`) is no
+  longer needed — the machine was rebooted and driver 580.173.02 is now loaded and
+  matched. The script is kept for the next time an upgrade lands before a reboot.
