@@ -91,6 +91,22 @@ Encapsulates the physical prior distribution and the likelihood function, handli
 **`jaxpe.core.transforms.Bijection`**
 The base class for geometric diffeomorphisms (like `Identity`, `Affine`, `Interval`) that seamlessly push parameters to the unconstrained real line while tracking the local volume Jacobian.
 
+- **`Identity`**: The identity map $f(y) = y$ with a zero log-Jacobian.
+- **`Affine`**: An affine transformation mapping $y$ to $x = \text{loc} + \text{scale} \times y$.
+- **`Interval`**: A bounded transformation mapping $\mathbb{R}$ onto $(low, high)$ using a scaled logistic sigmoid $x = low + (high - low) \times \sigma(y)$.
+
+### `Prior`
+**`jaxpe.core.priors.Prior`**
+Base class for 1-D physical parameter priors.
+
+- **`Uniform`**: A uniform prior distribution on $[low, high]$.
+- **`LogUniform`**: A log-uniform prior where $p(x) \propto 1/x$.
+- **`PowerLaw`**: A power-law prior where $p(x) \propto x^\alpha$.
+- **`Sine`**: A prior proportional to $\sin(x)$ for angles (e.g., inclination).
+- **`Cosine`**: A prior proportional to $\cos(x)$ for angles (e.g., declination).
+- **`Gaussian`**: A standard Gaussian prior parameterized by $\mu$ and $\sigma$.
+- **`Fixed`**: A delta prior for parameters pinned to a constant value.
+
 ---
 
 ### REFERENCES
