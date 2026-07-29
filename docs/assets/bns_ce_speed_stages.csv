@@ -14,3 +14,4 @@ flow spline interval 8 -> 16 (seed 7),40.61,44.45,72.69,415.81,574.75,48,1.0099,
 flow spline interval 8 -> 32 (seed 42),40.60,43.28,79.80,67.77,232.24,8,1.0093,7686,0,NOT REPRODUCIBLE: seed 7 needs 55 blocks
 flow spline interval 8 -> 32 (seed 7),40.61,42.90,77.35,480.85,642.73,55,1.0094,7183,0,same config as above; 2.8x the reference time
 ensemble-covariance metric (local acc 0.00),40.58,42.52,75.91,124.27,284.10,13,1.0094,12327,0,REJECTED: flow-only sampler
+cycled narrow(8)+wide(32) kernels (seed 42),40.10,47.83,58.07,246.95,393.85,26,1.0097,11448,1,wide component acc 0.02; contributes nothing

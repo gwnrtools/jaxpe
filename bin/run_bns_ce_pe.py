@@ -506,8 +506,27 @@ def run_pe(problem, y_map, cov0, args, timings):
     flow, losses = fit_flow(
         k_fit, flow, flow_train_set(k_fit), n_epochs=args.flow_epochs, batch_size=512
     )
+    # Optional SECOND flow with a wider spline interval, used as a cycled kernel in
+    # production (see the production loop). Fitted on the same training set, so the
+    # only difference is proposal reach.
+    flow_wide = None
+    if args.flow_interval_wide > 0.0:
+        key, k_makew, k_fitw = jax.random.split(key, 3)
+        flow_wide = make_flow(k_makew, n_dim, interval=args.flow_interval_wide)
+        flow_wide, losses_w = fit_flow(
+            k_fitw,
+            flow_wide,
+            flow_train_set(k_fitw),
+            n_epochs=args.flow_epochs,
+            batch_size=512,
+        )
     timings["flow_fit"] = time.perf_counter() - t0
-    print(f"flow fit: loss {losses[-1]:.3f}  [{timings['flow_fit']:.1f}s]")
+    wide_note = (
+        f", wide(interval {args.flow_interval_wide:g}) loss {losses_w[-1]:.3f}"
+        if flow_wide is not None
+        else ""
+    )
+    print(f"flow fit: loss {losses[-1]:.3f}{wide_note}  [{timings['flow_fit']:.1f}s]")
 
     # ---- equilibration: bootstrap the flow, and reach stationarity, BEFORE the
     # kept series starts ----
@@ -736,11 +755,36 @@ def run_pe(problem, y_map, cov0, args, timings):
         kept.append(np.asarray(ys))
         kept_lp.append(np.asarray(lps))
 
-        y0, logp0, gys, glps, g_acc = _global_block(
-            flow, k_glob, y0, logp0, logp, args.n_global
-        )
-        kept.append(np.asarray(gys))
-        kept_lp.append(np.asarray(glps))
+        if flow_wide is None:
+            y0, logp0, gys, glps, g_acc = _global_block(
+                flow, k_glob, y0, logp0, logp, args.n_global
+            )
+            kept.append(np.asarray(gys))
+            kept_lp.append(np.asarray(glps))
+        else:
+            # CYCLE two independence-MH kernels instead of picking one spline
+            # interval. Measured: a wide interval reaches the Exponential(~1)
+            # boundary tails and cuts the block count hard (25 -> 8 at one seed),
+            # but collapses acceptance to ~0.1, and at that acceptance whether the
+            # useful jumps land early is luck -- seed 42 gave 3.87 min and seed 7
+            # gave 10.71 min on the identical configuration. The narrow flow keeps
+            # acceptance healthy and the run reproducible; the wide one supplies
+            # the rare long jumps. Cycling is exact: each sub-block is a valid
+            # independence-MH kernel targeting the posterior, and a composition of
+            # posterior-invariant kernels is posterior-invariant -- no mixture
+            # density and no reweighting needed.
+            k_gn, k_gw = jax.random.split(k_glob)
+            n_half = args.n_global // 2
+            y0, logp0, gys_n, glps_n, g_acc = _global_block(
+                flow, k_gn, y0, logp0, logp, n_half
+            )
+            y0, logp0, gys_w, glps_w, g_acc_w = _global_block(
+                flow_wide, k_gw, y0, logp0, logp, args.n_global - n_half
+            )
+            gys = np.concatenate([np.asarray(gys_n), np.asarray(gys_w)])
+            glps = np.concatenate([np.asarray(glps_n), np.asarray(glps_w)])
+            kept.append(gys)
+            kept_lp.append(glps)
         if flow_prev is not None:
             # first block on a fresh refit: revert it if acceptance collapsed
             # (a single bad refit poisoned two blocks at acc 0.07, measured);
@@ -775,7 +819,9 @@ def run_pe(problem, y_map, cov0, args, timings):
         n_stuck = int((lp_now < np.median(lp_now) - 20.0).sum())
         print(
             f"production block {block + 1}: acc {float(jnp.mean(infos.accepted)):.2f}, "
-            f"global acc {float(g_acc):.2f}, "
+            f"global acc {float(g_acc):.2f}"
+            + (f"/{float(g_acc_w):.2f}w" if flow_wide is not None else "")
+            + ", "
             f"rank-Rhat(glob) {np.array2string(rhat, precision=4)}, "
             f"raw-Rhat max {rhat_raw.max():.4f}, "
             f"min ESS {ess.min():.0f}, stuck {n_stuck}  [{elapsed:.1f}s]"
@@ -801,6 +847,17 @@ def run_pe(problem, y_map, cov0, args, timings):
             flow, _ = fit_flow(
                 k_fit, flow, flow_train_set(k_fit), n_epochs=15, batch_size=512
             )
+            if flow_wide is not None:
+                # refit the wide flow on the same fresh window. No revert guard on
+                # this one: its acceptance is expected to be low by construction, so
+                # the guard's "acceptance collapsed" test cannot distinguish a bad
+                # refit from normal operation. The narrow kernel is what carries
+                # reproducibility, and it keeps its guard.
+                key, k_fitw = jax.random.split(key)
+                flow_wide, _ = fit_flow(
+                    k_fitw, flow_wide, flow_train_set(k_fitw), n_epochs=15,
+                    batch_size=512,
+                )
     timings["production"] = time.perf_counter() - t0
 
     ally = np.concatenate(kept)
@@ -860,6 +917,12 @@ def main():
     )
     ap.add_argument("--flow-acc-target", type=float, default=0.65)
     ap.add_argument("--flow-interval", type=float, default=8.0)
+    # > 0 enables a SECOND flow at this wider interval, cycled with the narrow one
+    # in production. Measured motivation: a single wide flow reaches the boundary
+    # tails and cuts blocks 25 -> 8, but collapses acceptance to ~0.1 and makes the
+    # run a lottery (3.87 min at one seed, 10.71 min at another). Cycling keeps the
+    # narrow kernel's acceptance and reproducibility while still reaching the tails.
+    ap.add_argument("--flow-interval-wide", type=float, default=0.0)
     ap.add_argument(
         "--reference",
         action="store_true",

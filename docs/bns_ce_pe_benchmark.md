@@ -532,6 +532,26 @@ honestly across the two seeds measured, the final configuration converges in
 that rests on single-seed timings inherits that same caveat — differences smaller
 than ~15 % between two single-seed runs are not resolved by the data.
 
+**Cycling a narrow and a wide kernel does not recover the best case.** The obvious
+repair is to stop choosing an interval and instead alternate two independence-MH
+kernels per block — half the proposals from the narrow flow (healthy acceptance,
+reproducible), half from a wide one (rare long jumps). This is exact: each sub-block
+leaves the posterior invariant, so their composition does too, with no mixture
+density or reweighting. It is available as `--flow-interval-wide` (default off).
+
+Measured at seed 42: **6.56 min, 26 blocks**, against 6.19 min / 25 blocks for the
+narrow flow alone. The per-block log explains it — the wide component's acceptance is
+**0.02**, rising only to 0.12 by the final block. It contributes almost nothing while
+consuming half the global proposals and an extra flow fit (9.5 s → 14.7 s), and
+block-1 R̂ degrades to 1.15–1.27 (from ~1.10) because the effective global sample
+count is halved.
+
+That result also reinterprets the interval-32 run. "8 blocks at seed 42" looked like
+evidence that *long jumps help*; if that were the mechanism, supplying those same
+jumps alongside a healthy narrow kernel would have reproduced the benefit. It did
+not. The 8-block run was a lucky trajectory, not a transferable mechanism — which is
+consistent with its 10.71 min counterpart at seed 7.
+
 Two lessons, both general:
 
 - **A single-seed timing is not a measurement** when the sampler's acceptance is low.
