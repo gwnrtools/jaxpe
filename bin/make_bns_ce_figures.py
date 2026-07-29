@@ -19,6 +19,14 @@ per-run stdout logs -- and writes two PNGs into ``docs/assets``:
     budget and the two gate thresholds are drawn, so the claim "converged inside
     the budget" is read directly off the axes.
 
+``bns_ce_speed_stages.png``
+    Where the wall clock goes, per configuration, for the speed-optimization
+    round: the four pipeline stages stacked to the run's total, read off the
+    ``timings:`` line each run prints. Configurations that converged with a live
+    local HMC kernel are drawn solid; one that hit a low total only because its
+    local acceptance had collapsed to zero is hatched and labelled rejected, so
+    the figure cannot be read as endorsing it.
+
 Run: python bin/make_bns_ce_figures.py
 """
 
@@ -36,6 +44,11 @@ import numpy as np
 # the aqua slot is below 3:1 on white, so every series is also direct-labelled)
 SERIES = ("#2a78d6", "#eb6834", "#1baf7a")
 INK, MUTED = "#0b0b0b", "#52514e"
+# The pipeline stages are *ordered in time*, not unrelated categories, so they take
+# an ordinal single-hue ramp (blue 250/350/450/600) rather than categorical hues.
+# Validated with scripts/validate_palette.js --ordinal: monotone lightness, all
+# adjacent dL >= 0.06, light end 2.06:1 on white.
+STAGES = ("#86b6ef", "#5598e7", "#2a78d6", "#184f95")
 
 BLOCK_RE = re.compile(
     r"production block (\d+):.*?rank-Rhat\(glob\) \[([^\]]+)\].*?"
@@ -278,6 +291,106 @@ def convergence_figure(runs, out):
     return out
 
 
+def speed_stages_figure(csv, out):
+    """Stacked wall-clock breakdown per configuration of the speed-optimization round."""
+    rows = np.genfromtxt(csv, delimiter=",", names=True, dtype=None, encoding="utf-8")
+    cols = ("setup_s", "warmup_flow_s", "equilibration_s", "production_s")
+    labels = (
+        "setup (PSD, injection, RB, MAP+Laplace, validation)",
+        "warmup + flow fit",
+        "equilibration (discarded)",
+        "production (to the convergence gate)",
+    )
+    y = np.arange(len(rows))[::-1]  # first CSV row at the top
+
+    fig, ax = plt.subplots(figsize=(11.5, 0.95 * len(rows) + 2.2))
+    left = np.zeros(len(rows))
+    for col, lab, c in zip(cols, labels, STAGES):
+        w = np.array([r[col] for r in rows]) / 60.0
+        ax.barh(
+            y,
+            w,
+            left=left,
+            height=0.62,
+            color=c,
+            label=lab,
+            # a 2px surface gap between adjacent segments keeps the boundary
+            # readable without a dark outline competing with the fills
+            edgecolor="white",
+            linewidth=2.0,
+            # the rejected configuration is hatched so its (attractive) total
+            # cannot be skim-read as a result
+            hatch=["" if r["sound"] else "///" for r in rows],
+        )
+        left += w
+
+    for yi, r in zip(y, rows):
+        tot = r["total_s"] / 60.0
+        ax.annotate(
+            f"{tot:.2f} min" + ("" if r["sound"] else "  ✗ rejected"),
+            (tot, yi),
+            xytext=(8, 0),
+            textcoords="offset points",
+            fontsize=10,
+            fontweight="bold",
+            color=INK if r["sound"] else "#d03b3b",
+            va="center",
+        )
+
+    # the per-run detail rides in the tick label, not inside the bar: a note drawn
+    # over the stack is unreadable against the darker segments
+    ax.set_yticks(y)
+    ax.set_yticklabels(
+        [
+            # spelled "Rhat": the combining-circumflex glyph mis-stacks in the
+            # default sans font at this size
+            f"{r['config']}\n{r['blocks']} blocks · Rhat {r['rhat']:.4f} · {r['note']}"
+            for r in rows
+        ],
+        fontsize=9.5,
+        color=INK,
+    )
+    ax.set_xlabel("wall clock  [min]", fontsize=10, color=INK)
+    ax.set_xlim(0, 18.0)
+    ax.grid(True, axis="x", color="#e6e6e3", linewidth=0.8)
+    ax.set_axisbelow(True)
+    for side in ("top", "right", "left"):
+        ax.spines[side].set_visible(False)
+    ax.spines["bottom"].set_color("#c9c9c4")
+    ax.tick_params(colors=MUTED, labelsize=9)
+
+    for x, txt, col, ha in (
+        (4.0, "4 min goal ", "#d03b3b", "right"),
+        (15.42, " round-1: 15.4 min", MUTED, "left"),
+    ):
+        ax.axvline(x, color=col, linestyle=":", linewidth=1.4)
+        ax.text(
+            x, len(rows) - 0.45, txt, fontsize=9, color=col, va="bottom", ha=ha
+        )
+
+    ax.legend(
+        frameon=False,
+        fontsize=9,
+        labelcolor=INK,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.11),
+        ncol=4,
+        columnspacing=1.4,
+        handlelength=1.4,
+    )
+    fig.suptitle(
+        "BNS/CE parameter estimation: where the wall clock goes, per configuration",
+        fontsize=12.5,
+        color=INK,
+        x=0.02,
+        ha="left",
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.95))
+    fig.savefig(out, dpi=140, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--rundir", default="examples/output/bns_ce_rb_hmc")
@@ -302,6 +415,15 @@ def main():
             f"Rhat {d[1][-1]:.4f}, ESS {d[2][-1]:.0f}"
         )
     print("wrote", convergence_figure(runs, assets / "bns_ce_convergence.png"))
+
+    stages_csv = assets / "bns_ce_speed_stages.csv"
+    if stages_csv.exists():
+        print(
+            "wrote",
+            speed_stages_figure(stages_csv, assets / "bns_ce_speed_stages.png"),
+        )
+    else:
+        print(f"skipping the stage breakdown: no {stages_csv}")
 
 
 if __name__ == "__main__":

@@ -143,22 +143,40 @@ spins slide along the anti-diagonal until the positive-support priors cut them o
 python bin/make_bns_ce_figures.py     # reads examples/output/bns_ce_rb_hmc/
 ```
 
-[`bin/make_bns_ce_figures.py`](../bin/make_bns_ce_figures.py) rebuilds both figures
-from the run artefacts, so every number on the axes traces back to a measurement
-rather than to this page. The convergence series is cached to
-[`docs/assets/bns_ce_convergence.csv`](assets/bns_ce_convergence.csv) — the raw
-stdout logs fall under the repo's `*.log` ignore, so that CSV is the committed
-evidence and the left-hand figure regenerates from a clean checkout. The corner plot
-needs `samples.npz` (1.04M × 4 float64, ~40 MB, deliberately untracked); rerun the PE
-to regenerate it.
+[`bin/make_bns_ce_figures.py`](../bin/make_bns_ce_figures.py) rebuilds all three
+figures from the run artefacts, so every number on the axes traces back to a
+measurement rather than to this page. The convergence series is cached to
+[`docs/assets/bns_ce_convergence.csv`](assets/bns_ce_convergence.csv) and the
+per-configuration stage timings to
+[`docs/assets/bns_ce_speed_stages.csv`](assets/bns_ce_speed_stages.csv) — the raw
+stdout logs fall under the repo's `*.log` ignore, so those CSVs are the committed
+evidence and both figures regenerate from a clean checkout. The corner plot needs
+`samples.npz` (1.04M × 4 float64, ~40 MB, deliberately untracked); rerun the PE to
+regenerate it.
 
 ## Speed round 2: chasing a 4-minute budget
 
-A follow-up goal asked for the same PE inside **4 minutes**. That was **not
-achieved**: the best configuration lands at ~7–10 min wall clock (warm compile
-cache), against 15.4 min for the reference. This section records what moved the
-number, what did not, and the measurement chain that bounds the floor — the
-negative results are the more useful half.
+A follow-up goal asked for the same PE inside **4 minutes**. The best *sound*
+configuration lands at **6.16 min** wall clock on the 1.4 + 1.4 M☉ source (warm
+compile cache), against 15.42 min for the reference — so 4 minutes is not reached,
+but the earlier claim on this page that it was unreachable has been **retracted**;
+see [Retraction](#retraction-the-floor-argument-was-wrong) below. Note that 6.16 min
+is this configuration *on this source*: a 1.35 + 1.25 M☉ injection runs the same
+settings with no retuning but needs more blocks
+([Generality](#generality-no-per-source-tuning)). This section records what moved the
+number and what did not — the negative results are the more useful half.
+
+![Wall-clock breakdown by pipeline stage for five configurations, from the 15.4-minute round-1 reference down to 6.16 minutes, with a rejected 4.74-minute run hatched](assets/bns_ce_speed_stages.png)
+
+Every bar is one run's `timings:` line, stacked to its own total; the numbers are
+regenerated from [`docs/assets/bns_ce_speed_stages.csv`](assets/bns_ce_speed_stages.csv)
+by `bin/make_bns_ce_figures.py`. Two things are readable directly off it. First,
+**production dominates** in every configuration — setup is ~40 s and flat, so the
+optimization target is the sampler, not the pipeline around it. Second, the
+hatched bar is the one that hit 4.74 min: it is hatched because its local HMC
+acceptance was exactly 0.00 for all 13 blocks, i.e. it converged as a
+*flow-only* independence sampler with a dead gradient kernel. It is recorded, not
+claimed.
 
 ### Where the time actually goes
 
@@ -192,6 +210,13 @@ help; only **fewer gradient evaluations** or a cheaper waveform would.
 - **Equilibration before the kept series.** Discarded flow rounds spread the chains
   and bootstrap the flow, so production starts at stationarity instead of burning
   blocks on a transient that R̂ cannot distinguish from non-convergence.
+- **Re-tuning ε *after* equilibration, against the equilibrated positions** — the
+  single largest sampler-side win of round 2 (10.56 → 6.16 min). Warmup adapts the
+  step size while the chains are still inside a 0.3σ ball, where the curvature is
+  not the curvature they will actually see; three discarded local blocks after
+  equilibration fix that, and are what make L = 32 viable. Note this is *not* the
+  same as the failed "re-tune to 0.75 acceptance" experiment below: the re-tune
+  targets the same acceptance as warmup, it just does so at the right positions.
 - **O(n) diagnostics.** R̂/ESS were recomputed over the whole growing sample stack
   every block — O(n²) across a run. Each block is now decimated on arrival.
 - **Forward-mode C¹ matching in IMRPhenomD** (`_value_and_deriv`). PhenomD used six
@@ -209,10 +234,12 @@ help; only **fewer gradient evaluations** or a cheaper waveform would.
   fiducial check returned lnL = −34 instead of 0. The coalescence-time phase can be
   cancelled analytically (t_c is fixed, so it divides out of the heterodyne ratio),
   but the *intrinsic* phase cannot. Single precision is unusable for long inspirals.
-- **Shorter trajectories + more flow proposals.** A flow proposal costs ~1/300 of a
-  128-step trajectory, so this looked like free mixing. It is not: cutting L 128 →
-  32 starved the flow's training data and took 40 blocks without converging.
-  Long trajectories do work the flow cannot replace.
+- **Shorter trajectories + more flow proposals,** *at fixed ε*. A flow proposal
+  costs ~1/300 of a 128-step trajectory, so this looked like free mixing. Cutting
+  L 128 → 32 took 40 blocks without converging. **Superseded:** the cause was the
+  inherited step size, not the trajectory length — with a post-equilibration ε
+  re-tune, L = 32 converges in 25 blocks and 6.16 min. See
+  [Trajectory length is coupled to the step size](#trajectory-length-is-coupled-to-the-step-size).
 - **Longer trajectories at fixed ε** (L = 192). Acceptance collapsed to 0.03–0.19:
   ε adapted at one trajectory length does **not** transfer to another, because
   leapfrog energy error accumulates along the trajectory.
@@ -223,46 +250,233 @@ help; only **fewer gradient evaluations** or a cheaper waveform would.
   ~350 s of sampling: a worse mode gives a worse Laplace metric, and production
   acceptance fell from ~0.45 to ~0.17.
 
-### The floor
+### Retraction: the floor argument was wrong
 
-Convergence needs ~30k leapfrog steps; each has ~1.7 ms of irreducible serial cost;
-that is ~50–90 s of production before any overhead, and ~7 min end-to-end in
-practice. Getting to 4 minutes needs one of: a GPU with real f64 throughput (this is
-a consumer part at 1/32), a cheaper waveform gradient, or a weaker convergence gate.
-The remaining in-code lever is that `Phase`/`Amp` evaluate **all three** regions at
-every frequency and select with heaviside masks — JAX evaluates both sides of an
-elementwise `where`, so every bin pays 3× (grad Phase 13,038 HLO lines vs 3,121 for
-inspiral-only). Skipping regions needs a static decision, but the transition
-frequencies depend on the sampled masses; specialising on "the whole band is
-inspiral" would be true for BNS and false in general, so it is a design change, not
-a tweak.
+An earlier revision of this page argued that ~30k leapfrog steps × ~1.7 ms of
+irreducible serial cost put a ~7-minute end-to-end floor on this problem, and
+concluded that 4 minutes was unreachable without different hardware. **The
+arithmetic was right and the premise was not.** It took the ~128-step trajectory
+length as given, when that length was itself an artefact of a mis-scaled metric —
+so it bounded the cost of the wrong sampler. The corrected statement is that the
+step count is a *tuning outcome*, not a property of the posterior, and the honest
+floor is unknown until the tuning is exhausted.
+
+What made the difference is below; it is the reason the number moved from ~10.5 min
+to 6.16 min after that paragraph was written.
+
+### Trajectory length is coupled to the step size
+
+Round 1 established that L = 12 → 48 → 128 monotonically improved R̂ and that
+cutting L to 32 "starved the flow" (40 blocks, no convergence). Both observations
+are real, and together they are misleading, because **ε was never re-tuned at the
+new L**. This page already records that ε does not transfer across trajectory
+lengths (L 96 → 192 at fixed ε collapsed acceptance to 0.03–0.19); the same
+non-transfer applies downward, and the short-L test inherited a step size adapted
+for a long one.
+
+Adding a short **ε re-tune after equilibration** — three discarded local blocks that
+re-run Robbins–Monro against the current metric and the *equilibrated* chain
+positions, rather than the initial ball — makes L = 32 work:
+
+| configuration | L | ε after tuning | production acc | blocks | total |
+|---|---|---|---|---|---|
+| round-2 committed | 96 | 0.153 (warmup only) | 0.94–0.96 | 28 | 10.56 min |
+| + post-equilibration ε re-tune | 32 | 0.255 | 0.69–0.86 | 25 | **6.16 min** |
+
+Note the acceptance column: the 10.56-min configuration was running at 0.95
+acceptance, which for HMC means the step size was far too small and most of the
+gradient work was buying almost no displacement. The re-tune is what exposed that,
+because it adapts where the chains actually are. Block count barely changed
+(28 → 25); the whole gain is that each block now costs 7.5 s instead of 15 s.
+
+Reproduced twice back to back (6.14 / 6.16 min, identical R̂ 1.0099 and min ESS
+19919), so this is not step-size lottery.
+
+**L ≈ 32 is the knee, and so is the local/global split.** Both halvings were then
+tested back to back against it, each changing one thing:
+
+| change from the 6.16-min configuration | steady-state block cost | blocks | total |
+|---|---|---|---|
+| — | 8.4 s | 25 | **6.16 min** |
+| L 32 → 16 (400 fewer leapfrog steps/block) | 7.0 s | 26* | 7.01 min* |
+| flow globals 1200 → 600 | 6.8 s | 35 | 6.54 min |
+
+(*measured on the local-blocks-in-equilibration variant, so compare its production
+against that variant's 33 blocks / 311 s, not against the 25 / 213 above.)
+
+Each halving buys ~1.5 s per block and costs 8–10 extra blocks, so each is a net
+loss. The two samplers are close to balanced, which is why this configuration
+behaves like an optimum rather than an arbitrary point: **re-balancing local against
+global is exhausted as a lever.**
+
+**Equilibration is also at its knee.** Cutting it 5 rounds → 3 saves 17 s and costs
+107 s: production ran 37 blocks instead of 25. The log says why — global acceptance
+in production block 1 was 0.38 against 0.59 with five rounds. The last two rounds
+are not spreading chains that are already spread; they are *training the flow*, and
+an undertrained flow costs a dozen production blocks. `--n-chains` was not swept:
+round 1 measured per-step cost as sublinear in chains (16 → 512 chains, 1.86 → 8.32
+ms), so 64 → 32 buys ~20 % per step while halving the samples per block.
+
+Subtracting both local/global deltas from the 8.4 s block leaves ~2 s that is
+neither sampler.
+That residual was then measured directly rather than inferred, and it is diffuse,
+not one hotspot: the decimated diagnostics cost 0.05 s per block early and 0.67 s at
+block 25 (rank-normalized split-R̂ on the global subseries and on all samples, plus
+Geyer ESS), and the flow refit every 4th block amortizes to ~0.75 s. The remainder
+is `to_phys` over the accumulated decimated stack, the device→host transfer of the
+global block (~2.4 MB, fetched more than once), and host sync. Removing all of it
+optimistically returns ~30 s over a run, ~8 % — worth doing, but not a route to
+4 minutes on its own.
+
+### The metric: measured, and a smaller lever than it looked
+
+The MAP-Laplace covariance is the curvature *at the mode*, and this posterior is
+badly non-Gaussian there — the η → 1/4 and χ → 0 pileups give heavy tails, so the
+mode is much sharper than the actual spread. Measured against 1.94M production
+samples:
+
+| direction | posterior σ | Laplace σ | ratio |
+|---|---|---|---|
+| chirp mass | 1.002e-06 | 2.61e-07 | 3.84 |
+| η | 1.494e-04 | 2.98e-05 | 5.01 |
+| spin1z | 6.017e-04 | 1.18e-04 | 5.10 |
+| spin2z | 6.381e-04 | 1.19e-04 | 5.36 |
+
+(physical marginals, reproducible from `samples.npz` against the `sigma_phys` line
+the run prints; the corresponding unconstrained-space eigen-spectra differ by
+11–21×, but that comparison sorts two spectra independently and is only indicative).
+
+The metric is therefore genuinely too narrow — but **the ratio is nearly uniform
+across directions**, and a uniform under-scaling of the mass matrix is exactly what
+the step size absorbs. Only the *anisotropy* matters for preconditioning, and that
+spans less than 1.4× here. This is the correction to the hypothesis that drove three
+runs: the mis-scaled metric was real, was worth fixing, and was **not** the dominant
+cost — re-tuning ε against it (previous section) captured essentially all of the
+available gain.
+
+The three attempts to replace the metric outright, all measured:
+
+| attempt | metric σ_y (chirp mass) | result |
+|---|---|---|
+| ensemble covariance over all equilibration rounds | 6.4e-4 (true ~1.6e-5) | **4.74 min but local acc 0.00** — a flow-only sampler; rejected |
+| + log-posterior outlier cut, final round only, revert guard | 7.0e-4 | guard fires, reverts to Laplace, 6.14 min |
+| + local HMC blocks interleaved into equilibration | 6.6e-4 | no improvement; +35 s equilibration, 8.39 min |
+
+The failure mode is consistent across all three: the equilibration ensemble is
+~40× **over-dispersed in the chirp-mass direction**, which is five orders of
+magnitude tighter than the others. A covariance estimated from it proposes
+trajectories that leave the Mc ridge immediately, and acceptance goes to exactly
+zero. Filtering the ensemble by log-posterior changed the estimate by 0.03 %
+(7.019e-4 vs 7.021e-4), which rules out "a few stranded chains" and says the whole
+ensemble is over-dispersed — the flow's independence proposals cannot resolve a
+1.6e-5-wide ridge, and interleaving local moves (attempt 3) does not pull them back
+fast enough to matter. The revert guard — drop back to the Laplace metric if local
+acceptance collapses after the re-tune — is what keeps this safe rather than silent.
+
+**Soundness criterion adopted here:** a configuration counts only if the local HMC
+kernel has non-zero acceptance in production. A flow-only sampler that passes R̂ and
+ESS is not the thing this benchmark is measuring, and its wall time is not
+comparable to the others.
+
+### What is left
+
+The sampler-configuration sweep is exhausted: every knob moved off the 6.16-minute
+configuration made it worse, in both directions where both were tried.
+
+| knob | values tried | best alternative |
+|---|---|---|
+| trajectory length L | 16, 32, 96 | 7.01 min (L = 16) |
+| flow proposals per block | 600, 1200 | 6.54 min (600) |
+| equilibration rounds | 3, 5 | 7.68 min (3) |
+| mass matrix | Laplace, 3 ensemble variants | 8.39 min, or unsound |
+
+That is what makes 6.16 min a defensible number rather than a lucky draw, and it
+also means the remaining distance to 4 minutes is not in the sampler's settings.
+
+Production is still ~58 % of the run and each leapfrog step carries ~1.7 ms of
+fixed serial cost (measured: cost is sublinear in chains and flat in bin count, so
+it is IMRPhenomD's ~3600-op coefficient chain, not array work). The remaining
+in-code lever is that `Phase`/`Amp` evaluate **all three** regions at every frequency
+and select with heaviside masks — JAX evaluates both sides of an elementwise `where`,
+so every bin pays 3× (grad `Phase` 13,038 HLO lines vs 3,121 for inspiral-only).
+Skipping regions needs a static decision, but the transition frequencies depend on
+the sampled masses; specialising on "the whole band is inspiral" would be true for
+BNS and false in general, so it is a design change, not a tweak.
 
 ### Generality (no per-source tuning)
 
 Everything above is derived at runtime from the data and priors, not fitted to the
 1.4+1.4 source. The equal-mass hard-coding that did exist was removed: component
 masses are now `--mass1/--mass2`, η's truth comes from them, and the optimiser start
-is the fiducial point inset from whichever prior edges it happens to touch. Verified
-by rerunning a **1.35 + 1.25 M☉** injection with no retuning: same bin count (125),
-relative-binning parity passes on its own waveform (6.2e-2 < 0.1), and warmup adapts
-to ε = 0.301 against 0.298 for the equal-mass source.
+is the fiducial point inset from whichever prior edges it happens to touch. Rerunning
+a **1.35 + 1.25 M☉** injection with no retuning exercises that: same bin count (125),
+relative-binning parity passes on its own waveform (6.2e-2 < 0.1), warmup adapts to
+its own ε (0.325 vs 0.322), and the post-equilibration re-tune to its own (0.283 vs
+0.255). Nothing needed a per-source constant.
+
+**But the wall clock does not carry over, and that distinction matters.** The
+*configuration* is source-independent; the *6.16-minute number* is not a property of
+the configuration alone, it is a property of the configuration applied to this
+source. Measured under the L = 32 setup:
+
+| source | network SNR | blocks | total | R̂ | min ESS |
+|---|---|---|---|---|---|
+| 1.4 + 1.4 M☉ | 607 | 25 | 6.16 min | 1.0099 | 19919 |
+| 1.35 + 1.25 M☉ | 571 | 42 | 8.69 min | 1.0099 | 12408 |
+
+The unequal-mass source is simply a harder posterior — it also needed 35 blocks under
+the older L = 96 configuration, against 28 for equal mass, so this is not something
+the speed work introduced. Flow acceptance is comparable between the two (mean 0.48
+vs 0.55), so the flow is not the discriminator; the likely driver is that η's truth
+sits just *inside* its prior edge (0.24963) rather than exactly on it, which trades
+a pinned corner for a genuinely curved two-dimensional ridge.
+
+One real defect surfaced here and is fixed: `--max-production-blocks` defaulted to
+**40**, which the unequal-mass run hit at R̂ = 1.0107 and therefore reported as
+`converged: False`. Re-run with the cap raised, the identical configuration
+converges at block 42 — it was two blocks short. A cap that converts "needs slightly
+longer" into "failed" is measuring the cap, not the sampler; `--max-minutes` is the
+real budget guard, so the default is now 80.
+
+The unequal-mass posterior also reproduces the *shape* effects documented for the
+equal-mass one, which is the more useful part of this check: chirp mass recovered to
+the printed precision, both spins piled above their zero-support prior floor
+(median ~6e-4, 90 % CI excluding 0), and η's median sitting ~2σ *below* its truth
+(0.24935 vs 0.24963) for exactly the reason given under
+[Posterior](#posterior) — forcing χ ≥ 0 pushes η down through the χ_eff–η
+anti-correlation. Seeing the same signature at a source whose η truth is *not* on
+the prior edge is evidence that it is prior geometry rather than anything
+source-specific.
 
 ### Posterior validation, and calibrating the JS threshold
 
-Halving the bins could in principle bias the posterior, so the fast configuration is
-compared to the 15.4-minute reference sample-set to sample-set
+Halving the bins, shortening the trajectories and re-tuning the step size could all
+in principle bias the posterior, so the fast configuration is compared to the
+15.4-minute reference sample-set to sample-set
 ([`bin/compare_bns_posteriors.py`](../bin/compare_bns_posteriors.py)):
 
 | comparison | worst JS | worst median shift |
 |---|---|---|
-| 312-bin reference vs 125-bin fast | 2.1e-3 | 0.018 σ |
+| 312-bin reference vs **final 6.16-min configuration** | **2.1e-3** | 0.022 σ |
+| 312-bin reference vs the earlier 125-bin config | 2.1e-3 | 0.018 σ |
 | **control:** two independent 125-bin runs | **4.6e-3** | 0.047 σ |
 
-The control is the point: re-running the sampler moves the posterior *more* than
-halving the bins does. The binning change is therefore below the Monte Carlo noise
-floor, and the 1e-3 threshold quoted in the relative-binning status page — which
-belongs to a deterministic grid comparison — is simply not applicable to
-sample-based comparisons at these sizes.
+The control is the point: re-running the sampler moves the posterior *more* than any
+of these changes do. They are therefore below the Monte Carlo noise floor, and the
+1e-3 threshold quoted in the relative-binning status page — which belongs to a
+deterministic grid comparison — is simply not applicable to sample-based comparisons
+at these sizes.
+
+Truth recovery under the final configuration is +1.80 σ in chirp mass and −1.82 σ in
+η, with both spins ~+1 σ. Those are not small numbers and they are not noise: they
+are the prior-boundary signature described under [Posterior](#posterior), and they
+appear at the same magnitude in the 15.4-minute reference. A change that left the
+sampler unbiased would have to reproduce them, and it does — which is what this
+comparison is testing.
+
+Reproducibility of the headline number, three consecutive runs of the final
+configuration: **6.14 / 6.16 / 6.19 min**, each converging at block 25 with R̂ 1.0099
+and min ESS 19919.
 
 ## Notes / known benign details
 

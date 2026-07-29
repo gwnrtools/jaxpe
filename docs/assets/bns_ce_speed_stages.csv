@@ -1,0 +1,9 @@
+config,setup_s,warmup_flow_s,equilibration_s,production_s,total_s,blocks,rhat,min_ess,sound,note
+round 1 reference (312 bins/256 chains/L=128),48.94,239.60,0.0,635.63,925.01,13,1.0099,30626,1,the 15.4-min benchmark
++ 125 bins/64 chains/Polyak eps/equilibration (L=96),42.37,50.14,76.42,463.88,633.72,28,1.0099,17347,1,round-2 committed config
++ L=32 with post-equilibration eps re-tune,41.26,42.05,71.87,213.36,369.40,25,1.0099,19919,1,best sound configuration
++ local HMC blocks inside equilibration,40.76,43.84,106.34,311.28,503.22,33,1.0091,17281,1,no metric improvement; slower
+same code at L=16 instead of L=32,40.50,43.66,108.44,226.94,420.45,26,1.0093,5516,1,cheaper blocks but more of them; L=32 is the knee
+flow globals halved (1200 -> 600 per block),40.84,43.11,67.18,240.08,392.10,35,1.0097,16142,1,cheaper blocks but +10 of them; net loss
+equilibration 5 rounds -> 3,41.08,43.62,55.15,319.84,460.66,37,1.0098,20529,1,saves 17 s; costs 107 s via an undertrained flow
+ensemble-covariance metric (local acc 0.00),40.58,42.52,75.91,124.27,284.10,13,1.0094,12327,0,REJECTED: flow-only sampler

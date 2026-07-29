@@ -87,7 +87,13 @@ from jaxpe.gw import IMRPhenomD, make_injection
 from jaxpe.gw.detectors import EARTH_OMEGA
 from jaxpe.gw.likelihood import RelativeBinningFDLikelihood
 from jaxpe.gw.likelihood.base import project_to_detector
-from jaxpe.kernels import HMC, adapted_step_size, run_chains, with_updates
+from jaxpe.kernels import (
+    HMC,
+    adapted_step_size,
+    ensemble_cov,
+    run_chains,
+    with_updates,
+)
 
 TARGET_ACC_HMC = 0.75
 
@@ -515,12 +521,29 @@ def run_pe(problem, y_map, cov0, args, timings):
     t0 = time.perf_counter()
     logp0 = jax.vmap(logp)(y0)
     eq_accs = []
+    eq_spread = []
     for rnd in range(args.equil_rounds):
         key, k_eq, k_fit = jax.random.split(key, 3)
-        y0, logp0, gys, _, eq_acc = _global_block(
+        y0, logp0, gys, glps, eq_acc = _global_block(
             flow, k_eq, y0, logp0, logp, args.n_global
         )
         eq_accs.append(float(eq_acc))
+        # Keep only draws that are actually in the posterior bulk before using them
+        # to estimate a metric. A handful of chains stranded on the likelihood's
+        # secondary ripples sit tens of sigma away in the chirp-mass direction, and
+        # a plain covariance over them inflates that direction by ~40x -- which is
+        # what silently produced 0.00 local acceptance. A log-posterior cut is the
+        # natural filter and costs nothing (the draws are already computed).
+        # Interleaving a discarded LOCAL block after each global one was tried here,
+        # on the theory that the ensemble is over-dispersed because the chains expand
+        # under flow proposals alone with nothing pulling them back onto the tight
+        # chirp-mass ridge. Measured: it does not work. sigma_y(Mc) went 7.0e-4 ->
+        # 6.6e-4 against a true ~1.6e-5, the metric was still rejected by the guard
+        # below, and it cost +35 s of equilibration and 8 extra production blocks
+        # (8.39 min vs 6.14). Do not re-add it.
+        g = np.asarray(gys)[::4].reshape(-1, n_dim)
+        lp = np.asarray(glps)[::4].reshape(-1)
+        eq_spread.append(np.vstack([g[lp > np.median(lp) - 10.0], np.asarray(y0)]))
         if float(eq_acc) >= args.flow_acc_target:
             break
         # Refit on the spread the flow just produced, thinned (adjacent
@@ -548,12 +571,54 @@ def run_pe(problem, y_map, cov0, args, timings):
     # 0.21-0.42 against a 0.75 target, i.e. most gradient work discarded). These
     # blocks are also thrown away, so the adaptation is free of any stationarity
     # concern.
-    # Off by default: re-tuning here targets 0.75 acceptance, which for this
-    # posterior is measurably the WRONG target -- it shrank the step size 0.33 ->
-    # 0.22, and the resulting shorter integration time took 20 blocks to converge
-    # where the larger-step/lower-acceptance setting took 13.
+    # ---- re-tune the step size against the EQUILIBRATED chains ----
+    # This is the single largest sampler-side win of the speed work (10.56 -> 6.16
+    # min) and it is the block below, not the metric swap above it. Warmup adapts eps
+    # while the chains are still inside the 0.3-sigma init ball, where the curvature
+    # is not the curvature they will actually see; measured, that left production
+    # running at 0.94-0.96 acceptance, i.e. eps far too small and nearly all of the
+    # gradient work buying no displacement. Re-tuning here -- same 0.75 target, just
+    # evaluated where the chains now are -- is what makes n_leapfrog=32 viable:
+    # per-block cost 15 s -> 7.5 s at essentially unchanged block count (28 -> 25).
+    #
+    # NOTE this is NOT the failed "re-tune to a higher acceptance" experiment; that
+    # one changed the target. Here the target is unchanged and only the evaluation
+    # point moves.
+    #
+    # ---- the metric swap below is retained but rarely survives its guard ----
+    # The MAP-Laplace covariance is the curvature at the mode, and this posterior is
+    # badly non-Gaussian there: the eta -> 1/4 and spin -> 0 pileups give heavy
+    # tails, so the mode is sharper than the actual spread -- measured at 3.8-5.4x
+    # too narrow per physical marginal. But that ratio is nearly UNIFORM across
+    # directions, and a uniform under-scaling of the mass matrix is exactly what the
+    # step size absorbs; only the anisotropy matters for preconditioning, and it
+    # spans <1.4x here. So this was a much smaller lever than it first appeared, and
+    # the eps re-tune above captured essentially all of the available gain.
+    # In practice the guard below fires on every run measured so far and reverts to
+    # the Laplace metric: the equilibration ensemble is ~40x over-dispersed in the
+    # chirp-mass direction (the tightest by five orders of magnitude), so a
+    # covariance built from it sends every trajectory off the ridge.
     acc_rt = None
-    for _ in range(args.retune_blocks):
+    laplace_chol = np.asarray(kernel.scale)
+    if eq_spread and args.ensemble_metric:
+        # ONLY the final round. Averaging over all of them mixes in the early
+        # rounds, when the chains were still spreading and the flow was still poor,
+        # and that inflates the tightest direction catastrophically: measured, the
+        # all-rounds estimate put sigma_y(chirp mass) at 6.4e-4 against a true
+        # 1.6e-5 (39x too wide), so every leapfrog trajectory left the chirp-mass
+        # ridge and local acceptance sat at exactly 0.00 for the whole run.
+        cov_ens = np.asarray(ensemble_cov(jnp.asarray(eq_spread[-1])))
+        kernel = HMC(
+            step_size=args.step_size,
+            n_leapfrog=args.n_leapfrog,
+            scale=np.linalg.cholesky(cov_ens),
+        )
+        print(
+            "metric -> equilibrated ensemble covariance; sigma_y "
+            f"{np.array2string(np.sqrt(np.diag(cov_ens)), precision=3)}"
+        )
+    log_eps_rt = []
+    for i in range(args.retune_blocks):
         key, k = jax.random.split(key)
         states, _, _, infos = run_chains(k, kernel, logp, y0, args.warmup_steps, thin=8)
         y0 = states.x
@@ -564,6 +629,45 @@ def run_pe(problem, y_map, cov0, args, timings):
                 kernel.step_size, acc_rt, TARGET_ACC_HMC, gamma=args.adapt_gain
             ),
         )
+        if i >= args.retune_blocks // 2:
+            log_eps_rt.append(np.log(float(kernel.step_size)))
+    if log_eps_rt:  # averaged iterate again, same reason as in warmup
+        kernel = with_updates(kernel, step_size=float(np.exp(np.mean(log_eps_rt))))
+    # Guard: a metric bad enough to kill local acceptance makes the run silently
+    # flow-only, which loses the local moves that cover wherever the flow is wrong.
+    # Fall back to the (conservative, too-narrow but valid) Laplace metric.
+    if acc_rt is not None and acc_rt < 0.05 and args.ensemble_metric:
+        print(
+            f"  local acceptance {acc_rt:.2f} after retune -> reverting to the "
+            "Laplace metric"
+        )
+        kernel = HMC(
+            step_size=args.step_size,
+            n_leapfrog=args.n_leapfrog,
+            scale=laplace_chol,
+        )
+        # KNOWN INCONSISTENCY: this fallback loop keeps the final Robbins-Monro
+        # iterate, where the loop above averages log(eps) over its second half. The
+        # averaging exists because the final iterate oscillates enough to swing run
+        # times (measured, in warmup: 13/34/28 blocks across identical runs). Since
+        # the guard fires on every run so far, THIS is the path actually taken, so
+        # the benchmark numbers come from an unaveraged iterate. In practice it has
+        # been stable (6.14 / 6.16 min back to back, identical Rhat and ESS), so it
+        # is left alone rather than changed underneath the recorded measurements;
+        # averaging it is a separate change that needs its own A/B.
+        for i in range(args.retune_blocks):
+            key, k = jax.random.split(key)
+            states, _, _, infos = run_chains(
+                k, kernel, logp, y0, args.warmup_steps, thin=8
+            )
+            y0 = states.x
+            acc_rt = float(jnp.mean(infos.accepted))
+            kernel = with_updates(
+                kernel,
+                step_size=adapted_step_size(
+                    kernel.step_size, acc_rt, TARGET_ACC_HMC, gamma=args.adapt_gain
+                ),
+            )
     logp0 = jax.vmap(logp)(y0)
     timings["equilibration"] = time.perf_counter() - t0
     retune_note = (
@@ -719,7 +823,7 @@ def main():
     ap.add_argument("--chi", type=float, default=1.0)
     ap.add_argument("--epsilon", type=float, default=0.25, help="RB phase per bin")
     ap.add_argument("--n-chains", type=int, default=64)
-    ap.add_argument("--n-leapfrog", type=int, default=96)
+    ap.add_argument("--n-leapfrog", type=int, default=32)
     ap.add_argument(
         "--warmup-leapfrog",
         type=int,
@@ -734,7 +838,13 @@ def main():
         help="single-precision waveform + per-bin products (3x on this GPU)",
     )
     ap.add_argument("--equil-rounds", type=int, default=5)
-    ap.add_argument("--retune-blocks", type=int, default=0)
+    ap.add_argument(
+        "--ensemble-metric",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="replace the Laplace metric with the equilibrated ensemble covariance",
+    )
+    ap.add_argument("--retune-blocks", type=int, default=3)
     ap.add_argument(
         "--adapt-gain",
         type=float,
@@ -747,13 +857,17 @@ def main():
         action="store_true",
         help="reproduce the 15.4-minute reference run's sampler settings",
     )
-    ap.add_argument("--step-size", type=float, default=0.1)
+    ap.add_argument("--step-size", type=float, default=0.5)
     ap.add_argument("--warmup-blocks", type=int, default=5)
     ap.add_argument("--warmup-steps", type=int, default=15)
     ap.add_argument("--production-steps", type=int, default=25)
     ap.add_argument("--thin", type=int, default=2)
     ap.add_argument("--n-global", type=int, default=1200)
-    ap.add_argument("--max-production-blocks", type=int, default=40)
+    # A safety stop only -- --max-minutes is the real budget guard. It was 40, which
+    # a 1.35+1.25 Msun source hit at Rhat 1.0107 and so reported as NOT converged
+    # despite being ~2 blocks short; a cap that turns "needs a bit longer" into
+    # "failed" is measuring the cap, not the sampler.
+    ap.add_argument("--max-production-blocks", type=int, default=80)
     ap.add_argument("--rhat-target", type=float, default=1.01)
     ap.add_argument("--ess-target", type=float, default=2000.0)
     ap.add_argument("--max-minutes", type=float, default=20.0)
@@ -769,6 +883,7 @@ def main():
         args.warmup_blocks, args.warmup_steps = 5, 25
         args.adapt_gain = 1.0
         args.equil_rounds, args.retune_blocks, args.f32 = 0, 0, False
+        args.ensemble_metric, args.n_leapfrog, args.step_size = False, 128, 0.1
     if not args.warmup_leapfrog:
         args.warmup_leapfrog = args.n_leapfrog
     if args.quick:
