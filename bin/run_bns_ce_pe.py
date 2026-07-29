@@ -621,6 +621,9 @@ def main():
         return 0
 
     # ---- sampling on the default device (GPU when available) ----
+    # the wall-clock budget covers the WHOLE run: hand production what remains
+    budget_min = args.max_minutes
+    args.max_minutes = max(2.0, budget_min - (time.perf_counter() - t_start) / 60.0)
     phys, lps, rhat, ess, converged, kernel = run_pe(
         problem, y_map, cov0, args, timings
     )
@@ -640,7 +643,7 @@ def main():
     imax = int(np.argmax(lps))
     print(f"  max log-posterior sampled: {lps.reshape(-1)[imax]:.3f}")
     total_min = timings["total"] / 60.0
-    print(f"wall time: {total_min:.2f} min (budget {args.max_minutes:.0f} min)")
+    print(f"wall time: {total_min:.2f} min (budget {budget_min:.0f} min)")
     print(f"timings: { {k: round(v, 2) for k, v in timings.items()} }")
 
     np.savez(
@@ -703,7 +706,7 @@ def main():
     except ImportError:
         pass
 
-    return 0 if converged and total_min < args.max_minutes else 1
+    return 0 if converged and total_min < budget_min else 1
 
 
 if __name__ == "__main__":

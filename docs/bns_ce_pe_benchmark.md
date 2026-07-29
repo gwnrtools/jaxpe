@@ -69,18 +69,29 @@ log-posterior ≈ the MAP value, zero-noise lnL(truth) = 0 anchor.
 
 ## Status
 
-- Reduced CPU config: gate ~2–3 blocks from closure at the 24-block cap
-  (R̂ decays monotonically; ESS 7340 ≫ target); cap now 40.
-- Full-scale setup (2048 s, 4096 Hz, 10 Hz): **2.9 min on CPU**, RB parity passes.
-- **GPU run blocked by the machine**: NVIDIA kernel module 580.159.03 vs userspace
-  580.173.02 (post-upgrade mismatch) — CUDA cannot initialize until a reboot or a
-  root module reload. After reboot:
+- **Reduced CPU config: CONVERGED.** Gate closed at production block 27:
+  rank-R̂(glob) max = 1.0091 < 1.01, min ESS = 8543, zero stuck chains; posterior
+  correct (Mc median within 1e-5 Msun of truth, η piled at 0.25, spins consistent
+  with 0, max sampled log-posterior = the MAP value). 42.6 min wall on CPU — the
+  CPU validates the machinery; the 20-minute target is for the GPU.
+- Full-scale setup (2048 s, 4096 Hz, 10 Hz): **2.9 min on CPU**, RB parity passes
+  (312 bins, SNR 607). The production wall-clock guard now budgets the *whole* run.
+- **GPU**: the machine's NVIDIA userspace (580.173.02) was upgraded past the loaded
+  kernel module (580.159.03; reboot pending), so CUDA cannot initialize against the
+  system libraries. The exact-match 580.159.03 userspace was retrieved from the
+  official Ubuntu Launchpad archive and extracted (no root, reversible);
+  `LD_LIBRARY_PATH` pointing at it restores CUDA — **verified**: JAX sees
+  `CudaDevice(id=0)` and computes. The sandboxed agent session is not permitted to
+  launch runs with injected driver libraries, so the final GPU benchmark needs a
+  human to start it:
 
   ```bash
-  conda activate lalsuite-dev
-  python bin/run_bns_ce_pe.py --outdir examples/output/bns_ce_rb_hmc
+  bash bin/run_gpu_with_matched_driver.sh --outdir examples/output/bns_ce_rb_hmc
   ```
 
-  Budget accounting: ~3 min CPU-pinned setup + compile, and per-block sampling cost
-  on the T2000 (fp64) to be measured; 256 chains halve the R̂ estimator noise vs the
-  CPU validation config, so closure is expected in ≲ 25 blocks.
+  (or, after a reboot, simply
+  `python bin/run_bns_ce_pe.py --outdir examples/output/bns_ce_rb_hmc`).
+  Budget projection: ~3 min CPU-pinned setup, ~2.4 min MAP+Laplace
+  (compile-dominated), warmup + compile ~2 min, and ≲ 25 production blocks (256
+  chains halve the R̂ estimator noise vs the 64-chain CPU validation) — inside the
+  20-minute budget if the T2000 (fp64) sustains ≲ 20 s per block, to be measured.
