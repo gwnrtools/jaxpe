@@ -393,15 +393,89 @@ configuration made it worse, in both directions where both were tried.
 That is what makes 6.16 min a defensible number rather than a lucky draw, and it
 also means the remaining distance to 4 minutes is not in the sampler's settings.
 
-Production is still ~58 % of the run and each leapfrog step carries ~1.7 ms of
-fixed serial cost (measured: cost is sublinear in chains and flat in bin count, so
-it is IMRPhenomD's ~3600-op coefficient chain, not array work). The remaining
-in-code lever is that `Phase`/`Amp` evaluate **all three** regions at every frequency
-and select with heaviside masks — JAX evaluates both sides of an elementwise `where`,
-so every bin pays 3× (grad `Phase` 13,038 HLO lines vs 3,121 for inspiral-only).
-Skipping regions needs a static decision, but the transition frequencies depend on
-the sampled masses; specialising on "the whole band is inspiral" would be true for
-BNS and false in general, so it is a design change, not a tweak.
+#### The 3-region evaluation is worth ~6 %, not 3× (measured)
+
+Earlier revisions of this page named the obvious remaining lever: `Phase`/`Amp`
+evaluate **all three** frequency regions at every point and select with heaviside
+masks, and JAX evaluates both sides of an elementwise `where`, so grad `Phase` is
+13,038 HLO lines against 3,121 for inspiral-only. That 4× line-count ratio does not
+survive being timed.
+
+Measured end to end on the benchmark's own relative-binning log-posterior, with
+`Phase`/`Amp` monkeypatched to their inspiral-only branches as an upper bound:
+
+| | gradient, 64 chains |
+|---|---|
+| full 3-region PhenomD | 2.657 ms |
+| inspiral-only (unreachable bound) | 1.613 ms |
+
+So the *ceiling* is 39 % of the gradient. But a production block spends only
+800 × 2.657 ms ≈ 2.1 s of its 8.4 s on gradients, so the whole partition is worth
+**~21 s of a 371 s run, ~6 %** — and that is the unreachable bound, not the
+achievable figure. The line count misled because those instructions are cheap
+elementwise work over 126 points; HLO instruction count is not time.
+
+Two further facts kill the "it's all inspiral for a BNS anyway" shortcut: of the 126
+bin edges, only 93 lie below the phase transition f1 = 1305 Hz and 79 below the
+amplitude transition f3 = 1015 Hz. A correct partition therefore has to evaluate two
+regions with a gather/scatter, not one. The change remains sound engineering and
+fully general — the partition is derivable from the prior's mass support at setup,
+so it is not a BNS specialisation — but it is a ~6 % change to a 4000-line waveform
+module, and it is not the route to 4 minutes.
+
+#### Where the time actually goes
+
+Production is ~58 % of the run. Per-chain gradient cost falls steeply with chain
+count, i.e. at 64 chains the GPU is launch-overhead-bound rather than compute-bound:
+
+| chains | gradient | per chain |
+|---|---|---|
+| 32 | 2.713 ms | 84.8 µs |
+| 64 | 3.228 ms | 50.4 µs |
+| 256 | 6.047 ms | 23.6 µs |
+| 1024 | 13.643 ms | 13.3 µs |
+
+Round 1 moved 256 → 64 chains and that helped, but it was decided at L = 128 against
+a mis-tuned step size, so it was re-measured under the corrected configuration. The
+predicted mechanism was real and still did not pay:
+
+| | 64 chains | 256 chains |
+|---|---|---|
+| warmup | 33.7 s | 55.2 s |
+| equilibration | 72.7 s | 100.3 s |
+| production | 213 s (25 blocks) | 223 s (17 blocks) |
+| **total** | **6.19 min** | 7.17 min |
+
+Four times the chains genuinely bought a third off the block count (25 → 17) — more
+flow training data per block, and R̂ on the spin directions is what gates this run.
+But per-block cost rose in step, so production came out a wash, and the whole 59 s
+loss is *preamble*: warmup and equilibration run a fixed number of steps, so their
+cost scales with chains while their benefit does not.
+
+### Why 4 minutes was not reached
+
+Unlike the retracted argument above, this is an accounting of measured levers rather
+than an extrapolation from an assumed trajectory length. Starting from 371 s:
+
+| lever | measured value | status |
+|---|---|---|
+| sampler configuration (L, globals, equil rounds, chains, metric) | 0 s | swept; every direction is worse |
+| PhenomD 3-region partition | ≤ 21 s | measured ceiling, ~6 % |
+| per-block overhead (diagnostics, refit, transfers) | ≤ 30 s | measured, diffuse |
+| **best case if both code levers land** | **320 s = 5.3 min** | still > 4 min |
+
+Closing the remaining 80 s would have to come out of equilibration (72.7 s) or warmup
+(33.7 s), and both are measured to be load-bearing — cutting equilibration from 5
+rounds to 3 saved 17 s and cost 107 s. So on this hardware, with this waveform and
+this convergence gate, 4 minutes is not reachable by configuration or by the
+identified code changes.
+
+What would change that, in rough order of leverage: a GPU with real f64 throughput
+(the T2000 is a consumer part at 1/32 rate, and this problem cannot use f32 — see
+above); a cheaper waveform gradient than IMRPhenomD's coefficient chain (a
+reduced-order or surrogate model); or a sampler whose preamble does not have to
+equilibrate 64 chains before the kept series starts. Each of those is a different
+project, not a tuning pass — which is the honest place to stop.
 
 ### Generality (no per-source tuning)
 
