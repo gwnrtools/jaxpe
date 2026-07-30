@@ -151,6 +151,17 @@ Metropolis-Adjusted Langevin Algorithm. Simulates overdamped Langevin diffusion 
 **`jaxpe.kernels.uld.ULD(step_size: float, friction: float, scale=None)`**
 Underdamped Langevin Dynamics. Simulates Langevin diffusion while preserving conjugate momenta, governed by a continuous friction coefficient.
 
+### `run_chains`
+**`jaxpe.kernels.run_chains(key, kernel, logp_fn, x0, n_steps, thin=1)`**
+Runs any of the above kernels across many parallel chains, `vmap`-ing the transition over chains and `scan`-ing the time stepping, so the whole block compiles to a single optimized executable. Returns `(final_states, xs, log_probs, infos)`, with `xs` of shape `(n_steps // thin, n_chains, n_dim)`.
+
+Everything — including **chain initialisation** — happens inside that single jit. This matters more than it sounds: initialisation evaluates the target and its gradient, so performing it outside the jit dispatches the whole gradient graph one operation at a time. For a gravitational-wave likelihood (~3600 instructions) that measured ~2.2 s per call against ~0.004 s jitted, and as a *fixed* cost per call it dominated any block of modest `n_steps`. This was a real regression in jaxpe ≤ 0.1.0.dev, fixed in **0.1.0**; see the `CHANGELOG` and `docs/bns_ce_pe_benchmark.md`.
+
+Two practical consequences:
+
+- **Cost scales with `n_steps`, not with call count.** After the fix the fixed per-call term is ~0.03 s, so slicing a long run into many short `run_chains` calls (e.g. to check convergence diagnostics between blocks) is cheap.
+- **`n_steps` and `thin` are static arguments.** Changing either triggers a recompile, so when timing a block, warm up at the *exact* size you intend to measure — otherwise the first timed call silently includes compilation. [`bin/profile_sampler_scaling.py`](https://github.com/prayush/jaxpe/blob/master/bin/profile_sampler_scaling.py) fits the fixed and marginal terms for both this and the flow global block, and is the recommended first measurement on unfamiliar hardware.
+
 ---
 
 ### REFERENCES
