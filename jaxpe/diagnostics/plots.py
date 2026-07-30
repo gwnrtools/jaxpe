@@ -1,10 +1,5 @@
 """Plotting helpers: corner and trace plots for engine-convention sample arrays."""
 
-import matplotlib
-
-matplotlib.use("Agg")
-import corner as corner_module
-import matplotlib.pyplot as plt
 import numpy as np
 
 
@@ -33,6 +28,11 @@ def corner_plot(samples, names=None, truths=None, **kwargs):
     matplotlib.figure.Figure
         The generated corner plot figure.
     """
+    try:
+        import corner as corner_module
+    except ImportError:
+        raise ImportError("corner is required for corner_plot. Install with `pip install jaxpe[plot]`.")
+    
     samples = np.asarray(samples)
     if samples.ndim == 3:
         samples = samples.reshape(-1, samples.shape[-1])
@@ -72,6 +72,13 @@ def trace_plot(xs, names=None, max_chains: int = 8):
     matplotlib.figure.Figure
         The generated trace plot figure.
     """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        raise ImportError("matplotlib is required for trace_plot. Install with `pip install jaxpe[plot]`.")
+
     xs = np.asarray(xs)
     n_dim = xs.shape[-1]
     fig, axes = plt.subplots(

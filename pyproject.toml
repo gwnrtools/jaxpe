@@ -17,17 +17,15 @@ dependencies = [
     "optax>=0.2",
     "numpy",
     "scipy",
-    "matplotlib",
-    "corner",
-    "ripplegw",
-    "JaxNRSur",
-    "emcee",
 ]
 
 [project.optional-dependencies]
+plot = ["matplotlib", "corner"]
+gw = ["ripplegw", "JaxNRSur"]
+postprocess = ["emcee"]
 gwdata = ["gwpy", "gwosc"]
 surrogate = ["gpry>=4.0,<5"]
-dev = ["pytest", "ruff", "black==24.10.0"]
+dev = ["pytest", "ruff", "black==24.10.0", "matplotlib", "corner", "ripplegw", "JaxNRSur", "emcee"]
 
 [tool.setuptools.packages.find]
 include = ["jaxpe*"]

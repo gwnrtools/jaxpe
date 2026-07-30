@@ -1,6 +1,5 @@
 import numpy as np
 import jax
-import emcee
 
 
 class PostProcessor:
@@ -51,6 +50,11 @@ class PostProcessor:
         tau : np.ndarray
             Array of length n_dim with the estimated tau for each parameter.
         """
+        try:
+            import emcee
+        except ImportError:
+            raise ImportError("emcee is required for autocorrelation computation. Install with `pip install jaxpe[postprocess]`.")
+
         try:
             tau = emcee.autocorr.integrated_time(self.samples, tol=tol)
         except emcee.autocorr.AutocorrError as e:
