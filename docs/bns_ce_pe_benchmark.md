@@ -271,6 +271,42 @@ the unequal-mass run hit at R̂ = 1.0107 and therefore reported as *not converge
 needed 42. A cap that turns "needs slightly longer" into "failed" is measuring the cap;
 `--max-minutes` is the real budget guard, and the default is now 80.
 
+### Beyond BNS: a mass sweep to 80 M☉
+
+The 1.35 + 1.25 M☉ check above verifies the configuration survives a *slightly*
+unequal BNS. [`bin/run_mass_sweep_pe.py`](../bin/run_mass_sweep_pe.py) pushes the same
+question much further: six equal-mass injections, log-spaced in total mass from 2.8 M☉
+(BNS) to 80 M☉ (BBH), each run unmodified through this page's exact HMC + flow pipeline
+via `run_bns_ce_pe.py` — same code, same defaults, only `--mass1/--mass2`, segment
+duration, and distance change per injection. Duration is sized per injection from
+LALSimulation's own chirp/merger/ringdown time bounds rather than reusing 2048 s
+everywhere (a 40+40 M☉ signal is in band for ~5 s from 10 Hz); distance is solved to a
+comparable-but-not-identical network SNR (~18–23) via the exact 1/D scaling now exposed
+as `--target-snr` on `run_bns_ce_pe.py` itself.
+
+| M_tot (M☉) | SNR | duration | time to converge | R̂_max | min ESS |
+|---:|---:|---:|---:|---:|---:|
+| 2.80 (BNS) | 21.6 | 2048 s | 3.39 min | 1.0098 | 9,492 |
+| 5.47 | 19.6 | 512 s | 3.33 min | 1.0097 | 12,617 |
+| 10.70 | 22.2 | 256 s | 2.60 min | 1.0092 | 12,185 |
+| 20.93 | 21.2 | 64 s | 2.10 min | 1.0099 | 9,741 |
+| 40.92 | 17.6 | 32 s | 1.88 min | 1.0074 | 10,833 |
+| 80.00 (BBH) | 22.9 | 8 s | 1.80 min | 1.0096 | 14,623 |
+
+![Wall-clock time to convergence versus total mass, log-x, for six injections from 2.8 to 80 solar masses, all converged](assets/mass_sweep_completion_time.png)
+
+All six converge on the same R̂/ESS gate as everywhere else on this page, and completion
+time falls **monotonically** with mass, 3.39 → 1.80 min, rather than growing or
+non-monotonically wandering. That is the expected direction — higher mass means a
+shorter segment and fewer relative-binning bins, so it is cheaper per gradient, not just
+per second of data — but it was an assumption in the "What is left" section below until
+this sweep measured it. It is not proof the sampler's *hyperparameters* (flow spline
+interval, equilibration rounds, ...) are optimal all the way to 80 M☉, only that the
+BNS-tuned defaults, left untouched, still reach the same convergence gate there.
+
+Raw sweep output: [`mass_sweep_summary.csv`](assets/mass_sweep_summary.csv); figure via
+`python bin/plot_mass_sweep_timing.py <sweep_summary.csv>`.
+
 ---
 
 ## What is left, if you want to go further
