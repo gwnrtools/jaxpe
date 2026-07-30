@@ -171,6 +171,71 @@ def test_run_chains_thinning_shape():
     assert logps.shape == (10, 8)
 
 
+def test_run_chains_initialises_inside_the_jit():
+    """``run_chains`` must not dispatch chain initialisation eagerly.
+
+    Regression guard. ``run_chains`` used to call ``jax.vmap(kernel.init)`` *outside*
+    the jit, so the target's whole gradient graph was dispatched one op at a time on
+    every call. For a gravitational-wave likelihood (~3600 instructions) that cost
+    ~2.2 s per call against ~0.004 s jitted -- a fixed cost paid regardless of
+    ``n_steps``, which dominated short blocks and silently distorted every cost
+    measurement taken on top of it.
+
+    Rather than assert on wall time (flaky), assert on the structural property that
+    caused it: initialisation happens under tracing, so a target that records eager
+    (concrete) invocations must never be called with concrete values.
+    """
+    calls = {"concrete": 0, "traced": 0}
+
+    def counting_logp(x):
+        if isinstance(x, jax.core.Tracer):
+            calls["traced"] += 1
+        else:
+            calls["concrete"] += 1
+        return logp(x)
+
+    key = jax.random.PRNGKey(7)
+    x0 = jax.random.normal(key, (8, N_DIM))
+    run_chains(key, HMC(step_size=0.35, n_leapfrog=4), counting_logp, x0, 10, thin=2)
+
+    assert calls["traced"] > 0, "target was never traced: nothing was jitted"
+    assert calls["concrete"] == 0, (
+        "run_chains evaluated the target eagerly "
+        f"({calls['concrete']} concrete calls): chain init has escaped the jit, "
+        "which reintroduces a large fixed per-call cost"
+    )
+
+
+def test_run_chains_cost_is_dominated_by_steps_not_calls():
+    """Doubling ``n_steps`` must roughly double the work, not add a constant.
+
+    The complement to the test above, stated as the user-visible consequence: with
+    initialisation outside the jit, ``run_chains`` carried a fixed per-call cost that
+    swamped the marginal cost of extra steps, so a 4x longer run was barely slower.
+    Uses a deliberately loose bound -- this is a guard against an O(1)-dominated
+    regime, not a benchmark.
+    """
+    key = jax.random.PRNGKey(11)
+    x0 = jax.random.normal(key, (16, N_DIM))
+    kernel = HMC(step_size=0.35, n_leapfrog=8)
+
+    def timed(n_steps):
+        import time
+
+        run_chains(key, kernel, logp, x0, n_steps, thin=1)[0].x.block_until_ready()
+        t0 = time.perf_counter()
+        run_chains(key, kernel, logp, x0, n_steps, thin=1)[0].x.block_until_ready()
+        return time.perf_counter() - t0
+
+    t_short, t_long = timed(25), timed(100)
+    # 4x the steps should cost clearly more than 1.5x; a fixed-cost-dominated
+    # implementation lands near 1.0x.
+    assert t_long > 1.5 * t_short, (
+        f"4x the steps cost only {t_long / t_short:.2f}x the time: run_chains looks "
+        "dominated by a fixed per-call cost (see the init-inside-jit regression)"
+    )
+
+
 def test_kernel_rejects_neg_inf_region():
     """A proposal into log_prob = -inf must never be accepted."""
 
