@@ -55,6 +55,7 @@ Run:  python bin/run_bns_ce_pe.py                        (default, ~7-10 min on 
       python bin/run_bns_ce_pe.py --mass1 1.35 --mass2 1.25   (a different source)
       python bin/run_bns_ce_pe.py --quick               (reduced CPU validation config)
       python bin/run_bns_ce_pe.py --setup-only          (profile setup + RB validation)
+      python bin/run_bns_ce_pe.py --target-snr 20       (rescale distance to hit SNR 20)
 
 The first invocation pays JIT compilation; the persistent XLA cache makes every
 later one compile-free, which is the honest basis for the quoted timings.
@@ -899,6 +900,14 @@ def main():
     ap.add_argument("--f-min", type=float, default=10.0)
     ap.add_argument("--f-max", type=float, default=None, help="default 0.45*rate")
     ap.add_argument("--distance", type=float, default=200.0, help="Mpc")
+    ap.add_argument(
+        "--target-snr",
+        type=float,
+        default=None,
+        help="rescale --distance so the injected network SNR equals this value "
+        "(exact: SNR is proportional to 1/distance for a fixed source, so one "
+        "rebuild at the solved distance suffices); default keeps --distance as given",
+    )
     ap.add_argument("--mass1", type=float, default=1.4, help="component mass [Msun]")
     ap.add_argument("--mass2", type=float, default=1.4, help="component mass [Msun]")
     ap.add_argument(
@@ -1066,6 +1075,34 @@ def main():
             f"injection: Mc={mc_true:.5f} Msun, D={args.distance:.0f} Mpc, "
             f"SNR {snr} (network {net_snr:.1f})  [{timings['injection']:.1f}s]"
         )
+
+        if args.target_snr is not None:
+            # h(f) scales as 1/D_L for a fixed source and orientation (the only
+            # distance dependence in the detector response), so SNR = sqrt(<h|h>)
+            # does too -- this rescale is EXACT, not an iterative or approximate
+            # search, and one rebuild at the solved distance suffices.
+            t0 = time.perf_counter()
+            args.distance *= net_snr / args.target_snr
+            truth["luminosity_distance"] = args.distance
+            dense_like = make_injection(
+                IMRPhenomD(f_ref=args.f_min),
+                truth,
+                detector_names=("H1",),
+                duration=args.duration,
+                sampling_rate=args.sampling_rate,
+                f_min=args.f_min,
+                f_max=args.f_max,
+                psd_fn=lambda f: np.interp(f, freqs, psd),
+                noise_seed=None,
+            )
+            snr = dense_like.optimal_snr(truth)
+            net_snr = float(np.sqrt(sum(v**2 for v in snr.values())))
+            timings["snr_rescale"] = time.perf_counter() - t0
+            print(
+                f"rescaled to target SNR {args.target_snr:.1f}: distance -> "
+                f"{args.distance:.1f} Mpc, achieved network SNR {net_snr:.2f}  "
+                f"[{timings['snr_rescale']:.1f}s]"
+            )
 
         t0 = time.perf_counter()
         rb = RelativeBinningFDLikelihood.from_likelihood(
