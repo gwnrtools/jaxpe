@@ -80,11 +80,35 @@ repeated draws at fixed parameters, a different experiment design).
 Profiling: every injection's full component-wise ``timings.json`` (psd,
 injection, snr_rescale, rb_setup, map_laplace, rb_validation, warmup, flow_fit,
 equilibration, production, total) is copied into the sweep summary verbatim, so
-per-component scaling with mass is visible without re-deriving it.
+per-component scaling with mass is visible without re-deriving it. The sweep
+summary also records the ``default backend: ...`` line each injection actually
+printed (column ``backend``), so "did this run on the GPU" is read from the log,
+not assumed from having launched it in the right conda env.
+
+GPU and compile-time caveats
+----------------------------
+Backend selection is jax's own auto-detection (unchanged from
+``run_bns_ce_pe.py``): whichever conda env this process runs in decides it, most
+likely ``lalsuite-dev`` for a CUDA-enabled jaxlib here. ``--require-gpu`` sets
+``JAX_PLATFORMS=cuda`` for every subprocess so a missing/invisible GPU raises
+immediately instead of silently completing the entire sweep on CPU.
+
+Every injection has a DIFFERENT duration -> a different n_bins -> different
+compiled shapes, so unlike a single fixed-config run of ``run_bns_ce_pe.py``,
+there is no "later injection" in the same sweep that reuses an earlier one's
+JIT compile. ``--warm-cache`` runs one throwaway
+``--max-production-blocks 1`` pass per injection first (into
+``<outdir>_warmup``, discarded) to populate the persistent XLA cache
+(``~/.cache/jaxpe_xla``, shared with ``run_bns_ce_pe.py``) before the timed run,
+so its ``timings.json`` is the honest, compile-free basis this codebase's other
+benchmarks already use -- at the cost of roughly doubling the setup + warmup +
+equilibration time per injection (production is unaffected: it is not part of
+the priming pass beyond its first block, and needs no priming since only its
+FIRST block per injection pays a compile either way).
 
 Run:
     python bin/run_mass_sweep_pe.py --n-injections 6 --dry-run   # preview only
-    python bin/run_mass_sweep_pe.py --n-injections 6             # the real thing
+    python bin/run_mass_sweep_pe.py --n-injections 6 --require-gpu --warm-cache
 """
 
 import argparse
@@ -204,11 +228,8 @@ def build_grid(args):
 
 
 # ------------------------------------------------------------------------- driver
-def run_injection(row, args):
-    """One blocking subprocess call into run_bns_ce_pe.py; returns the result row."""
-    outdir = Path(args.outdir) / f"inj_{row['index']:02d}_M{row['total_mass']:.1f}"
-    outdir.mkdir(parents=True, exist_ok=True)
-    cmd = [
+def _build_cmd(row, args, outdir):
+    return [
         sys.executable,
         str(args.run_script),
         "--outdir", str(outdir),
@@ -226,22 +247,141 @@ def run_injection(row, args):
         "--ess-target", f"{args.ess_target:.1f}",
     ] + shlex.split(args.extra_args)
 
+
+def _subprocess_env(args):
+    """Child env: inherits this process's env, optionally hardening the backend.
+
+    ``--require-gpu`` sets ``JAX_PLATFORMS=cuda,cpu`` rather than leaving
+    backend selection to jax's default auto-detection. Without it, a
+    misconfigured environment (wrong conda env, GPU busy/invisible) silently
+    falls back to CPU and you only find out after an N x 20 min sweep finishes
+    slow -- with it, jax raises immediately if no CUDA device is visible, so
+    the mistake costs seconds, not hours. ``cpu`` MUST stay in the list:
+    ``run_bns_ce_pe.py`` explicitly pins its heavy setup to
+    ``jax.devices("cpu")[0]``, and ``JAX_PLATFORMS=cuda`` alone makes that call
+    raise ("Unknown backend cpu") instead of only excluding cpu from the
+    *default*-backend choice -- both backends must be initialized, with cuda
+    listed first so it wins the default.
+    """
+    env = os.environ.copy()
+    if args.require_gpu:
+        env["JAX_PLATFORMS"] = "cuda,cpu"
+    return env
+
+
+def _parse_backend(log_path):
+    """Pull the ``default backend: <x>`` line run_bns_ce_pe.py prints at startup.
+
+    This is the ground truth for "did it actually use the GPU", independent of
+    what was requested -- read from the log rather than assumed.
+    """
+    try:
+        with open(log_path) as f:
+            for line in f:
+                if "default backend:" in line:
+                    return line.rsplit("default backend:", 1)[1].strip()
+    except FileNotFoundError:
+        pass
+    return None
+
+
+def _run_with_timeout(cmd, log_path, args, timeout_s):
+    """subprocess.run with a hard wall-clock cap and one retry after a cooldown.
+
+    Observed in practice: back-to-back subprocesses sharing one small consumer
+    GPU can hit a multi-minute hang with ZERO output (not even the first
+    ``print`` in ``main()``) -- most likely jax's lazy CUDA initialization
+    stalling while the previous process's device context is still being torn
+    down by the driver. Nothing in this script can fix that race, but it can
+    refuse to let it silently kill the whole sweep: without a timeout, a hang
+    like that either wedges the sweep forever or gets cleaned up by some
+    OUTSIDE mechanism (observed: the child dies with zero flushed output and a
+    truncated/corrupt ``samples.npz``, then ``np.load`` on that file raises and
+    crashes the entire sweep with everything after it unrun). This function
+    bounds the damage to one wasted ``cooldown_s + timeout_s`` per injection.
+
+    Returns (returncode, timed_out: bool). A timeout is reported via
+    returncode = -1 after the retry is also exhausted.
+    """
+    for attempt in range(2):
+        with open(log_path, "w") as logf:
+            try:
+                proc = subprocess.run(
+                    cmd, stdout=logf, stderr=subprocess.STDOUT,
+                    env=_subprocess_env(args), timeout=timeout_s,
+                )
+                return proc.returncode, False
+            except subprocess.TimeoutExpired:
+                print(
+                    f"  TIMEOUT after {timeout_s:.0f}s (attempt {attempt + 1}/2) "
+                    f"-- subprocess killed, see {log_path}"
+                )
+                if attempt == 0:
+                    time.sleep(args.cooldown_seconds)
+    return -1, True
+
+
+def _prime_cache(row, args, outdir):
+    """Throwaway pass that forces every JIT compile site in the pipeline once.
+
+    ``run_bns_ce_pe.py`` and this script share one persistent XLA cache
+    (``~/.cache/jaxpe_xla``), keyed on device + compiled program + shapes, not
+    on process identity -- so a subprocess that ran once already leaves the
+    cache warm for the NEXT subprocess with the same shapes, exactly as if it
+    were the same long-lived process (see that script's own docstring: "the
+    persistent XLA cache makes every later one compile-free"). Every injection
+    in this sweep has a distinct duration -> distinct n_bins -> distinct
+    compiled shapes, so each one needs its OWN priming pass; there is no
+    shortcut that reuses another injection's cache entries.
+
+    ``--max-production-blocks 1`` (appended last, so it overrides anything in
+    ``--extra-args``) is what keeps this cheap: it still runs setup, one
+    warmup block, one retune block, the full equilibration loop (which already
+    exercises fit_flow and the global block), and exactly one production
+    block -- enough to touch every distinct static shape in the pipeline --
+    without paying for a full run to convergence twice.
+    """
+    warm_outdir = outdir.parent / f"{outdir.name}_warmup"
+    warm_outdir.mkdir(parents=True, exist_ok=True)
+    cmd = _build_cmd(row, args, warm_outdir) + ["--max-production-blocks", "1"]
+    log_path = warm_outdir / "run.log"
+    t0 = time.perf_counter()
+    _rc, timed_out = _run_with_timeout(cmd, log_path, args, args.injection_timeout * 60.0)
+    wall = time.perf_counter() - t0
+    backend = _parse_backend(log_path)
+    note = " (TIMED OUT)" if timed_out else ""
+    print(f"  priming cache: {wall:.1f}s, backend={backend}  [{log_path}]  (discarded){note}")
+
+
+def run_injection(row, args):
+    """One blocking subprocess call into run_bns_ce_pe.py; returns the result row."""
+    outdir = Path(args.outdir) / f"inj_{row['index']:02d}_M{row['total_mass']:.1f}"
+    outdir.mkdir(parents=True, exist_ok=True)
+
     print(
         f"\n[{row['index'] + 1}/{args.n_injections}] M_tot={row['total_mass']:.2f} "
         f"Msun (m1={row['m1']:.2f}, m2={row['m2']:.2f}), duration={row['duration']:.0f}s, "
         f"target SNR={row['target_snr']:.1f}  ->  {outdir}"
     )
+
+    if args.warm_cache:
+        _prime_cache(row, args, outdir)
+
+    cmd = _build_cmd(row, args, outdir)
     print("  " + " ".join(cmd))
 
     t0 = time.perf_counter()
     log_path = outdir / "run.log"
-    with open(log_path, "w") as logf:
-        proc = subprocess.run(cmd, stdout=logf, stderr=subprocess.STDOUT)
+    returncode, timed_out = _run_with_timeout(
+        cmd, log_path, args, args.injection_timeout * 60.0
+    )
     wall = time.perf_counter() - t0
 
     result = dict(row)
-    result["returncode"] = proc.returncode
+    result["returncode"] = returncode
+    result["timed_out"] = timed_out
     result["wall_clock_driver"] = wall
+    result["backend"] = _parse_backend(log_path)
     result["log"] = str(log_path)
     for k in TIMING_KEYS:
         result[k] = None
@@ -250,39 +390,56 @@ def run_injection(row, args):
     result["ess_min"] = None
     result["achieved_snr"] = None
     result["worst_recovery_sigma"] = None
+    result["parse_error"] = None
 
-    timings_path = outdir / "timings.json"
-    if timings_path.exists():
-        with open(timings_path) as f:
-            t = json.load(f)
-        for k in TIMING_KEYS:
-            result[k] = t.get(k)
-        result["converged"] = bool(t.get("converged", False))
-        result["achieved_snr"] = t.get("network_snr")
+    # Best-effort: a corrupt/partial timings.json or samples.npz (observed after
+    # a killed/timed-out subprocess, mid-write) must never crash the sweep --
+    # one bad injection's leftovers should cost that injection's diagnostics,
+    # not the rest of the grid.
+    try:
+        timings_path = outdir / "timings.json"
+        if timings_path.exists():
+            with open(timings_path) as f:
+                t = json.load(f)
+            for k in TIMING_KEYS:
+                result[k] = t.get(k)
+            result["converged"] = bool(t.get("converged", False))
+            result["achieved_snr"] = t.get("network_snr")
 
-    samples_path = outdir / "samples.npz"
-    if samples_path.exists():
-        npz = np.load(samples_path)
-        result["rhat_max"] = float(np.max(npz["rhat"]))
-        result["ess_min"] = float(np.min(npz["ess"]))
-        flat = npz["samples"]
-        truth = npz["truth"]
-        std = flat.std(axis=0)
-        med = np.median(flat, axis=0)
-        result["worst_recovery_sigma"] = float(
-            np.max(np.abs(med - truth) / np.where(std > 0, std, 1.0))
-        )
+        samples_path = outdir / "samples.npz"
+        if samples_path.exists():
+            npz = np.load(samples_path)
+            result["rhat_max"] = float(np.max(npz["rhat"]))
+            result["ess_min"] = float(np.min(npz["ess"]))
+            flat = npz["samples"]
+            truth = npz["truth"]
+            std = flat.std(axis=0)
+            med = np.median(flat, axis=0)
+            result["worst_recovery_sigma"] = float(
+                np.max(np.abs(med - truth) / np.where(std > 0, std, 1.0))
+            )
+    except Exception as exc:  # noqa: BLE001 -- deliberately broad, see docstring
+        result["parse_error"] = f"{type(exc).__name__}: {exc}"
+        print(f"  WARNING: could not parse outputs for this injection: {result['parse_error']}")
 
-    status = "OK" if proc.returncode == 0 else f"FAILED (exit {proc.returncode})"
+    status = "OK" if returncode == 0 else f"FAILED (exit {returncode})"
     conv = "converged" if result["converged"] else "NOT converged"
-    print(f"  -> {status}, {conv}, {wall / 60.0:.2f} min driver wall time  [{log_path}]")
+    print(
+        f"  -> {status}, {conv}, backend={result['backend']}, "
+        f"{wall / 60.0:.2f} min driver wall time  [{log_path}]"
+    )
     return result
 
 
 def write_summary(rows, outdir):
     csv_path = Path(outdir) / "sweep_summary.csv"
     json_path = Path(outdir) / "sweep_summary.json"
-    fieldnames = list(rows[0].keys()) if rows else []
+    # Union of keys across all rows, not just rows[0]: a resumed sweep can mix
+    # rows loaded from an older sweep_summary.json (different script version,
+    # e.g. missing 'timed_out'/'parse_error') with freshly computed ones, and
+    # DictWriter raises on a row with keys outside a rows[0]-only fieldnames
+    # list rather than just filling the gap with restval.
+    fieldnames = list(dict.fromkeys(k for r in rows for k in r))
     with open(csv_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -295,10 +452,12 @@ def write_summary(rows, outdir):
 def print_report(rows):
     n_ok = sum(1 for r in rows if r["returncode"] == 0)
     n_conv = sum(1 for r in rows if r["converged"])
+    backends = sorted({r["backend"] for r in rows if r["backend"]})
     print("\n===== sweep summary =====")
     header = (
         f"{'idx':>3} {'M_tot':>7} {'SNR(tgt/ach)':>14} {'dur[s]':>8} "
-        f"{'total[min]':>10} {'converged':>10} {'Rhat_max':>9} {'ESS_min':>8}"
+        f"{'total[min]':>10} {'converged':>10} {'Rhat_max':>9} {'ESS_min':>8} "
+        f"{'backend':>8}"
     )
     print(header)
     for r in rows:
@@ -309,9 +468,12 @@ def print_report(rows):
         print(
             f"{r['index']:>3} {r['total_mass']:>7.2f} "
             f"{r['target_snr']:>6.1f}/{ach:<6.1f} {r['duration']:>8.0f} "
-            f"{tot_min:>10.2f} {str(r['converged']):>10} {rhat:>9.4f} {ess:>8.0f}"
+            f"{tot_min:>10.2f} {str(r['converged']):>10} {rhat:>9.4f} {ess:>8.0f} "
+            f"{str(r['backend']):>8}"
         )
     print(f"\n{n_ok}/{len(rows)} runs exited cleanly, {n_conv}/{len(rows)} converged")
+    if backends and backends != ["gpu"]:
+        print(f"WARNING: mixed/non-GPU backends seen across the sweep: {backends}")
 
 
 # ----------------------------------------------------------------------------- main
@@ -374,9 +536,49 @@ def main():
         help="abort the sweep on the first non-zero exit instead of continuing",
     )
     ap.add_argument(
+        "--require-gpu",
+        action="store_true",
+        help="set JAX_PLATFORMS=cuda,cpu for every subprocess, so a missing/invisible "
+        "GPU fails immediately instead of silently falling back to CPU for the "
+        "whole sweep",
+    )
+    ap.add_argument(
+        "--injection-timeout",
+        type=float,
+        default=None,
+        help="minutes: hard wall-clock cap per subprocess (priming and real), one "
+        "retry after --cooldown-seconds before giving up on that injection. "
+        "Default: 2 x --max-minutes + 15, generous enough for setup",
+    )
+    ap.add_argument(
+        "--cooldown-seconds",
+        type=float,
+        default=10.0,
+        help="pause before retrying a timed-out subprocess, to let the GPU driver "
+        "settle (observed: back-to-back subprocesses on a small shared GPU can "
+        "hang for minutes with zero output, most likely a CUDA context "
+        "teardown race with the previous subprocess)",
+    )
+    ap.add_argument(
+        "--warm-cache",
+        action="store_true",
+        help="run a throwaway --max-production-blocks=1 pass per injection first, "
+        "to prime the persistent XLA cache so the timed run's timings.json "
+        "excludes JIT compilation (see the module docstring); roughly doubles "
+        "the setup+warmup+equilibration cost per injection but not production",
+    )
+    ap.add_argument(
         "--dry-run",
         action="store_true",
         help="print the planned grid and commands; run nothing",
+    )
+    ap.add_argument(
+        "--start-index",
+        type=int,
+        default=0,
+        help="skip injections with index < this (resume a sweep); indices < "
+        "start-index are pulled from an existing sweep_summary.json in --outdir "
+        "if present, so the report still covers the full grid",
     )
     args = ap.parse_args()
 
@@ -393,6 +595,8 @@ def main():
     args.run_script = Path(args.run_script)
     if not args.run_script.exists():
         raise FileNotFoundError(args.run_script)
+    if args.injection_timeout is None:
+        args.injection_timeout = 2.0 * args.max_minutes + 15.0
 
     rows = build_grid(args)
 
@@ -415,8 +619,39 @@ def main():
 
     Path(args.outdir).mkdir(parents=True, exist_ok=True)
     results = []
+    if args.start_index > 0:
+        prior_json = Path(args.outdir) / "sweep_summary.json"
+        if prior_json.exists():
+            with open(prior_json) as f:
+                results = [r for r in json.load(f) if r["index"] < args.start_index]
+            print(f"resuming from index {args.start_index}: kept {len(results)} prior result(s)")
+
+    ran_one = False
     for row in rows:
-        result = run_injection(row, args)
+        if row["index"] < args.start_index:
+            continue
+        if ran_one:
+            # Let the GPU driver fully release the previous subprocess's CUDA
+            # context first -- see _run_with_timeout's docstring for why.
+            time.sleep(args.cooldown_seconds)
+        ran_one = True
+        try:
+            result = run_injection(row, args)
+        except Exception as exc:  # noqa: BLE001 -- one bad injection must not
+            # take the rest of the sweep down with it (see run_injection's own
+            # internal guard for the common case; this is the outer net for
+            # anything unexpected, e.g. failing to even create the outdir).
+            print(f"  UNHANDLED ERROR on injection {row['index']}: {type(exc).__name__}: {exc}")
+            result = dict(row)
+            result.update(
+                {k: None for k in TIMING_KEYS}
+                | dict(
+                    returncode=-1, timed_out=False, wall_clock_driver=None,
+                    backend=None, log=None, converged=False, rhat_max=None,
+                    ess_min=None, achieved_snr=None, worst_recovery_sigma=None,
+                    parse_error=f"{type(exc).__name__}: {exc}",
+                )
+            )
         results.append(result)
         write_summary(results, args.outdir)  # incremental: safe to interrupt
         if args.stop_on_failure and result["returncode"] != 0:
