@@ -10,6 +10,10 @@ PI = jnp.pi
 EULERGAMMA = 0.577215664901532860606512090082402431
 C_SI = 299792458.0
 
+def _safe_sqrt(x):
+    safe_x = jnp.where(x > 0, x, 1e-12)
+    return jnp.where(x > 0, jnp.sqrt(safe_x), 0.0)
+
 class IMRPhenomT(TimeDomainModel):
     is_fd = False
 
@@ -21,13 +25,14 @@ class IMRPhenomT(TimeDomainModel):
         Returns tapered spherical-harmonic modes {(l, +-m): h_lm(t)}, strain at 1 Mpc.
         Used by the relative binning likelihood.
         """
-        mc = params["chirp_mass"]
-        q = params["mass_ratio"]
+        mc = jnp.maximum(params["chirp_mass"], 1.0)
+        q = jnp.clip(params["mass_ratio"], 0.01, 1.0)
         eta = q / (1.0 + q) ** 2
+        eta = jnp.clip(eta, 1e-4, 0.25)
         M = mc / (eta ** (3.0 / 5.0))
         
-        s1z = params.get("spin1z", jnp.zeros(()))
-        s2z = params.get("spin2z", jnp.zeros(()))
+        s1z = jnp.clip(params.get("spin1z", jnp.zeros(())), -0.99, 0.99)
+        s2z = jnp.clip(params.get("spin2z", jnp.zeros(())), -0.99, 0.99)
 
         t_geom = grid / (M * MTSUN)
         tc = params.get("geocent_time", 0.0)
@@ -59,8 +64,8 @@ class IMRPhenomT(TimeDomainModel):
         dist_scale = 1.0 / dist
         
         # Apply phi_ref and project
-        h22 = modes[(2, 2)] * dist_scale * jnp.exp(-1j * 2 * phi_ref)
-        h2m2 = modes[(2, -2)] * dist_scale * jnp.exp(1j * 2 * phi_ref)
+        h22 = modes[(2, 2)] * dist_scale * jnp.exp(1j * 2 * phi_ref)
+        h2m2 = modes[(2, -2)] * dist_scale * jnp.exp(-1j * 2 * phi_ref)
         
         Y22 = jnp.sqrt(5.0 / (64.0 * PI)) * (1.0 + jnp.cos(iota))**2
         Y2m2 = jnp.sqrt(5.0 / (64.0 * PI)) * (1.0 - jnp.cos(iota))**2
@@ -90,7 +95,7 @@ class IMRPhenomT(TimeDomainModel):
         }
 
     def _pn_omega(self, eta, chi1, chi2):
-        dm = jnp.sqrt(jnp.maximum(1.0 - 4.0 * eta, 0.0))
+        dm = _safe_sqrt(1.0 - 4.0 * eta)
         m1 = (1.0 + dm) / 2.0
         m2 = (1.0 - dm) / 2.0
         
@@ -119,7 +124,7 @@ class IMRPhenomT(TimeDomainModel):
         return w
 
     def _pn_amp(self, eta, chi1, chi2):
-        dm = jnp.sqrt(jnp.maximum(1.0 - 4.0 * eta, 0.0))
+        dm = _safe_sqrt(1.0 - 4.0 * eta)
         m1 = (1.0 + dm) / 2.0
         m2 = (1.0 - dm) / 2.0
         
@@ -139,7 +144,8 @@ class IMRPhenomT(TimeDomainModel):
         return h
 
     def _evaluate_frequency(self, t, eta, chi1, chi2, c):
-        theta_insp = jnp.power(eta * jnp.maximum(-t, 1e-10) / 5.0, -1.0/8.0)
+        t_insp = jnp.minimum(t, c["t_meco"])
+        theta_insp = jnp.power(eta * jnp.maximum(-t_insp, 1e-10) / 5.0, -1.0/8.0)
         w_pn = self._pn_omega(eta, chi1, chi2)
         
         omega_0 = theta_insp**3 / 8.0
@@ -150,16 +156,20 @@ class IMRPhenomT(TimeDomainModel):
             c["c8"]*theta_insp**8 + c["c9"]*theta_insp**9 + c["c10"]*theta_insp**10 + c["c11"]*theta_insp**11 + c["c12"]*theta_insp**12
         )
         
-        w_merg = c["a0"] + c["a1"]*jnp.arcsinh(c["alpha_1"]*t) + c["a2"]*jnp.arcsinh(c["alpha_1"]*t)**2 + c["a3"]*jnp.arcsinh(c["alpha_1"]*t)**3 + c["a4"]*jnp.arcsinh(c["alpha_1"]*t)**4
+        t_merg = jnp.clip(t, c["t_meco"], 0.0)
+        w_merg = c["a0"] + c["a1"]*jnp.arcsinh(c["alpha_1"]*t_merg) + c["a2"]*jnp.arcsinh(c["alpha_1"]*t_merg)**2 + c["a3"]*jnp.arcsinh(c["alpha_1"]*t_merg)**3 + c["a4"]*jnp.arcsinh(c["alpha_1"]*t_merg)**4
         
-        denom = 1.0 + c["c3"]*jnp.exp(-c["c2"]*t) + c["c4"]*jnp.exp(-2.0*c["c2"]*t)
-        num = c["c2"] * (c["c3"]*jnp.exp(-c["c2"]*t) + 2.0*c["c4"]*jnp.exp(-2.0*c["c2"]*t))
+        t_rd = jnp.maximum(t, 0.0)
+        denom = 1.0 + c["c3"]*jnp.exp(-c["c2"]*t_rd) + c["c4"]*jnp.exp(-2.0*c["c2"]*t_rd)
+        num = c["c2"] * (c["c3"]*jnp.exp(-c["c2"]*t_rd) + 2.0*c["c4"]*jnp.exp(-2.0*c["c2"]*t_rd))
         w_rd = c["omega_rd"] + c["c1"] * (num / denom)
         
         return jnp.where(t <= c["t_meco"], w_insp, jnp.where(t < 0.0, w_merg, w_rd))
 
     def _evaluate_amplitude(self, t, omega, eta, chi1, chi2, c):
+        omega = jnp.maximum(omega, 1e-10)
         x = (omega / 2.0)**(2.0/3.0)
+        x = jnp.maximum(x, 1e-10)
         h_pn = self._pn_amp(eta, chi1, chi2)
         
         amp_prefactor = 2.0 * eta * jnp.sqrt(16.0/5.0) * x
@@ -170,12 +180,22 @@ class IMRPhenomT(TimeDomainModel):
         )
         amp_insp = jnp.abs(amp_insp)
         
-        amp_merg = c["b0"] + c["b1"]*t**2 + c["b2"]*(1.0/jnp.cosh(c["alpha_1"]*t))**(1.0/7.0) + c["b3"]*(1.0/jnp.cosh(c["alpha_1"]*t))
-        amp_rd = jnp.exp(-c["alpha_1"]*t) * (c["d1"]*jnp.tanh(c["d2"]*t + c["d3"]) + c["d4"])
+        t_merg = jnp.clip(t, c["t_meco"], 0.0)
+        amp_merg = c["b0"] + c["b1"]*t_merg**2 + c["b2"]*(1.0/jnp.cosh(c["alpha_1"]*t_merg))**(1.0/7.0) + c["b3"]*(1.0/jnp.cosh(c["alpha_1"]*t_merg))
+        
+        t_rd = jnp.maximum(t, 0.0)
+        amp_rd = jnp.exp(-c["alpha_1"]*t_rd) * (c["d1"]*jnp.tanh(c["d2"]*t_rd + c["d3"]) + c["d4"])
         
         return jnp.where(t <= c["t_meco"], amp_insp, jnp.where(t < 0.0, amp_merg, amp_rd))
 
     def _evaluate_phase(self, t, eta, chi1, chi2, c):
-        # A full exact integral of the piecewise frequency is required for correct phase.
-        # This is a structural placeholder.
-        return jnp.zeros_like(t)
+        omega = self._evaluate_frequency(t, eta, chi1, chi2, c)
+        dt = jnp.diff(t, prepend=t[0] - (t[1] - t[0]))
+        
+        # Use lax.scan to compute cumsum without XLA loop unrolling
+        def scan_fn(carry, xi):
+            new_carry = carry + xi
+            return new_carry, new_carry
+        _, phase = jax.lax.scan(scan_fn, 0.0, omega * dt, unroll=1)
+        
+        return phase
