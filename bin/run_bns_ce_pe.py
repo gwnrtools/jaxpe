@@ -11,7 +11,12 @@ Cosmic Explorer P1600143 PSD (H1 site geometry as the CE stand-in). The segment 
 wrap-free and df = 1/2048 Hz resolves the signal's frequency structure.
 
 Priors (all uniform): chirp mass in [0.9, 1.1] x true, eta in [0.2, 0.25],
-spin1z and spin2z in [0, 0.05]. Extrinsic parameters are fixed at the injected values.
+spin1z and spin2z in [--spin-min, --spin-max] (default [0, 0.05], matching the
+zero-spin BNS reference above; ``--spin1z``/``--spin2z`` set a non-zero injected
+truth and ``--spin-min``/``--spin-max`` widen the prior to a symmetric aligned-spin
+range, e.g. [-0.9, 0.9] for BBH-mass sources -- see run_mass_sweep_pe.py for the
+mass-dependent NS/BH convention used across a sweep). Extrinsic parameters are
+fixed at the injected values.
 
 Likelihood: :class:`~jaxpe.gw.likelihood.RelativeBinningFDLikelihood` summary data
 built once on the dense grid (CPU), then a lean jitted log-posterior that evaluates
@@ -41,6 +46,23 @@ Nothing here is fitted to a particular source: masses are ``--mass1/--mass2``, t
 priors and the optimiser start are derived from them, and every adaptation is driven
 by measured acceptance. Verified by rerunning at 1.35 + 1.25 Msun with no retuning.
 
+``--kernel`` selects the local transition kernel from ``jaxpe.kernels``: ``hmc``
+(default, the only one with validated numbers on docs/bns_ce_pe_benchmark.md),
+``mala``, ``mmala`` (constant-metric mode -- no per-point Fisher/metric estimator
+exists in this pipeline, so this is NOT the full Riemannian variant, just dense
+MALA under another name), ``random-walk``, or ``uld``. The four non-HMC kernels
+reuse the same MAP-Laplace mass matrix and the same flow-based equilibration, but
+adapt their step size to jaxpe's own literature-default target acceptance
+(``jaxpe.kernels.adaptation.TARGET_ACCEPTANCE``, overridable via
+``--target-acceptance``) rather than a target measured on this posterior, and skip
+the HMC-specific trajectory-length/eps-cycling machinery entirely (there is no
+trajectory length or leapfrog resonance to manage outside HMC). ``uld`` is
+unadjusted -- no Metropolis-Hastings step, so ``--step-size``/``--friction`` are
+held fixed for the whole run (nothing to adapt an acceptance rate toward) and the
+kept posterior carries an uncorrected O(step_size^2) discretization bias by
+construction (see ``jaxpe/kernels/uld.py``); it is exposed for a fast/approximate
+look, not as a substitute for HMC/MALA's exact posterior.
+
 Convergence gate, evaluated per block: rank-normalized split-Rhat over the
 *global-subseries* (near-independent draws; split-Rhat over the raw autocorrelated
 series only re-measures tau) < 1.01, Geyer min ESS over the full series >= target,
@@ -56,6 +78,7 @@ Run:  python bin/run_bns_ce_pe.py                        (default, ~7-10 min on 
       python bin/run_bns_ce_pe.py --quick               (reduced CPU validation config)
       python bin/run_bns_ce_pe.py --setup-only          (profile setup + RB validation)
       python bin/run_bns_ce_pe.py --target-snr 20       (rescale distance to hit SNR 20)
+      python bin/run_bns_ce_pe.py --kernel mala         (a different local kernel)
 
 The first invocation pays JIT compilation; the persistent XLA cache makes every
 later one compile-free, which is the honest basis for the quoted timings.
@@ -75,7 +98,12 @@ jax.config.update("jax_enable_x64", True)
 # persistent XLA compilation cache: repeat invocations skip all jit compiles
 # (the 20-minute benchmark budget excludes compile time; a warm second run is
 # the honest measurement of it)
-jax.config.update("jax_compilation_cache_dir", os.path.expanduser("~/.cache/jaxpe_xla"))
+# JAXPE_XLA_CACHE_DIR relocates it: the cache grows to several GB, and the home
+# filesystem is not always where there is room for it.
+jax.config.update(
+    "jax_compilation_cache_dir",
+    os.environ.get("JAXPE_XLA_CACHE_DIR", os.path.expanduser("~/.cache/jaxpe_xla")),
+)
 jax.config.update("jax_persistent_cache_min_compile_time_secs", 1.0)
 
 import jax.numpy as jnp
@@ -90,13 +118,54 @@ from jaxpe.gw.likelihood import RelativeBinningFDLikelihood
 from jaxpe.gw.likelihood.base import project_to_detector
 from jaxpe.kernels import (
     HMC,
+    MALA,
+    MMALA,
+    ULD,
+    RandomWalk,
     adapted_step_size,
     ensemble_cov,
     run_chains,
     with_updates,
 )
+from jaxpe.kernels.adaptation import TARGET_ACCEPTANCE
 
 TARGET_ACC_HMC = 0.75
+
+
+def _make_kernel(name, step_size, *, n_leapfrog, friction, cov):
+    """Dispatch to the selected jaxpe.kernels transition kernel.
+
+    All five share the ``Kernel`` protocol (init/step/step_size), so this is
+    the only place that needs to know each constructor's own knobs -- and,
+    critically, each one's own *interpretation* of ``scale``. Only HMC's step
+    actually does a matrix solve with it (momentum ~ L^{-T} v), so it alone can
+    take the dense Cholesky factor and see the eta<->chirp-mass anti-correlation
+    (97% here). MALA/ULD/RandomWalk's step functions use ``scale`` purely
+    elementwise (``d * grad``, ``d * xi``) -- passing them a dense (n,n) matrix
+    doesn't error quietly, it silently broadcasts into an (n, n)-shaped proposal
+    and blows up downstream (found by hitting exactly this: a shape-mismatch
+    crash inside the waveform call, several frames away from the real cause).
+    So those three get the per-dimension marginal std instead -- correct, but it
+    means they cannot exploit the anti-correlation the way HMC's dense mass can;
+    that is a real, expected handicap for them on this posterior, not a bug.
+    MMALA is the odd one out again: its step *does* do proper matrix solves, but
+    via a raw covariance (``cov``) rather than a Cholesky factor (``scale``).
+    """
+    diag_scale = np.sqrt(np.diag(cov))
+    if name == "hmc":
+        return HMC(step_size=step_size, n_leapfrog=n_leapfrog, scale=np.linalg.cholesky(cov))
+    if name == "mala":
+        return MALA(step_size=step_size, scale=diag_scale)
+    if name == "mmala":
+        # metric_fn=None + cov=<constant> is MMALA's own documented fallback,
+        # "equivalent to dense-mass MALA" -- no per-point Fisher/metric estimator
+        # exists in this pipeline, so this is NOT the full Riemannian variant.
+        return MMALA(step_size=step_size, cov=cov)
+    if name == "uld":
+        return ULD(step_size=step_size, friction=friction, scale=diag_scale)
+    if name == "random-walk":
+        return RandomWalk(step_size=step_size, scale=diag_scale)
+    raise ValueError(f"unknown --kernel {name!r}")
 
 
 # --------------------------------------------------------------------------- setup
@@ -389,7 +458,8 @@ def run_pe(problem, y_map, cov0, args, timings):
         f"mass eigen-sigmas: laplace {np.array2string(np.sqrt(w), precision=3)} -> "
         f"floored {np.array2string(np.sqrt(w_mass), precision=3)}"
     )
-    L0 = np.linalg.cholesky((V * w_mass) @ V.T)
+    cov_floored = (V * w_mass) @ V.T
+    L0 = np.linalg.cholesky(cov_floored)
     L_init = np.linalg.cholesky(cov0)  # chain init stays tight around the MAP
     key = jax.random.PRNGKey(args.seed)
     key, k0 = jax.random.split(key)
@@ -400,11 +470,35 @@ def run_pe(problem, y_map, cov0, args, timings):
     y0 = jnp.asarray(y_map)[None, :] + 0.3 * (
         jax.random.normal(k0, (args.n_chains, n_dim)) @ jnp.asarray(L_init).T
     )
-    kernel = HMC(
-        step_size=args.step_size,
+    kernel = _make_kernel(
+        args.kernel,
+        args.step_size,
         n_leapfrog=args.warmup_leapfrog,
-        scale=jnp.asarray(L0),
+        friction=args.friction,
+        cov=cov_floored,
     )
+    # HMC's target is measured on THIS posterior (see docs/bns_ce_pe_benchmark.md);
+    # the other three adjusted kernels use jaxpe.kernels.adaptation's literature
+    # defaults, not independently benchmarked here, unless overridden. ULD has no
+    # target at all (has_accept_prob=False, not in TARGET_ACCEPTANCE) -- target_acc
+    # is simply never read for it (see the has_accept_prob guards below).
+    target_acc = None
+    if args.kernel == "hmc":
+        target_acc = TARGET_ACC_HMC
+    elif kernel.has_accept_prob:
+        target_acc = args.target_acceptance or TARGET_ACCEPTANCE[type(kernel).__name__]
+    if not kernel.has_accept_prob:
+        friction_note = (
+            f" and friction {float(kernel.friction):.3g}"
+            if hasattr(kernel, "friction")
+            else ""
+        )
+        print(
+            f"{args.kernel}: no MH step -- step_size {float(kernel.step_size):.3g}"
+            f"{friction_note} are held fixed for the whole run (no acceptance-based "
+            "adaptation); the kept posterior carries an O(step_size^2) "
+            "discretization bias by construction, per jaxpe/kernels/uld.py"
+        )
     to_phys = jax.jit(jax.vmap(problem.prior.to_physical))
 
     # ---- warmup: Robbins-Monro step size; the dense Laplace mass stays frozen ----
@@ -425,22 +519,27 @@ def run_pe(problem, y_map, cov0, args, timings):
         y0 = states.x
         acc = float(jnp.mean(infos.accepted))
         accs.append(acc)
-        if block >= args.warmup_blocks // 2:  # post-transient iterates only
-            log_eps.append(np.log(float(kernel.step_size)))
-        # Robbins-Monro gain > 1: what matters for decorrelation is the integration
-        # time T = eps * n_leapfrog, so a short-trajectory kernel needs a
-        # proportionally larger eps. The default gain of 1.0 moves log(eps) by only
-        # (acc - target) per block -- at most ~1.3x -- so a warmup of a few blocks
-        # starting far from the target never arrives: measured acceptance stayed at
-        # 0.98 (eps ~4x too small, T ~5x short), which starves the flow's training
-        # data and stalls everything downstream. The gain is a property of the
-        # schedule length, not of the source, so this carries across injections.
-        kernel = with_updates(
-            kernel,
-            step_size=adapted_step_size(
-                kernel.step_size, acc, TARGET_ACC_HMC, gamma=args.adapt_gain
-            ),
-        )
+        # ULD has no MH step (has_accept_prob=False): acc is always 1.0 and
+        # would drive step_size to its upper clip, so step_size/friction are held
+        # fixed at their user-supplied values for the whole run instead (see the
+        # note printed above).
+        if kernel.has_accept_prob:
+            if block >= args.warmup_blocks // 2:  # post-transient iterates only
+                log_eps.append(np.log(float(kernel.step_size)))
+            # Robbins-Monro gain > 1: what matters for decorrelation is the integration
+            # time T = eps * n_leapfrog, so a short-trajectory kernel needs a
+            # proportionally larger eps. The default gain of 1.0 moves log(eps) by only
+            # (acc - target) per block -- at most ~1.3x -- so a warmup of a few blocks
+            # starting far from the target never arrives: measured acceptance stayed at
+            # 0.98 (eps ~4x too small, T ~5x short), which starves the flow's training
+            # data and stalls everything downstream. The gain is a property of the
+            # schedule length, not of the source, so this carries across injections.
+            kernel = with_updates(
+                kernel,
+                step_size=adapted_step_size(
+                    kernel.step_size, acc, target_acc, gamma=args.adapt_gain
+                ),
+            )
         if block >= 1:  # skip the pre-adaptation transient
             buffer.append(np.asarray(ys).reshape(-1, n_dim))
         if block == 0:
@@ -638,8 +737,11 @@ def run_pe(problem, y_map, cov0, args, timings):
     # chirp-mass direction (the tightest by five orders of magnitude), so a
     # covariance built from it sends every trajectory off the ridge.
     acc_rt = None
-    laplace_chol = np.asarray(kernel.scale)
-    if eq_spread and args.ensemble_metric:
+    laplace_chol = np.asarray(L0)
+    # The ensemble-metric swap below is an HMC-specific finding (measured on this
+    # posterior; see docs/bns_ce_pe_benchmark.md) -- not extended to the other
+    # four kernels without their own evidence.
+    if args.kernel == "hmc" and eq_spread and args.ensemble_metric:
         # ONLY the final round. Averaging over all of them mixes in the early
         # rounds, when the chains were still spreading and the flow was still poor,
         # and that inflates the tightest direction catastrophically: measured, the
@@ -662,20 +764,22 @@ def run_pe(problem, y_map, cov0, args, timings):
         states, _, _, infos = run_chains(k, kernel, logp, y0, args.warmup_steps, thin=8)
         y0 = states.x
         acc_rt = float(jnp.mean(infos.accepted))
-        kernel = with_updates(
-            kernel,
-            step_size=adapted_step_size(
-                kernel.step_size, acc_rt, TARGET_ACC_HMC, gamma=args.adapt_gain
-            ),
-        )
-        if i >= args.retune_blocks // 2:
-            log_eps_rt.append(np.log(float(kernel.step_size)))
+        if kernel.has_accept_prob:  # ULD: fixed step_size, see the warmup note above
+            kernel = with_updates(
+                kernel,
+                step_size=adapted_step_size(
+                    kernel.step_size, acc_rt, target_acc, gamma=args.adapt_gain
+                ),
+            )
+            if i >= args.retune_blocks // 2:
+                log_eps_rt.append(np.log(float(kernel.step_size)))
     if log_eps_rt:  # averaged iterate again, same reason as in warmup
         kernel = with_updates(kernel, step_size=float(np.exp(np.mean(log_eps_rt))))
     # Guard: a metric bad enough to kill local acceptance makes the run silently
     # flow-only, which loses the local moves that cover wherever the flow is wrong.
-    # Fall back to the (conservative, too-narrow but valid) Laplace metric.
-    if acc_rt is not None and acc_rt < 0.05 and args.ensemble_metric:
+    # Fall back to the (conservative, too-narrow but valid) Laplace metric. HMC-only,
+    # same reason as the swap above (rebuilds an HMC(...) with the Laplace scale).
+    if args.kernel == "hmc" and acc_rt is not None and acc_rt < 0.05 and args.ensemble_metric:
         print(
             f"  local acceptance {acc_rt:.2f} after retune -> reverting to the "
             "Laplace metric"
@@ -721,7 +825,8 @@ def run_pe(problem, y_map, cov0, args, timings):
     )
 
     # ---- production: adaptation frozen, convergence-gated blocks ----
-    # Each block: a local HMC block, then n_global flow independence-MH steps.
+    # Each block: a local kernel block (HMC by default; --kernel selects another
+    # jaxpe.kernels transition kernel), then n_global flow independence-MH steps.
     # The step size cycles +-13% across blocks: fixed-length leapfrog can resonate
     # (periodic orbits alias the trajectory endpoints), and varying eps between
     # blocks -- each block a fixed, valid kernel -- breaks the resonance without
@@ -748,13 +853,20 @@ def run_pe(problem, y_map, cov0, args, timings):
     # decorrelate scales as T_c^2 / T, so *increasing* the integration time
     # T = eps * L lowers total cost (measured: L 32 -> 96 cut 40 blocks to 13).
     # n_leapfrog is a static field, so this is a rebuild rather than an update.
-    kernel = HMC(
-        step_size=float(kernel.step_size),
-        n_leapfrog=args.n_leapfrog,
-        scale=kernel.scale,
-    )
+    # HMC-only: the other four kernels have no trajectory length to switch, so
+    # they simply continue with the kernel already tuned in the retune phase.
+    if args.kernel == "hmc":
+        kernel = HMC(
+            step_size=float(kernel.step_size),
+            n_leapfrog=args.n_leapfrog,
+            scale=kernel.scale,
+        )
     eps_prod = float(kernel.step_size)
-    eps_cycle = (1.0, 0.93, 1.07, 0.97)
+    # Fixed-length leapfrog can resonate (periodic orbits alias the trajectory
+    # endpoints), so eps is cycled +-13% across blocks to break it without
+    # recompiling -- HMC-only; the other kernels have no such resonance to avoid,
+    # so their step_size just stays at eps_prod every block.
+    eps_cycle = (1.0, 0.93, 1.07, 0.97) if args.kernel == "hmc" else (1.0,)
     flow_prev, g_acc_ref = None, None
     for block in range(args.max_production_blocks):
         kernel = with_updates(
@@ -914,11 +1026,53 @@ def main():
         "--eta-min", type=float, default=0.2, help="lower edge of the eta prior"
     )
     ap.add_argument(
+        "--spin-min", type=float, default=0.0, help="lower edge of the spin priors"
+    )
+    ap.add_argument(
         "--spin-max", type=float, default=0.05, help="upper edge of the spin priors"
+    )
+    ap.add_argument(
+        "--spin1z", type=float, default=0.0, help="injected aligned-spin truth, component 1"
+    )
+    ap.add_argument(
+        "--spin2z", type=float, default=0.0, help="injected aligned-spin truth, component 2"
     )
     ap.add_argument("--chi", type=float, default=1.0)
     ap.add_argument("--epsilon", type=float, default=0.25, help="RB phase per bin")
+    ap.add_argument(
+        "--max-rb-refinements",
+        type=int,
+        default=4,
+        help="times to quarter --epsilon and retry when the RB-vs-dense parity "
+        "guard fails, before giving up (the tolerances are never relaxed)",
+    )
     ap.add_argument("--n-chains", type=int, default=64)
+    ap.add_argument(
+        "--kernel",
+        choices=["hmc", "mala", "mmala", "uld", "random-walk"],
+        default="hmc",
+        help="local transition kernel (jaxpe.kernels). HMC is the only one with "
+        "validated numbers on docs/bns_ce_pe_benchmark.md; the other four use "
+        "jaxpe's library-default adaptation targets, unbenchmarked on this "
+        "posterior. uld has no MH step -- see --friction and the printed note",
+    )
+    ap.add_argument(
+        "--friction",
+        type=float,
+        default=1.0,
+        help="uld only: BAOAB friction coefficient (held fixed, no adaptation)",
+    )
+    ap.add_argument(
+        "--target-acceptance",
+        type=float,
+        default=None,
+        help="override the Robbins-Monro target acceptance for non-hmc kernels "
+        "(default: jaxpe.kernels.adaptation.TARGET_ACCEPTANCE's literature value "
+        "per kernel); has no effect for hmc (uses this script's own measured "
+        "0.75) or uld (no acceptance to target)",
+    )
+    # --n-leapfrog / --warmup-leapfrog are HMC-only (trajectory length); unused
+    # by the other four kernels, which have no such concept.
     ap.add_argument("--n-leapfrog", type=int, default=32)
     ap.add_argument(
         "--warmup-leapfrog",
@@ -999,7 +1153,20 @@ def main():
     # a 1.35+1.25 Msun source hit at Rhat 1.0107 and so reported as NOT converged
     # despite being ~2 blocks short; a cap that turns "needs a bit longer" into
     # "failed" is measuring the cap, not the sampler.
-    ap.add_argument("--max-production-blocks", type=int, default=80)
+    # A CAP, not a budget: --max-minutes is the real guard (see the note above about
+    # 40 turning "needs slightly longer" into "failed"). 80 is still low enough to
+    # bind on single-step kernels -- measured, MALA hits it at R-hat 1.012 having
+    # spent only 6.4 of its 12 allowed minutes -- which makes a cross-kernel
+    # comparison at a fixed cap measure the CAP, penalising exactly the kernels that
+    # take smaller steps per block. Raised so wall clock is the binding constraint.
+    ap.add_argument("--max-production-blocks", type=int, default=400)
+    ap.add_argument(
+        "--max-saved-samples",
+        type=int,
+        default=400_000,
+        help="uniform stride the kept series down to at most this many rows before "
+        "writing samples.npz; diagnostics are always computed on the full chains",
+    )
     ap.add_argument("--rhat-target", type=float, default=1.01)
     ap.add_argument("--ess-target", type=float, default=2000.0)
     ap.add_argument("--max-minutes", type=float, default=20.0)
@@ -1007,6 +1174,14 @@ def main():
     ap.add_argument("--quick", action="store_true", help="small CPU smoke test")
     ap.add_argument(
         "--setup-only", action="store_true", help="stop after setup + RB validation"
+    )
+    ap.add_argument(
+        "--setup-cache",
+        default=None,
+        help="npz path: reuse (or, if absent, write) this injection's solved "
+        "distance, refined --epsilon and MAP+Laplace mode/covariance. All three "
+        "depend only on the injection, never on --kernel, so sharing them across "
+        "kernels is both cheaper and strictly more like-for-like",
     )
     args = ap.parse_args()
     if args.reference:  # the 15.4-minute configuration, for like-for-like reruns
@@ -1033,11 +1208,21 @@ def main():
     m1, m2 = max(args.mass1, args.mass2), min(args.mass1, args.mass2)
     mc_true = (m1 * m2) ** 0.6 / (m1 + m2) ** 0.2
     eta_true = m1 * m2 / (m1 + m2) ** 2
+    if not (args.spin_min <= args.spin1z <= args.spin_max):
+        raise ValueError(
+            f"--spin1z={args.spin1z} outside the ({args.spin_min}, {args.spin_max}) "
+            "prior; widen --spin-min/--spin-max"
+        )
+    if not (args.spin_min <= args.spin2z <= args.spin_max):
+        raise ValueError(
+            f"--spin2z={args.spin2z} outside the ({args.spin_min}, {args.spin_max}) "
+            "prior; widen --spin-min/--spin-max"
+        )
     truth = dict(
         chirp_mass=mc_true,
         mass_ratio=m2 / m1,
-        spin1z=0.0,
-        spin2z=0.0,
+        spin1z=args.spin1z,
+        spin2z=args.spin2z,
         luminosity_distance=args.distance,
         geocent_time=1187008882.43,
         phase=1.3,
@@ -1047,6 +1232,21 @@ def main():
         psi=0.8,
     )
 
+    # Everything the setup phase derives depends only on the INJECTION -- the
+    # rescaled distance, the refined relative-binning resolution, and the
+    # MAP+Laplace mode and covariance -- never on which transition kernel will
+    # sample it. Caching them makes a multi-kernel comparison on one injection
+    # both cheaper (the MAP and the parity refinement are minutes at high bin
+    # count) and strictly more like-for-like: every kernel then samples a
+    # bit-identical likelihood from a bit-identical mass matrix, so a difference
+    # between two runs is a difference between two kernels and nothing else.
+    cache_path = Path(args.setup_cache) if args.setup_cache else None
+    cached = None
+    if cache_path is not None and cache_path.exists():
+        with np.load(cache_path) as c:
+            cached = {k: c[k] for k in c.files}
+        print(f"setup cache: reusing {cache_path}")
+
     # ---- heavy setup pinned to CPU: dense grids never touch the GPU ----
     cpu = jax.devices("cpu")[0]
     with jax.default_device(cpu):
@@ -1055,6 +1255,13 @@ def main():
         freqs = np.fft.rfftfreq(n, d=1.0 / args.sampling_rate)
         psd = cosmic_explorer_psd(freqs)
         timings["psd"] = time.perf_counter() - t0
+
+        # On a cache hit the solved distance is already known, so the injection is
+        # built once at that distance instead of twice (once to measure the SNR,
+        # once at the rescaled distance).
+        if cached is not None:
+            args.distance = float(cached["distance"])
+            truth["luminosity_distance"] = args.distance
 
         t0 = time.perf_counter()
         dense_like = make_injection(
@@ -1076,7 +1283,7 @@ def main():
             f"SNR {snr} (network {net_snr:.1f})  [{timings['injection']:.1f}s]"
         )
 
-        if args.target_snr is not None:
+        if args.target_snr is not None and cached is None:
             # h(f) scales as 1/D_L for a fixed source and orientation (the only
             # distance dependence in the detector response), so SNR = sqrt(<h|h>)
             # does too -- this rescale is EXACT, not an iterative or approximate
@@ -1104,10 +1311,33 @@ def main():
                 f"[{timings['snr_rescale']:.1f}s]"
             )
 
-        t0 = time.perf_counter()
-        rb = RelativeBinningFDLikelihood.from_likelihood(
-            dense_like, truth, chi=args.chi, epsilon=args.epsilon
+        prior = JointPrior(
+            {
+                "chirp_mass": Uniform(0.9 * mc_true, 1.1 * mc_true),
+                "eta": Uniform(args.eta_min, 0.25),
+                "spin1z": Uniform(args.spin_min, args.spin_max),
+                "spin2z": Uniform(args.spin_min, args.spin_max),
+            }
         )
+        if not (args.eta_min < eta_true <= 0.25):
+            raise ValueError(
+                f"eta_true={eta_true:.4f} outside the eta prior "
+                f"({args.eta_min}, 0.25]; widen --eta-min"
+            )
+
+        def build_rb(epsilon):
+            rb = RelativeBinningFDLikelihood.from_likelihood(
+                dense_like, truth, chi=args.chi, epsilon=epsilon
+            )
+            loglike = build_loglike(rb, truth, f32=args.f32)
+            return rb, loglike, InferenceProblem(prior=prior, log_likelihood=loglike)
+
+        t0 = time.perf_counter()
+        # A cache hit skips straight to the resolution the parity guard already
+        # settled on for this injection; rebuilding the summary data there is
+        # seconds, while REDERIVING it costs the whole refinement ladder.
+        epsilon = float(cached["epsilon"]) if cached is not None else args.epsilon
+        rb, loglike, problem = build_rb(epsilon)
         n_bins = rb.n_bins
         timings["rb_setup"] = time.perf_counter() - t0
         n_band = int(np.sum((freqs >= args.f_min) & (freqs <= rb.f_max)))
@@ -1116,38 +1346,71 @@ def main():
             f"[{timings['rb_setup']:.1f}s]"
         )
 
-        prior = JointPrior(
-            {
-                "chirp_mass": Uniform(0.9 * mc_true, 1.1 * mc_true),
-                "eta": Uniform(args.eta_min, 0.25),
-                "spin1z": Uniform(0.0, args.spin_max),
-                "spin2z": Uniform(0.0, args.spin_max),
-            }
-        )
-        if not (args.eta_min < eta_true <= 0.25):
-            raise ValueError(
-                f"eta_true={eta_true:.4f} outside the eta prior "
-                f"({args.eta_min}, 0.25]; widen --eta-min"
-            )
-        loglike = build_loglike(rb, truth, f32=args.f32)
-        problem = InferenceProblem(prior=prior, log_likelihood=loglike)
-
         # Optimizer start: the fiducial (trigger) point itself, inset off any prior
         # edge it happens to lie on -- the sigmoid bijection sends the open bounds
         # to +-inf, so a start exactly on a boundary is not representable. Derived
         # from the prior support and the injection, with no numbers specific to a
         # particular binary: an equal-mass system starts inset from eta = 1/4, an
         # unequal-mass one starts at its own (interior) eta.
+        #
+        # The inset FRACTION is not fixed: the optimiser is run from a ladder of
+        # them and the best converged mode is kept (see below). A single fixed
+        # 0.02 is safe only where the likelihood is gentle across that offset,
+        # which is a mass-dependent accident: for a zero-noise injection lnL peaks
+        # at exactly 0 at the fiducial, and at 55 Msun the M_c-eta ridge is sharp
+        # enough that insetting eta by 0.02 * 0.05 = 1e-3 costs 392 nats. Newton
+        # then starts 392 below the peak, correctly climbs monotonically, and
+        # still ends at a prior CORNER with a degenerate (sigma ~ 1e-13) Laplace
+        # covariance -- a silently unusable mass matrix.
         lo = np.array([p.low for p in prior.priors])
         hi = np.array([p.high for p in prior.priors])
-        inset = 0.02 * (hi - lo)
         x_fid = np.array(
             [truth["chirp_mass"], eta_true, truth["spin1z"], truth["spin2z"]]
         )
-        x_init = np.clip(x_fid, lo + inset, hi - inset)
-        y_init = np.asarray(prior.to_unconstrained(jnp.asarray(x_init)))
         t0 = time.perf_counter()
-        y_map, cov0, logp_map = map_laplace(problem, y_init)
+        if cached is not None:
+            y_map, cov0 = cached["y_map"], cached["cov0"]
+            logp_map = float(cached["logp_map"])
+            y_init = None
+        else:
+            # Run the optimiser from EVERY rung and keep the best converged mode --
+            # not the rung whose STARTING log-posterior is highest. Those are
+            # different things, and the difference is not academic: for the
+            # zero-spin BNS the highest-starting rung (2e-4) climbs to a mode
+            # pinned against the eta boundary with log-posterior -26.8 and a
+            # Laplace sigma 100-2400x too narrow, while the 2e-2 rung reaches
+            # -11.5 with a usable covariance. Newton only accepts improvements, so
+            # each rung is a valid local ascent; which BASIN it lands in is what
+            # the start selects, and only the final mode reveals that.
+            #
+            # Cost is n_rungs MAP solves, paid once per injection and shared across
+            # kernels by --setup-cache, against a mass matrix that is otherwise
+            # silently degenerate (see the boundary-corner failure at 55 Msun).
+            best = None
+            for frac in (0.02, 2e-3, 2e-4, 2e-5, 2e-6):
+                x_c = np.clip(x_fid, lo + frac * (hi - lo), hi - frac * (hi - lo))
+                y_c = np.asarray(prior.to_unconstrained(jnp.asarray(x_c)))
+                if not np.all(np.isfinite(y_c)):
+                    continue
+                y_m, cov_m, lp_m = map_laplace(problem, y_c)
+                # Reject a covariance the Laplace approximation has collapsed:
+                # a mode on the prior edge has a vanishing Jacobian, and the
+                # resulting metric is numerically a delta function.
+                sig = np.sqrt(np.diag(cov_m))
+                ok = np.all(np.isfinite(sig)) and np.all(sig > 1e-8)
+                print(
+                    f"  MAP from inset {frac:g}: log-posterior {lp_m:.2f}, "
+                    f"min sigma_y {sig.min():.2e}{'' if ok else '  [rejected: degenerate]'}"
+                )
+                if ok and (best is None or lp_m > best[0]):
+                    best = (lp_m, y_m, cov_m, y_c, frac)
+            if best is None:
+                raise RuntimeError(
+                    "every optimizer start gave a degenerate Laplace covariance; "
+                    "the mode is on a prior edge for all of them"
+                )
+            logp_map, y_map, cov0, y_init, inset_frac = best
+            print(f"optimizer start: kept inset fraction {inset_frac:g}")
         timings["map_laplace"] = time.perf_counter() - t0
         x_map = np.asarray(prior.to_physical(jnp.asarray(y_map)))
         print(
@@ -1156,16 +1419,79 @@ def main():
         )
 
         t0 = time.perf_counter()
-        # physical-space posterior scale: sigma_y * |dx/dy| (bijections elementwise)
-        jac = np.asarray(jax.jacfwd(prior.to_physical)(jnp.asarray(y_map)))
-        sigma_phys = np.sqrt(np.diag(cov0)) * np.abs(np.diag(jac))
         rng = np.random.default_rng(args.seed)
         # sampled-space truth (eta from the actual component masses, not assumed 1/4)
         x_true = np.array([mc_true, eta_true, truth["spin1z"], truth["spin2z"]])
-        wb, wr = validate_rb(
-            rb, dense_like, loglike, prior, truth, x_true, sigma_phys, rng, args.f32
-        )
+
+        def posterior_scale(y, cov):
+            """physical-space sigma: sigma_y * |dx/dy| (bijections are elementwise)"""
+            jac = np.asarray(jax.jacfwd(prior.to_physical)(jnp.asarray(y)))
+            return np.sqrt(np.diag(cov)) * np.abs(np.diag(jac))
+
+        sigma_phys = posterior_scale(y_map, cov0)
+
+        # The bin scheme's required resolution is a property of the PRIOR VOLUME,
+        # not of the source alone: the linear-in-f ratio model has to hold across
+        # the parameters actually proposed, so a +-0.9 aligned-spin prior at
+        # SNR ~20 needs far finer bins than the +-0.05 BNS prior this pipeline was
+        # first validated against (measured: tail ratio 0.22-0.50 at epsilon 0.25,
+        # 40-100x outside tolerance). Refining automatically holds the ACCURACY
+        # contract fixed and lets the bin count -- i.e. the cost -- absorb the
+        # difference, instead of sampling a likelihood that provably does not
+        # reproduce the dense one. The tolerances themselves are never relaxed.
+        # A cache hit re-uses a resolution that ALREADY passed this guard on this
+        # injection, so the guard is not re-run: it is a property of (injection,
+        # epsilon), both of which the cache pins.
+        for attempt in range(0 if cached is not None else args.max_rb_refinements + 1):
+            try:
+                wb, wr = validate_rb(
+                    rb, dense_like, loglike, prior, truth, x_true, sigma_phys, rng,
+                    args.f32,
+                )
+                break
+            except RuntimeError as exc:
+                if attempt == args.max_rb_refinements:
+                    raise RuntimeError(
+                        f"{exc}\n(already refined epsilon {args.epsilon:g} -> "
+                        f"{epsilon:g} over {attempt} attempts; raise "
+                        "--max-rb-refinements or widen the analysis assumptions)"
+                    ) from exc
+                epsilon /= 4.0
+                rb, loglike, problem = build_rb(epsilon)
+                print(
+                    f"  RB parity failed ({exc.args[0].split(';')[0]}); refining "
+                    f"epsilon -> {epsilon:g} ({rb.n_bins} bins) and retrying"
+                )
+        if rb.n_bins != n_bins:
+            # The mass matrix must be the curvature of the likelihood actually
+            # sampled, so the MAP is redone once at the FINAL resolution -- once,
+            # not per refinement, since the coarse-epsilon sigma above is only
+            # needed to set the scale of the validation draws.
+            n_bins = rb.n_bins
+            y_map, cov0, logp_map = map_laplace(problem, y_init)
+            sigma_phys = posterior_scale(y_map, cov0)
+            x_map = np.asarray(prior.to_physical(jnp.asarray(y_map)))
+            wb, wr = validate_rb(
+                rb, dense_like, loglike, prior, truth, x_true, sigma_phys, rng, args.f32
+            )
+            print(
+                f"re-MAP at epsilon {epsilon:g} ({n_bins} bins): "
+                f"x = {np.array2string(x_map, precision=6)}, "
+                f"log-posterior {logp_map:.2f}"
+            )
         timings["rb_validation"] = time.perf_counter() - t0
+        timings["rb_epsilon"] = epsilon
+        timings["rb_n_bins"] = n_bins
+        if cached is not None:
+            wb = wr = float("nan")  # not re-measured; see the cache note above
+        elif cache_path is not None:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            np.savez(
+                cache_path, distance=args.distance, epsilon=epsilon, y_map=y_map,
+                cov0=cov0, logp_map=logp_map, net_snr=net_snr, n_bins=n_bins,
+                parity_bulk=wb, parity_tail=wr,
+            )
+            print(f"setup cache: wrote {cache_path}")
         print(
             f"RB parity vs dense: bulk err {wb:.2e} (tol 0.1), tail ratio {wr:.2e} "
             f"(tol 5e-3); sigma_phys ~ {np.array2string(sigma_phys, precision=2)} "
@@ -1204,15 +1530,30 @@ def main():
     print(f"wall time: {total_min:.2f} min (budget {budget_min:.0f} min)")
     print(f"timings: { {k: round(v, 2) for k, v in timings.items()} }")
 
+    # Decimate before saving. R-hat, ESS and every posterior summary above are
+    # computed on the FULL chains; what lands on disk only has to support plots and
+    # sample-to-sample comparisons downstream. The kept series is ~1200 global draws
+    # per block per chain, so a long run writes 200+ MB per injection -- across a
+    # multi-kernel suite that is tens of GB of a 4-parameter posterior, for no
+    # statistical gain (the Geyer ESS is O(10^4), so a few 10^5 stored draws are
+    # already far past the point where storing more reduces Monte Carlo error).
+    # A uniform stride preserves the distribution; it is not a burn-in cut.
+    stride = max(1, flat.shape[0] // max(1, args.max_saved_samples))
+    print(
+        f"saving {flat[::stride].shape[0]:,} of {flat.shape[0]:,} samples "
+        f"(stride {stride}); diagnostics above used all of them"
+    )
     np.savez(
         outdir / "samples.npz",
         names=names,
-        samples=flat,
-        log_prob=lps.reshape(-1),
+        samples=flat[::stride],
+        log_prob=lps.reshape(-1)[::stride],
         truth=x_true,
         rhat=rhat,
         ess=ess,
         snr=net_snr,
+        save_stride=stride,
+        n_samples_full=flat.shape[0],
     )
     with open(outdir / "timings.json", "w") as f:
         json.dump(
