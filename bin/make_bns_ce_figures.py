@@ -4,12 +4,18 @@ r"""Figures for the BNS/Cosmic-Explorer PE benchmark (docs/bns_ce_pe_benchmark.m
 Reads the artefacts written by :mod:`bin.run_bns_ce_pe` -- ``samples.npz`` and the
 per-run stdout logs -- and writes two PNGs into ``docs/assets``:
 
-``bns_ce_corner.png``
-    Posterior corner plot of the four sampled parameters. Chirp mass is shown as
-    an offset from the injected value (its posterior is ~1e-6 Msun wide, so an
-    absolute axis is unreadable) and the spins in units of 1e-3. The injection is
-    marked; note it sits on the *edge* of several marginals because eta = 1/4 and
-    chi = 0 are prior boundaries, not because the posterior is biased.
+``bns_ce_corner.png`` and ``mass_sweep_corner_inj0N_M*.png``
+    Posterior corner plot of the four sampled parameters (chirp mass, eta, both
+    aligned spins) plus three derived ones appended in the same figure: m1, m2,
+    and chi_eff, computed per-sample from (chirp_mass, eta, spin1z, spin2z) since
+    none of the three is itself sampled. Chirp mass is shown as an offset from the
+    injected value, scaled per figure to whatever power of ten its own posterior
+    spread needs (~1e-6 Msun for the BNS reference, much wider for the higher-mass
+    sweep points) rather than a fixed 1e-6 -- an absolute or fixed-scale axis is
+    unreadable at one end of that range or the other. The injection is marked;
+    note it sits on the *edge* of several marginals because eta = 1/4 and
+    chi = 0 are prior boundaries, not because the posterior is biased -- and that
+    same boundary pushes m1 up / m2 down at every mass in the sweep.
 
 ``bns_ce_convergence.png``
     Convergence against wall clock: rank-normalized split-Rhat of the global
@@ -113,36 +119,93 @@ def load_runs(rundir, csv):
     }, str(csv)
 
 
-def corner_figure(npz, out):
+def _derived_m1_m2_chieff(s, truth, i):
+    """(m1, m2, chi_eff) per sample and at the truth, from (chirp_mass, eta, spins).
+
+    m1, m2, chi_eff are not themselves sampled -- they are the standard invertible
+    map from (chirp_mass, eta) to component masses (m1 >= m2, same convention as
+    ``eta_to_q`` in run_bns_ce_pe.py) plus the mass-weighted spin combination
+    chi_eff = (m1 spin1z + m2 spin2z)/(m1+m2). Computed identically for every
+    sample and for the truth so the two are directly comparable.
+    """
+
+    def convert(mc, eta, s1, s2):
+        mtot = mc * eta ** (-0.6)
+        delta = np.sqrt(np.clip(1.0 - 4.0 * eta, 0.0, None))
+        m1 = mtot * (1.0 + delta) / 2.0
+        m2 = mtot * (1.0 - delta) / 2.0
+        chi_eff = (m1 * s1 + m2 * s2) / mtot
+        return m1, m2, chi_eff
+
+    m1, m2, chi_eff = convert(
+        s[:, i["chirp_mass"]], s[:, i["eta"]], s[:, i["spin1z"]], s[:, i["spin2z"]]
+    )
+    m1_t, m2_t, chieff_t = convert(
+        truth[i["chirp_mass"]], truth[i["eta"]], truth[i["spin1z"]], truth[i["spin2z"]]
+    )
+    return m1, m2, chi_eff, m1_t, m2_t, chieff_t
+
+
+def _chirp_mass_offset_scale(spread):
+    """Power-of-ten multiplier putting an O(spread)-wide offset into O(1-10) units.
+
+    The chirp-mass posterior is ~1e-6 Msun wide for a BNS but ~0.1-1 Msun wide for
+    an 80 Msun BBH (same relative SNR, very different absolute precision) -- a
+    fixed 1e6 multiplier that reads well for one is unreadable for the other, so
+    the scale is derived from the actual spread each time rather than hardcoded.
+    """
+    if spread <= 0:
+        return 1.0, 0
+    exp = int(np.floor(np.log10(spread)))
+    return 10.0**-exp, exp
+
+
+def corner_figure(npz, out, *, title=None, info_lines=None):
     import corner
 
     d = np.load(npz)
     s, truth, names = d["samples"], d["truth"], [str(n) for n in d["names"]]
     i = {n: k for k, n in enumerate(names)}
 
+    m1, m2, chi_eff, m1_t, m2_t, chieff_t = _derived_m1_m2_chieff(s, truth, i)
+
+    mc_offset = s[:, i["chirp_mass"]] - truth[i["chirp_mass"]]
+    mc_scale, mc_exp = _chirp_mass_offset_scale(np.std(mc_offset))
+
     # rescale into readable units; the truth maps to the same transform
     x = np.column_stack(
         [
-            (s[:, i["chirp_mass"]] - truth[i["chirp_mass"]]) * 1e6,
+            mc_offset * mc_scale,
             s[:, i["eta"]],
             s[:, i["spin1z"]] * 1e3,
             s[:, i["spin2z"]] * 1e3,
+            m1,
+            m2,
+            chi_eff * 1e3,
         ]
     )
-    t = [0.0, truth[i["eta"]], 0.0, 0.0]
+    t = [0.0, truth[i["eta"]], 0.0, 0.0, m1_t, m2_t, chieff_t * 1e3]
     labels = [
-        r"$\mathcal{M}_c - \mathcal{M}_c^{\rm true}$  [$10^{-6}\,M_\odot$]",
+        rf"$\mathcal{{M}}_c - \mathcal{{M}}_c^{{\rm true}}$  [$10^{{{mc_exp}}}\,M_\odot$]",
         r"$\eta$",
         r"$\chi_{1z}$  [$10^{-3}$]",
         r"$\chi_{2z}$  [$10^{-3}$]",
+        r"$m_1$  [$M_\odot$]",
+        r"$m_2$  [$M_\odot$]",
+        r"$\chi_{\rm eff}$  [$10^{-3}$]",
     ]
     # clamp to the physical/prior support so smoothing cannot bleed across the
-    # eta <= 1/4 and chi >= 0 boundaries where the posterior actually piles up
+    # eta <= 1/4 and chi >= 0 boundaries where the posterior actually piles up;
+    # m1/m2 carry no such boundary here (mass ratio is interior), so 1.0 (all
+    # samples) is corner's own convention for "no clamp".
     rng = [
         (x[:, 0].min(), x[:, 0].max()),
         (x[:, 1].min(), 0.25),
         (0.0, np.percentile(x[:, 2], 99.9)),
         (0.0, np.percentile(x[:, 3], 99.9)),
+        1.0,
+        1.0,
+        (0.0, np.percentile(x[:, 6], 99.9)),
     ]
 
     fig = corner.corner(
@@ -170,34 +233,40 @@ def corner_figure(npz, out):
     # keep the suptitle to one line: the per-column titles corner draws sit at the
     # very top of the grid, and a second suptitle line collides with the first one
     fig.suptitle(
-        "BNS at Cosmic Explorer — FD relative binning + JAX HMC",
+        title or "BNS at Cosmic Explorer — FD relative binning + JAX HMC",
         fontsize=13,
         color=INK,
         y=1.015,
     )
     fig.text(
-        0.60,
-        0.80,
-        f"network SNR {float(d['snr']):.0f}\n"
-        f"{s.shape[0] / 1e6:.2f}M posterior samples\n"
-        rf"$\hat{{R}} \leq {float(np.max(d['rhat'])):.4f}$,  min ESS "
-        f"{round(float(np.min(d['ess']))):,}\n"
-        "converged in 15.4 min on one GPU",
+        0.68,
+        0.86,
+        info_lines
+        or (
+            f"network SNR {float(d['snr']):.0f}\n"
+            f"{s.shape[0] / 1e6:.2f}M posterior samples\n"
+            rf"$\hat{{R}} \leq {float(np.max(d['rhat'])):.4f}$,  min ESS "
+            f"{round(float(np.min(d['ess']))):,}\n"
+            "converged in 15.4 min on one GPU"
+        ),
         fontsize=10,
         color=INK,
         va="top",
         linespacing=1.5,
     )
-    # keep this note to <= 4 lines: it must clear the row-3 column title below it
+    # keep this note to <= 4 lines: it must clear the row-3 column title below it.
+    # True for every injection in the mass sweep (all equal-mass, zero-spin truth,
+    # same recovery priors), so this stays fixed rather than varying per call.
     fig.text(
-        0.60,
         0.68,
+        0.74,
         "orange = injection\n\n"
         r"$\eta = 1/4$ and $\chi_{iz} = 0$ are prior edges, so the"
         "\ninjection lying on a marginal's boundary is\n"
-        r"expected — and it pushes $\mathcal{M}_c$ up through the"
+        r"expected — and it pushes $\mathcal{M}_c$, $m_1$ up and"
         "\n"
-        r"$\mathcal{M}_c$–$\eta$ anti-correlation. Not a bias.",
+        r"$m_2$ down through the $\mathcal{M}_c$–$\eta$"
+        " anti-correlation.\nNot a bias.",
         fontsize=9.5,
         color=MUTED,
         va="top",
@@ -206,6 +275,41 @@ def corner_figure(npz, out):
     fig.savefig(out, dpi=140, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     return out
+
+
+def mass_sweep_corner_figures(sweep_dir, csv, assets):
+    """Regenerate one 7-parameter corner plot per mass-sweep injection.
+
+    Reads ``sweep_summary.csv`` (written by run_mass_sweep_pe.py) for the total
+    wall-clock time each injection took (not stored in samples.npz itself) and
+    the injection index -> output-directory mapping.
+    """
+    rows = list(np.genfromtxt(csv, delimiter=",", names=True, dtype=None, encoding="utf-8"))
+    written = []
+    for row in rows:
+        idx = int(row["index"])
+        mtot = float(row["total_mass"])
+        rundir = Path(sweep_dir) / f"inj_{idx:02d}_M{mtot:.1f}"
+        npz = rundir / "samples.npz"
+        if not npz.exists():
+            print(f"skipping injection {idx}: no {npz}")
+            continue
+        d = np.load(npz)
+        label = "BNS" if idx == 0 else ("BBH" if mtot >= 20.0 else "")
+        title = f"M_tot = {mtot:.2f} M☉" + (f" ({label})" if label else "")
+        title += " — FD relative binning + JAX HMC"
+        info = (
+            f"network SNR {float(row['achieved_snr']):.0f}\n"
+            f"{d['samples'].shape[0] / 1e6:.2f}M posterior samples\n"
+            rf"$\hat{{R}} \leq {float(np.max(d['rhat'])):.4f}$,  min ESS "
+            f"{round(float(np.min(d['ess']))):,}\n"
+            f"converged in {float(row['total']) / 60.0:.1f} min on one GPU"
+        )
+        out = assets / f"mass_sweep_corner_inj{idx:02d}_M{mtot:.1f}.png"
+        corner_figure(npz, out, title=title, info_lines=info)
+        written.append(out)
+        print("wrote", out)
+    return written
 
 
 def convergence_figure(runs, out):
@@ -395,6 +499,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--rundir", default="examples/output/bns_ce_rb_hmc")
     ap.add_argument("--assets", default="docs/assets")
+    ap.add_argument("--sweep-dir", default="examples/output/mass_sweep_pe")
     args = ap.parse_args()
 
     rundir, assets = Path(args.rundir), Path(args.assets)
@@ -406,6 +511,12 @@ def main():
         )
     else:
         print(f"skipping the corner plot: no {rundir}/samples.npz (re-run the PE)")
+
+    sweep_csv = Path(args.sweep_dir) / "sweep_summary.csv"
+    if sweep_csv.exists():
+        mass_sweep_corner_figures(args.sweep_dir, sweep_csv, assets)
+    else:
+        print(f"skipping the mass-sweep corner plots: no {sweep_csv}")
 
     runs, src = load_runs(rundir, assets / "bns_ce_convergence.csv")
     print(f"convergence series from {src}")
