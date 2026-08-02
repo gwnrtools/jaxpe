@@ -48,9 +48,19 @@ What varies across the sweep
 
 What is assumed and NOT swept (stated explicitly; change if you need otherwise)
 --------------------------------------------------------------------------------
-- Zero spin truth at every mass (matches ``run_bns_ce_pe.py``'s own convention);
-  the recovered ``spin1z``/``spin2z`` prior width is the same ``--spin-max`` at
-  every mass.
+- **Aligned-spin truth is mass-dependent, drawn (not fixed) per injection.** Each
+  component is classified NS if its mass is below ``--ns-max-mass`` (default 3.0
+  Msun, the boundary GWTC compact-object classifications commonly use) or BH
+  otherwise, and its spin truth is drawn uniformly from
+  ``[-spin_max_ns, spin_max_ns]`` (default +-0.05, matching the BNS reference
+  page's own prior width) or ``[-spin_max_bh, spin_max_bh]`` (default +-0.9,
+  the standard "high but sub-extremal" BH aligned-spin range) accordingly --
+  seeded by the same per-injection RNG as the SNR jitter, so the draw is
+  reproducible but not identical across injections or across a re-run at the
+  same ``--seed``. The recovery prior forwarded to ``run_bns_ce_pe.py`` is the
+  SUPERSET ``[-max(bound1, bound2), max(bound1, bound2)]`` (both components
+  share one ``--spin-min``/``--spin-max`` prior there), so an NS+BH combination
+  is not accidentally clipped to the narrower bound.
 - Equal mass (``eta_true = 0.25`` exactly) at every point unless ``--mass-ratio``
   is set, so the eta-boundary-pileup degeneracy structure that the sampler's
   defaults (flow spline interval, eigenvalue-floored Laplace mass) were tuned
@@ -66,6 +76,13 @@ What is assumed and NOT swept (stated explicitly; change if you need otherwise)
   (or via ``--extra-args``) -- they are DERIVED per injection already (the
   Laplace mass matrix and step size are refit at each source's own MAP), so no
   further per-mass tuning is threaded through this script.
+- ``--kernel`` (default ``hmc``) is one fixed choice for the WHOLE sweep, not
+  itself swept per injection -- the same reasoning as ``--mass-ratio``: sweeping
+  mass and kernel at once would conflate two independent questions. Compare
+  kernels by re-invoking with a different ``--kernel`` and ``--outdir``. Only
+  ``hmc`` has validated numbers behind it; see ``run_bns_ce_pe.py``'s own
+  docstring for what the other four (``mala``, ``mmala``, ``random-walk``,
+  ``uld``) assume, and ``uld``'s unadjusted (biased-by-construction) caveat.
 
 Convergence, per injection: exactly the gate already in ``run_bns_ce_pe.py`` --
 rank-normalized split-Rhat over the global-subseries < ``--rhat-target``, Geyer
@@ -135,6 +152,11 @@ TIMING_KEYS = (
     "injection",
     "snr_rescale",
     "rb_setup",
+    # not times: the relative-binning resolution run_bns_ce_pe.py actually settled
+    # on after its parity-guard refinement, which varies per injection with the
+    # prior volume and is the cost driver behind the timings beside it
+    "rb_epsilon",
+    "rb_n_bins",
     "map_laplace",
     "rb_validation",
     "warmup",
@@ -189,20 +211,27 @@ def estimate_duration(m1, m2, f_min, safety, dur_min, dur_max):
     return float(2.0 ** np.ceil(np.log2(max(t_est, 1.0))))
 
 
+def spin_bound(mass, args):
+    """+-bound of the aligned-spin truth/prior for one component, by its mass regime."""
+    return args.spin_max_ns if mass < args.ns_max_mass else args.spin_max_bh
+
+
 def build_grid(args):
-    """Per-injection (m1, m2, duration, target_snr, seed) table.
+    """Per-injection (m1, m2, spins, duration, target_snr, seed) table.
 
     Total mass is log-spaced (a sweep from 2.8 to 80 Msun spans more than an
     order of magnitude; a linear grid would waste most of its points above
-    ~30 Msun). SNR jitter and the mass grid itself are both drawn/spaced so no
-    two injections coincide; see the module docstring for what is and is not
-    varied.
+    ~30 Msun). SNR jitter, the two spin draws, and the mass grid itself are all
+    drawn/spaced so no two injections coincide; see the module docstring for
+    what is and is not varied.
     """
     n = args.n_injections
     total_masses = np.geomspace(args.total_mass_min, args.total_mass_max, n)
     rng = np.random.default_rng(args.seed)
     jitter = rng.uniform(-1.0, 1.0, size=n)
     target_snrs = args.target_snr * (1.0 + args.snr_jitter * jitter)
+    spin1_frac = rng.uniform(-1.0, 1.0, size=n)
+    spin2_frac = rng.uniform(-1.0, 1.0, size=n)
 
     rows = []
     for i, (mtot, snr_i) in enumerate(zip(total_masses, target_snrs)):
@@ -211,6 +240,10 @@ def build_grid(args):
             m1, m2, args.f_min, args.duration_safety, args.duration_min,
             args.duration_max,
         )
+        bound1, bound2 = spin_bound(m1, args), spin_bound(m2, args)
+        spin1z = float(spin1_frac[i] * bound1)
+        spin2z = float(spin2_frac[i] * bound2)
+        spin_bound_prior = max(bound1, bound2)
         rows.append(
             dict(
                 index=i,
@@ -221,6 +254,12 @@ def build_grid(args):
                 eta=symmetric_mass_ratio(m1, m2),
                 duration=duration,
                 target_snr=float(snr_i),
+                spin1z=spin1z,
+                spin2z=spin2z,
+                spin_min=-spin_bound_prior,
+                spin_max=spin_bound_prior,
+                regime1="ns" if m1 < args.ns_max_mass else "bh",
+                regime2="ns" if m2 < args.ns_max_mass else "bh",
                 seed=args.seed + i,
             )
         )
@@ -241,11 +280,25 @@ def _build_cmd(row, args, outdir):
         "--sampling-rate", f"{args.sampling_rate:.1f}",
         "--f-min", f"{args.f_min:.3f}",
         "--eta-min", f"{args.eta_min:.4f}",
+        "--spin1z", f"{row['spin1z']:.6f}",
+        "--spin2z", f"{row['spin2z']:.6f}",
+        "--spin-min", f"{row['spin_min']:.6f}",
+        "--spin-max", f"{row['spin_max']:.6f}",
         "--seed", str(row["seed"]),
         "--max-minutes", f"{args.max_minutes:.2f}",
         "--rhat-target", f"{args.rhat_target:.4f}",
         "--ess-target", f"{args.ess_target:.1f}",
-    ] + shlex.split(args.extra_args)
+        "--kernel", args.kernel,
+        "--friction", f"{args.friction:.4f}",
+    ] + (
+        ["--setup-cache", str(Path(args.setup_cache) / f"inj_{row['index']:02d}.npz")]
+        if args.setup_cache
+        else []
+    ) + (
+        ["--target-acceptance", f"{args.target_acceptance:.4f}"]
+        if args.target_acceptance is not None
+        else []
+    ) + shlex.split(args.extra_args)
 
 
 def _subprocess_env(args):
@@ -267,6 +320,46 @@ def _subprocess_env(args):
     if args.require_gpu:
         env["JAX_PLATFORMS"] = "cuda,cpu"
     return env
+
+
+def check_gpu_or_die(args):
+    """Fail the whole sweep NOW if --require-gpu cannot actually reach the GPU.
+
+    ``JAX_PLATFORMS=cuda,cpu`` makes a *missing* CUDA backend raise inside each
+    subprocess -- but the sweep catches per-injection failures by design (one bad
+    injection must not kill the grid), so a driver that is wedged rather than
+    absent produces ten identical instant failures and an empty summary. That is
+    exactly what a several-hour unattended run should not spend itself on.
+
+    Observed failure mode this guards against: after a long run the CUDA driver
+    can enter a state where NVML (``nvidia-smi``) still reports a perfectly
+    healthy GPU while ``cuInit()`` returns CUDA_ERROR_UNKNOWN, because the
+    ``nvidia_uvm`` kernel module is loaded but wedged. nvidia-smi is therefore NOT
+    a valid readiness check; only initializing a CUDA context is.
+    """
+    if not args.require_gpu:
+        return
+    probe = (
+        "import jax; d = jax.devices('cuda'); "
+        "import jax.numpy as jnp; "
+        "assert float(jnp.ones(8).sum()) == 8.0; print(d[0])"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", probe],
+        env=_subprocess_env(args), capture_output=True, text=True, timeout=300,
+    )
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout).strip().splitlines()[-3:]
+        raise SystemExit(
+            "--require-gpu: no usable CUDA device (a CUDA context could not be "
+            "created and exercised). Aborting before running any injection.\n  "
+            + "\n  ".join(tail)
+            + "\n\nIf nvidia-smi looks healthy but cuInit fails, the driver is "
+            "wedged rather than absent; reloading the UVM module usually clears "
+            "it without a reboot:\n    sudo rmmod nvidia_uvm && sudo modprobe "
+            "nvidia_uvm"
+        )
+    print(f"--require-gpu: CUDA device verified ({proc.stdout.strip()})")
 
 
 def _parse_backend(log_path):
@@ -378,6 +471,7 @@ def run_injection(row, args):
     wall = time.perf_counter() - t0
 
     result = dict(row)
+    result["kernel"] = args.kernel
     result["returncode"] = returncode
     result["timed_out"] = timed_out
     result["wall_clock_driver"] = wall
@@ -517,6 +611,20 @@ def main():
     )
     ap.add_argument("--duration-min", type=float, default=4.0, help="seconds")
     ap.add_argument("--duration-max", type=float, default=2048.0, help="seconds")
+    ap.add_argument(
+        "--ns-max-mass",
+        type=float,
+        default=3.0,
+        help="Msun: component mass below this is classified NS (narrow spin "
+        "range), at/above is BH (wide spin range) -- the boundary common GWTC "
+        "compact-object classifications use",
+    )
+    ap.add_argument(
+        "--spin-max-ns", type=float, default=0.05, help="+-bound for NS-mass components"
+    )
+    ap.add_argument(
+        "--spin-max-bh", type=float, default=0.9, help="+-bound for BH-mass components"
+    )
     ap.add_argument("--outdir", default="examples/output/mass_sweep_pe")
     ap.add_argument(
         "--run-script", default=str(HERE / "run_bns_ce_pe.py"), help="single-injection engine"
@@ -524,6 +632,36 @@ def main():
     ap.add_argument("--max-minutes", type=float, default=20.0, help="per-injection budget")
     ap.add_argument("--rhat-target", type=float, default=1.01)
     ap.add_argument("--ess-target", type=float, default=2000.0)
+    ap.add_argument(
+        "--kernel",
+        choices=["hmc", "mala", "mmala", "uld", "random-walk"],
+        default="hmc",
+        help="local transition kernel, forwarded to run_bns_ce_pe.py; one fixed "
+        "choice for the whole sweep (like --mass-ratio), not itself swept per "
+        "injection -- compare kernels by re-invoking with a different --kernel "
+        "and --outdir. hmc is the only one validated on this problem; see "
+        "run_bns_ce_pe.py's own docstring for what the other four assume",
+    )
+    ap.add_argument(
+        "--friction", type=float, default=1.0, help="uld only, forwarded as-is"
+    )
+    ap.add_argument(
+        "--target-acceptance",
+        type=float,
+        default=None,
+        help="override the non-hmc kernels' Robbins-Monro target, forwarded as-is",
+    )
+    ap.add_argument(
+        "--setup-cache",
+        default=None,
+        help="directory of per-injection setup caches, forwarded to "
+        "run_bns_ce_pe.py's --setup-cache as <dir>/inj_NN.npz. Point SEVERAL "
+        "sweeps that differ only in --kernel at the SAME directory: the solved "
+        "distance, refined --epsilon and MAP+Laplace mass matrix are then derived "
+        "once per injection and shared, so the kernels are compared on a "
+        "bit-identical likelihood and metric instead of merely equivalent ones "
+        "(and the second and later sweeps skip minutes of setup per injection)",
+    )
     ap.add_argument("--seed", type=int, default=42, help="master seed; injection i uses seed+i")
     ap.add_argument(
         "--extra-args",
@@ -608,14 +746,17 @@ def main():
           f"= {args.n_injections * args.max_minutes:.0f} min, run strictly sequentially")
     for r in rows:
         print(
-            f"  [{r['index']}] M_tot={r['total_mass']:7.2f}  m1={r['m1']:6.2f}  "
-            f"m2={r['m2']:6.2f}  Mc={r['mc']:7.3f}  duration={r['duration']:7.0f}s  "
-            f"target SNR={r['target_snr']:5.1f}  seed={r['seed']}"
+            f"  [{r['index']}] M_tot={r['total_mass']:7.2f}  m1={r['m1']:6.2f}({r['regime1']})  "
+            f"m2={r['m2']:6.2f}({r['regime2']})  Mc={r['mc']:7.3f}  duration={r['duration']:7.0f}s  "
+            f"target SNR={r['target_snr']:5.1f}  spin=[{r['spin1z']:+.3f},{r['spin2z']:+.3f}] "
+            f"prior=[{r['spin_min']:+.2f},{r['spin_max']:+.2f}]  seed={r['seed']}"
         )
 
     if args.dry_run:
         print("\n--dry-run: no injections were executed")
         return 0
+
+    check_gpu_or_die(args)
 
     Path(args.outdir).mkdir(parents=True, exist_ok=True)
     results = []
