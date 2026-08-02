@@ -416,14 +416,16 @@ injected 1.21877.
 
 > **Caveat on the suite below.** The best-converged-mode criterion was found *while*
 > performing that reference check, after the ten-injection suite had already been run
-> against a shared setup cache built with the cheaper start-log-posterior criterion. The
-> two do select different rungs — 2×10⁻⁴ → 2×10⁻³ at 2.8 M☉, 2×10⁻² → 2×10⁻⁶ at
-> 4.1 M☉ — so the absolute convergence rates below would likely change on a re-run, and
-> probably improve. What they do **not** affect is the cross-kernel comparison, which is
-> the point of the exercise: every kernel shared one mass matrix per injection, so the
-> agreement between kernels and the ULD result are unchanged by which rung produced it.
-> Re-running the suite against the corrected cache is the obvious follow-up and has not
-> been done.
+> against a shared setup cache built with the cheaper start-log-posterior criterion.
+> Rebuilding the cache both ways and comparing: the two criteria select different rungs on
+> most injections, but converge to **essentially the same mode anyway** — the resulting
+> Laplace covariances agree to within 3 % on eight of ten. The exceptions are 26.2 M☉
+> (1.77× wider in its tightest direction under the corrected criterion) and 38.0 M☉ (57×,
+> one of the three that never produced a result). So the caveat is narrow but not empty,
+> and it is *not* neutral for the cross-kernel comparison: a metric that is too tight
+> penalises single-step kernels far more than HMC, which is quantified at the end of this
+> section. Re-running the suite against the corrected cache remains the obvious follow-up
+> and has not been done.
 
 **2. Relative-binning resolution is set by the prior volume, not the source.** The
 heterodyne's linear-in-f ratio model must hold across the parameters actually *proposed*,
@@ -551,23 +553,40 @@ kernel's, on every binary — 1.12 σ vs 1.36–1.87 σ at 2.8 M☉, 0.82 σ vs 
 26.2 M☉ — and the ordering (HMC, then RandomWalk, then MMALA/MALA) tracks the boundary
 occupancy exactly.
 
-**Mechanism.** It is the local move length, not the Metropolis correction. HMC integrates
-for T = ε × n_leapfrog ≈ 1.0–3.7 per trajectory; the single-step kernels displace ~ε per
-step, measured at 0.006–0.08, with production acceptance drifting well off target (MMALA
-0.53 → 0.16, RandomWalk 0.15 → 0.06). Their local kernel therefore contributes almost no
-displacement, and reaching the boundary falls entirely to the flow's global proposals —
-which are fitted to those same chains' spread. Narrow chains train a narrow flow, which
-proposes narrowly, which keeps the chains narrow. HMC breaks that loop by physically
-transporting chains into the pileup along the curved valley, which then trains a flow
-that can propose there. This is the same feedback the equilibration phase was designed to
-break at start-up; what these runs show is that it re-forms in production when the local
-kernel is too weak to keep pushing.
+**Mechanism, and how much of it is the kernel.** It is the local move length, not the
+Metropolis correction. HMC integrates for T = ε × n_leapfrog ≈ 1.0–3.7 per trajectory;
+the single-step kernels displace ~ε per step, measured at 0.006–0.08, with production
+acceptance drifting well off target (MMALA 0.53 → 0.16, RandomWalk 0.15 → 0.06). Their
+local kernel therefore contributes almost no displacement, and reaching the boundary
+falls to the flow's global proposals — which are fitted to those same chains' spread.
+Narrow chains train a narrow flow, which proposes narrowly, which keeps the chains
+narrow. HMC breaks that loop by transporting chains into the pileup along the curved
+valley, which then trains a flow that can propose there.
+
+That mechanism predicts something testable: a kernel whose entire step is set by the
+preconditioner should be far more sensitive to the *quality* of the shared mass matrix
+than one whose trajectories bend along the true curvature. It is, and it matters for how
+much of the above should be read as intrinsic. Re-running 26.2 M☉ against the corrected
+setup cache (whose metric is 1.77× wider in its tightest direction — see the caveat
+above) moves MALA's 90 % widths from 0.66/0.70/0.44/0.45 to **0.92/0.91/0.54/0.56** of
+HMC's, while HMC itself barely moves (JS 0.005–0.021 between the two metrics). So on that
+binary **most of the M_c–η under-dispersion was a suboptimal shared metric being
+amplified by a single-step kernel, not a property of MALA.**
+
+What survives that correction is still real, and is the honest residual: the spin
+marginals stay 0.54–0.56× (from 0.44), and the η boundary occupancy stays at 0.03× HMC's
+— unmoved. And at 2.8 M☉, where the two metrics agree to within 1 %, the deficit is
+undiminished (0.68–0.82× widths, 19–32× the JS floor). The exploration deficit is
+therefore genuine but **smaller than the suite's headline numbers suggest**, because those
+numbers were measured against a metric that handicapped the single-step kernels more than
+it handicapped HMC.
 
 So the Metropolis correction buys **unbiasedness in the limit**, which is real and is why
 all four land in the right place. It does not buy *sufficient exploration in finite time*,
-and on this posterior that is the binding constraint. The corrected reading of the table
-above: the MH kernels differ in cost **and** in answer; only their medians are
-interchangeable.
+and on this posterior that is the binding constraint — but a meaningful share of the
+measured gap is metric quality, which is fixable, rather than kernel choice, which is not.
+Re-running the suite against the corrected cache is the experiment that would separate
+them cleanly, and it has not been done.
 
 ULD is a different and much larger failure, and it is worth keeping the two apart. The
 under-dispersion above is a *finite-time exploration* deficit in kernels that would
