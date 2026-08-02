@@ -465,7 +465,9 @@ kernels alone. Two further corrections were needed before the comparison meant a
 
 ### Results
 
-Convergence is governed by the relative-binning cost, **not by the kernel**:
+Whether a run passes the gate at all is governed by the relative-binning cost, **not by
+the kernel** (what the resulting posteriors look like is a separate question, and the
+next subsection shows they differ):
 
 | M_tot (M☉) | bins | HMC | MALA | MMALA | RandomWalk | ULD |
 |---:|---:|:--|:--|:--|:--|:--|
@@ -495,12 +497,10 @@ sampler was given an advantage, because none of them got a result.
 The figure is grouped by binary rather than plotted against mass on purpose: cost here
 tracks bin count, and a line against a mass axis would draw a trend that does not exist.
 
-### The MH correction is what matters, not the kernel
+### Medians agree; the distributions do not
 
-Comparing posterior medians against HMC's, in units of HMC's own posterior σ, over the
-four binaries where HMC passed the gate (2.8, 5.9, 26.2, 80.0 M☉ — MALA's 80 M☉ run is
-included even though it stopped at R̂ = 1.026, which is why its worst shift is the
-largest of the three):
+Comparing posterior *medians* against HMC's, in units of HMC's own posterior σ, over the
+four binaries where HMC passed the gate (2.8, 5.9, 26.2, 80.0 M☉):
 
 | kernel | worst median shift vs HMC |
 |---|---:|
@@ -509,19 +509,78 @@ largest of the three):
 | RandomWalk | 0.15 σ |
 | **ULD** | **218 σ** |
 
-The three MH-corrected alternatives are indistinguishable from HMC at the level this
-page's own control measures (two independent runs of one configuration differ by
-0.047 σ; 0.15–0.32 σ is that floor plus genuinely different tuning). They differ in
-*cost*, not in *answer* — which is the expected consequence of Metropolis correction:
-the target is preserved exactly however good or bad the proposal is.
+Read alone, that table says the three MH-corrected alternatives are interchangeable with
+HMC. **It is misleading, and the rest of this section is why.** A median is one number
+from a four-dimensional distribution, and it is the number these kernels get right.
 
-ULD is the control that proves the point. It has no Metropolis step, so its stationary
-distribution carries an O(ε²) discretisation bias **by construction**
-(`jaxpe/kernels/uld.py`), and with the step size inherited from the HMC-tuned default it
-is not merely biased but unstable: on five of the seven binaries **up to 27 % of its
-stored draws are non-finite** (0 % on the cheapest, 80 M☉ one), and the survivors put the
-chirp-mass median 218 σ from HMC's. It never passes the gate at any mass. This is not a tuning failure to be fixed before publishing the comparison — it is
-the measurement of what dropping the accept/reject step costs.
+Jensen–Shannon divergence against HMC (same estimator as
+[`compare_bns_posteriors.py`](../bin/compare_bns_posteriors.py)) tells a different story.
+Against a null built by splitting HMC's *own* chains in half at the same ESS — the honest
+Monte-Carlo floor for each run — the MH-corrected kernels sit at:
+
+| binary | MALA | MMALA | RandomWalk |
+|---|---:|---:|---:|
+| 2.8 M☉ | 19–32× floor | 13–24× | 1.6–7.7× |
+| 5.9 M☉ | 1.2–3.5× | 3.0–13× | 0.3–0.6× |
+| 26.2 M☉ | 8.2–15× | 3.5–15× | 1.5–4.7× |
+| 80.0 M☉ | 0.5–5.8× | 0.8–8.1× | 0.4–2.6× |
+
+Twelve to thirty-two times the noise floor is not sampling scatter. These are genuinely
+different distributions.
+
+**The difference is under-dispersion, and it is one-sided.** Every non-HMC kernel returns
+a *narrower* posterior than HMC, on every parameter of every binary — never wider. The
+90 % credible widths run from 0.44× to 1.01× HMC's, and the M_c–η correlation is
+systematically weaker too (−0.95 → −0.90/−0.91/−0.93 at 2.8 M☉).
+
+Two measurements locate it. First, the deficit *shrinks* with credible level (η at
+26.2 M☉: 0.53× at 50 %, 0.83× at 99 % for MALA), so it is not tail truncation. Second,
+the prior-boundary accumulation is missing: HMC places 11.8 % of its 26.2 M☉ posterior
+within 10⁻³ of the η = 0.25 edge, MALA 0.35 % — **34× less**. That accumulation is the
+feature this page's sampler was built around ("the η → 1/4 and spin → 0 pileups that no
+fixed mass matrix equilibrates"), and it is precisely what the single-step kernels miss.
+
+Because η_true = 0.25 sits *on* that boundary for equal-mass injections, "reaches the
+pileup" and "recovers the truth" are the same statement there — so the aligned spins,
+whose truths are interior, are the control. They show the same deficit: at 26.2 M☉ the
+spin marginals are 0.44–0.67× HMC's width with the truth nowhere near an edge. The
+under-dispersion is a general exploration failure, not an artefact of where η's truth sits.
+
+It has a consequence for accuracy. HMC's η median is closer to the truth than every other
+kernel's, on every binary — 1.12 σ vs 1.36–1.87 σ at 2.8 M☉, 0.82 σ vs 1.09–1.42 σ at
+26.2 M☉ — and the ordering (HMC, then RandomWalk, then MMALA/MALA) tracks the boundary
+occupancy exactly.
+
+**Mechanism.** It is the local move length, not the Metropolis correction. HMC integrates
+for T = ε × n_leapfrog ≈ 1.0–3.7 per trajectory; the single-step kernels displace ~ε per
+step, measured at 0.006–0.08, with production acceptance drifting well off target (MMALA
+0.53 → 0.16, RandomWalk 0.15 → 0.06). Their local kernel therefore contributes almost no
+displacement, and reaching the boundary falls entirely to the flow's global proposals —
+which are fitted to those same chains' spread. Narrow chains train a narrow flow, which
+proposes narrowly, which keeps the chains narrow. HMC breaks that loop by physically
+transporting chains into the pileup along the curved valley, which then trains a flow
+that can propose there. This is the same feedback the equilibration phase was designed to
+break at start-up; what these runs show is that it re-forms in production when the local
+kernel is too weak to keep pushing.
+
+So the Metropolis correction buys **unbiasedness in the limit**, which is real and is why
+all four land in the right place. It does not buy *sufficient exploration in finite time*,
+and on this posterior that is the binding constraint. The corrected reading of the table
+above: the MH kernels differ in cost **and** in answer; only their medians are
+interchangeable.
+
+ULD is a different and much larger failure, and it is worth keeping the two apart. The
+under-dispersion above is a *finite-time exploration* deficit in kernels that would
+converge to the right answer eventually. ULD has no Metropolis step at all, so its
+stationary distribution carries an O(ε²) discretisation bias **by construction**
+(`jaxpe/kernels/uld.py`) — it does not converge to the right answer at any run length at
+fixed ε. With the step size inherited from the HMC-tuned default it is not merely biased
+but unstable: on five of the seven binaries **up to 27 % of its stored draws are
+non-finite** (0 % on the cheapest, 80 M☉ one), its JS divergence from HMC is 0.15–1.00
+against a floor of ~0.005, and the survivors put the chirp-mass median 218 σ from HMC's.
+It never passes the gate at any mass. This is not a tuning failure to be fixed before
+publishing the comparison — it is the measurement of what dropping the accept/reject step
+costs.
 
 Two structural caveats that no amount of budget addresses: `mala`, `uld` and
 `random-walk` use their `scale` **elementwise** in `jaxpe.kernels`, so they receive
