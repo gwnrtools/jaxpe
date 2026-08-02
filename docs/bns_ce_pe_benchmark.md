@@ -230,20 +230,27 @@ acceptance threshold. (The 1e-3 figure quoted in the relative-binning status pag
 belongs to a deterministic grid comparison with no Monte Carlo noise and does not
 transfer to sample-based comparisons at these sizes.)
 
-![Corner plot of the BNS/CE posterior over chirp mass, eta, spin1z and spin2z, with the injection marked in orange](assets/bns_ce_corner.png)
+![Corner plot of the BNS/CE posterior over chirp mass, eta, spin1z, spin2z, and the derived m1, m2, chi_eff, with the injection marked in orange](assets/bns_ce_corner.png)
 
 Median chirp mass 1.2187730 M☉ against an injected 1.2187707 — a measurement to roughly
 one part in 10⁶, which is what SNR 607 over a ~1000 s inspiral buys. Chirp mass is drawn
-as an offset from the injection because its posterior is only ~10⁻⁶ M☉ wide.
+as an offset from the injection because its posterior is only ~10⁻⁶ M☉ wide. The three
+right/bottom-most panels — m1, m2, χ_eff — are not themselves sampled; they are computed
+per-sample from (chirp_mass, η, spin1z, spin2z), the same map used everywhere else on
+this page, so they can be read off directly instead of reconstructed by hand from the
+sampled corner.
 
 **The marginals are one-sided about the truth by construction, not biased.** Truth
 recovery comes out at +1.84 σ in chirp mass, −1.86 σ in η and ~+1 σ in both spins, and
 those same offsets appear in the 15.4-minute reference. The injection sits exactly on
 the η = 0.25 prior boundary; Mc and η are ~97 % anti-correlated, so truncating η from
-above truncates Mc from below. The spin panels show the expected χ_eff degeneracy
+above truncates Mc from below (and, equivalently, pushes m1 up and m2 down — visible
+directly in their panels now). The spin panels show the expected χ_eff degeneracy
 triangle — only the mass-weighted combination is measured, so the individual spins slide
 along the anti-diagonal until the positive-support priors cut them off, which pushes
-their medians above zero and η's below its truth.
+their medians above zero and η's below its truth; the χ_eff panel makes that combination
+explicit — it is the actual spin quantity this measurement constrains, not the
+individual spins.
 
 ### Nothing is tuned to this source
 
@@ -307,6 +314,260 @@ BNS-tuned defaults, left untouched, still reach the same convergence gate there.
 Raw sweep output: [`mass_sweep_summary.csv`](assets/mass_sweep_summary.csv); figure via
 `python bin/plot_mass_sweep_timing.py <sweep_summary.csv>`.
 
+#### Posteriors across the sweep
+
+Same layout as the BNS corner plot above — chirp mass, η, spin1z, spin2z, plus the
+derived m1, m2, χ_eff (χ_eff = (m1·spin1z + m2·spin2z)/(m1+m2)) panels appended, truth
+marked throughout — one per injection, in increasing total mass. The table below is the
+same derived quantities made quantitative (median and 90% CI), for reference without
+opening every image:
+
+| M_tot (M☉) | m1 truth / median [90% CI] | m2 truth / median [90% CI] | χ_eff truth / median [90% CI] |
+|---:|---|---|---|
+| 2.80 | 1.400 / 1.650 [1.526, 1.760] | 1.400 / 1.194 [1.125, 1.286] | 0 / 0.017 [0.005, 0.032] |
+| 5.47 | 2.737 / 3.278 [3.016, 3.500] | 2.737 / 2.300 [2.166, 2.489] | 0 / 0.023 [0.007, 0.040] |
+| 10.70 | 5.352 / 6.393 [5.886, 6.779] | 5.352 / 4.508 [4.272, 4.875] | 0 / 0.024 [0.007, 0.041] |
+| 20.93 | 10.464 / 12.444 [11.427, 13.189] | 10.464 / 8.853 [8.391, 9.598] | 0 / 0.025 [0.008, 0.042] |
+| 40.92 | 20.458 / 24.188 [22.281, 25.726] | 20.458 / 17.411 [16.436, 18.835] | 0 / 0.025 [0.009, 0.042] |
+| 80.00 | 40.000 / 46.705 [42.930, 49.955] | 40.000 / 34.484 [32.293, 37.452] | 0 / 0.025 [0.009, 0.041] |
+
+m1/m2 are one-sided about the truth for the same reason chirp-mass/η are (see above): η
+is truncated at its true value of exactly 0.25, so the posterior only ever sees
+`eta <= eta_true`, which pushes `m1` up and `m2` down at every mass — this is a prior
+boundary artifact, not a mass asymmetry the sampler invented. χ_eff is similarly
+one-sided **because the spin priors are** (`Uniform(0, 0.05)` on each of spin1z/spin2z,
+not centered on 0), so a mass-weighted average of two positive-truncated quantities
+comes out positive even when both truths are exactly 0. Both effects are visible
+directly in the corner plots below and are already discussed for the BNS case earlier
+on this page; the table above is the same statement made quantitative at every mass in
+the sweep.
+
+![Posterior corner plot, m1 = m2 = 1.40 M☉ (BNS), SNR 22, converged in 3.4 min](assets/mass_sweep_corner_inj00_M2.8.png)
+
+![Posterior corner plot, m1 = m2 = 2.74 M☉, SNR 20, converged in 3.3 min](assets/mass_sweep_corner_inj01_M5.5.png)
+
+![Posterior corner plot, m1 = m2 = 5.35 M☉, SNR 22, converged in 2.6 min](assets/mass_sweep_corner_inj02_M10.7.png)
+
+![Posterior corner plot, m1 = m2 = 10.46 M☉, SNR 21, converged in 2.1 min](assets/mass_sweep_corner_inj03_M20.9.png)
+
+![Posterior corner plot, m1 = m2 = 20.46 M☉, SNR 18, converged in 1.9 min](assets/mass_sweep_corner_inj04_M40.9.png)
+
+![Posterior corner plot, m1 = m2 = 40.00 M☉ (BBH), SNR 23, converged in 1.8 min](assets/mass_sweep_corner_inj05_M80.0.png)
+
+A trend is visible across the set that has nothing to do with sampler performance and
+everything to do with the physics: **the spin1z/spin2z marginals flatten as mass
+increases.** At 2.8 M☉ they peak sharply at zero and fall off by z ~ 0.03; by 10.7 M☉
+they are already close to flat; by 80 M☉ they are indistinguishable from the uniform
+[0, 0.05] prior. A higher-mass signal spends fewer inspiral cycles in band before
+merger, and it is the accumulated spin-orbit phasing over many cycles that measures
+spin — fewer cycles means less of that signature, independent of how well the sampler
+mixes. The chirp-mass/η anti-correlation (the same one described for the BNS case
+above) persists at every mass, since it comes from the η = 0.25 prior boundary, not from
+the source.
+
+> **These six runs predate the MAP start-point fix described in the next section.** They
+> used a fixed 2 % inset off the prior edge; the optimiser start is now chosen from a
+> ladder. At these masses with a narrow zero-centred spin prior the difference is
+> immaterial — but the numbers above were measured before it, and have not been re-run.
+
+---
+
+## Spinning binaries, and all five transition kernels
+
+Everything above holds spins near zero: the reference BNS injects χ₁ᶻ = χ₂ᶻ = 0 under a
+one-sided `Uniform(0, 0.05)` prior. That turns out to be a load-bearing assumption in two
+places that have nothing to do with the sampler, and both surface immediately when the
+suite is pushed to realistic aligned spins.
+
+The suite: **ten equal-mass injections**, log-spaced from 2.8 to 80 M☉, each component
+classified NS below 3 M☉ and BH at or above, aligned-spin truth drawn per component from
+±0.05 (NS) or ±0.9 (BH), recovery prior widened to the symmetric range of the wider
+component, distance solved per injection to a comparable-but-not-identical network SNR
+(~18–23). Each is then sampled by **all five `jaxpe.kernels` transition kernels** on the
+same 12-minute budget and the same R̂ < 1.01 / ESS ≥ 2000 gate used everywhere else here.
+
+### Two defects a ±0.9 spin prior exposed
+
+**1. The MAP optimiser started in the wrong place, and failed silently.** The Laplace
+mass matrix comes from a damped-Newton MAP started at the fiducial point, inset off any
+prior edge it lies on (the sigmoid bijection sends open bounds to ±∞, so a start exactly
+on a boundary is not representable). That inset was a fixed 2 % of the prior width.
+Because the injection is zero-noise, lnL peaks at *exactly* 0 at the fiducial, so the
+inset's cost is directly measurable — and at 55 M☉, insetting η by 0.02 × 0.05 = 10⁻³
+costs **392 nats**. Newton then starts 392 below the peak, climbs monotonically exactly
+as designed, and still terminates at a prior *corner* (η = 0.2, χ₁ᶻ = χ₂ᶻ = −0.9) whose
+Laplace covariance has σ ~ 10⁻¹³. Nothing raises; the run proceeds to sample with a mass
+matrix that is numerically a delta function.
+
+The optimiser is now run from **every** rung of a ladder (2×10⁻² … 2×10⁻⁶) and the best
+*converged* mode is kept, rejecting any whose Laplace covariance has collapsed. Selecting
+on the rung's *starting* log-posterior — the obvious cheaper version — is wrong, and
+measurably so: for the zero-spin BNS that criterion picks the 2×10⁻⁴ rung, which climbs
+to a mode pinned against the η boundary at log-posterior −26.8 with a smallest σ_y of
+6.8×10⁻⁷, where the 2×10⁻² rung reaches −17.6 at 4.3×10⁻⁶, a metric 6× wider in its
+tightest direction. Newton only accepts improvements, so every rung is a valid local
+ascent; which *basin* it lands in is what the start decides, and only the final mode
+reveals that.
+
+Re-running the reference BNS confirms the validated path is unchanged: the ladder keeps
+2×10⁻² (log-posterior −17.6, against −20.0 / −26.8 / −33.5 / −40.4 for the finer rungs),
+converges at R̂ = 1.0098 with min ESS 21 846, and recovers chirp mass 1.21877 against an
+injected 1.21877.
+
+> **Caveat on the suite below.** The best-converged-mode criterion was found *while*
+> performing that reference check, after the ten-injection suite had already been run
+> against a shared setup cache built with the cheaper start-log-posterior criterion. The
+> two do select different rungs — 2×10⁻⁴ → 2×10⁻³ at 2.8 M☉, 2×10⁻² → 2×10⁻⁶ at
+> 4.1 M☉ — so the absolute convergence rates below would likely change on a re-run, and
+> probably improve. What they do **not** affect is the cross-kernel comparison, which is
+> the point of the exercise: every kernel shared one mass matrix per injection, so the
+> agreement between kernels and the ULD result are unchanged by which rung produced it.
+> Re-running the suite against the corrected cache is the obvious follow-up and has not
+> been done.
+
+**2. Relative-binning resolution is set by the prior volume, not the source.** The
+heterodyne's linear-in-f ratio model must hold across the parameters actually *proposed*,
+so widening the spin prior from ±0.05 to ±0.9 at SNR ≈ 20 breaks it: measured RB-vs-dense
+tail ratios of 0.22–0.50 against a 5×10⁻³ tolerance, 40–100× outside contract. `--epsilon`
+now auto-refines (quartering, tolerances never relaxed) until the existing parity guard
+passes. The cost is real and is recorded per injection: half the grid needs 490–7 900
+bins where the BNS reference needs 125.
+
+Neither is visible at BNS masses with narrow spin priors, which is why both survived.
+
+### Making it a fair comparison
+
+The solved distance, refined `--epsilon`, and MAP+Laplace mode and covariance depend only
+on the injection, never on the kernel. They are derived **once per injection** and shared
+across all five sweeps via `--setup-cache`, so every kernel samples a bit-identical
+likelihood from a bit-identical mass matrix and any difference is a difference between
+kernels alone. Two further corrections were needed before the comparison meant anything:
+
+- **`--max-production-blocks` was binding instead of the time budget.** At its previous
+  default of 80, MALA hit the cap on 6 of 10 injections having spent only 6.4 of its 12
+  allowed minutes. A fixed block cap penalises exactly the kernels that take smaller steps
+  per block, so the comparison would have measured the cap. Default raised to 400.
+- **Everything runs on CPU, not the GPU** — because mid-suite the CUDA driver wedged
+  (`cuInit` → `CUDA_ERROR_UNKNOWN`, while `nvidia-smi` continued to report a perfectly
+  healthy card). This is a fallback, not a preference: measured per production block, the
+  T2000 is **1.9–2.6× faster** than this CPU (see "Different hardware" below). What
+  matters for the comparison is only that all five kernels ran on the *same* device;
+  absolute wall clocks here are therefore ~2.3× the GPU figures quoted elsewhere on this
+  page and should not be compared across sections.
+
+  A caution worth recording, since it nearly went into this page as a result: an early
+  CPU-vs-GPU comparison appeared to show the CPU *winning*, because the GPU side of it
+  was measured while the driver was already degrading (per-block cost had silently
+  tripled before it failed outright). The healthy-GPU numbers say the opposite.
+  `run_mass_sweep_pe.py --require-gpu` now creates and exercises a real CUDA context
+  before the first injection and aborts if it cannot; `nvidia-smi` is documented there as
+  explicitly *not* a valid readiness check.
+
+### Results
+
+Convergence is governed by the relative-binning cost, **not by the kernel**:
+
+| M_tot (M☉) | bins | HMC | MALA | MMALA | RandomWalk | ULD |
+|---:|---:|:--|:--|:--|:--|:--|
+| 2.8 | 125 | ✅ 14.1 | ✅ 8.8 | ✅ 10.5 | ✅ 8.5 | ✗ R̂ 1.843 |
+| 4.1 | 499 | ✗ R̂ 1.023 | ✗ R̂ 1.030 | ✗ R̂ 1.033 | ✗ R̂ 1.019 | ✗ R̂ 2.257 |
+| 5.9 | 125 | ✅ 8.8 | ✅ 9.8 | ✅ 8.7 | ✅ 8.1 | ✗ R̂ 1.352 |
+| 8.6 | 499 | ✗ R̂ 1.037 | ✗ R̂ 1.019 | ✗ R̂ 1.195 | ✗ R̂ 1.019 | ✗ R̂ 3.116 |
+| 26.2 | 125 | ✅ 12.2 | ✅ 10.6 | ✅ 7.4 | ✅ 9.5 | ✗ R̂ 2.175 |
+| 55.1 | 490 | ✗ R̂ 1.031 | ✗ R̂ 1.038 | ✗ R̂ 1.019 | ✗ R̂ 1.033 | ✗ R̂ 2.383 |
+| 80.0 | 124 | ✅ 6.6 | ✗ R̂ 1.026 | ✅ 9.1 | ✅ 12.2 | ✗ R̂ 2.857 |
+
+✅ = passed the gate, with end-to-end minutes; ✗ = budget exhausted, with the R̂ reached.
+Every 125-bin injection converges for all four MH-corrected kernels; no 490+ bin injection
+converges for any of them.
+
+**Three injections are absent from this table entirely** (12.4, 18.0 and 38.0 M☉, the
+ones the parity guard pushed to 6 375–7 888 bins), and they are the clearest statement of
+what the refinement costs. Re-run alone with a 25-minute budget, the 12.4 M☉ case spends
+617 s in warmup, 950 s in equilibration, and then **325 s per production block**, reaching
+only R̂ = 1.13 after four blocks. Extrapolating the block count these posteriors need,
+each run is hours, and the fifteen runs (three injections × five kernels) are tens of
+hours on this hardware. They were abandoned rather than reported as fast failures; no
+sampler was given an advantage, because none of them got a result.
+
+![Grouped-bar comparison of wall clock per sampler for each binary, production-only and end-to-end, with hatched bars marking runs that exhausted the budget](assets/sampler_timing_comparison.png)
+
+The figure is grouped by binary rather than plotted against mass on purpose: cost here
+tracks bin count, and a line against a mass axis would draw a trend that does not exist.
+
+### The MH correction is what matters, not the kernel
+
+Comparing posterior medians against HMC's, in units of HMC's own posterior σ, over the
+four binaries where HMC passed the gate (2.8, 5.9, 26.2, 80.0 M☉ — MALA's 80 M☉ run is
+included even though it stopped at R̂ = 1.026, which is why its worst shift is the
+largest of the three):
+
+| kernel | worst median shift vs HMC |
+|---|---:|
+| MALA | 0.32 σ |
+| MMALA | 0.23 σ |
+| RandomWalk | 0.15 σ |
+| **ULD** | **218 σ** |
+
+The three MH-corrected alternatives are indistinguishable from HMC at the level this
+page's own control measures (two independent runs of one configuration differ by
+0.047 σ; 0.15–0.32 σ is that floor plus genuinely different tuning). They differ in
+*cost*, not in *answer* — which is the expected consequence of Metropolis correction:
+the target is preserved exactly however good or bad the proposal is.
+
+ULD is the control that proves the point. It has no Metropolis step, so its stationary
+distribution carries an O(ε²) discretisation bias **by construction**
+(`jaxpe/kernels/uld.py`), and with the step size inherited from the HMC-tuned default it
+is not merely biased but unstable: on five of the seven binaries **up to 27 % of its
+stored draws are non-finite** (0 % on the cheapest, 80 M☉ one), and the survivors put the
+chirp-mass median 218 σ from HMC's. It never passes the gate at any mass. This is not a tuning failure to be fixed before publishing the comparison — it is
+the measurement of what dropping the accept/reject step costs.
+
+Two structural caveats that no amount of budget addresses: `mala`, `uld` and
+`random-walk` use their `scale` **elementwise** in `jaxpe.kernels`, so they receive
+per-dimension marginal standard deviations rather than the dense Cholesky factor `hmc`
+and `mmala` get, and cannot see the ~97 % M_c–η anti-correlation at all; and `mmala` runs
+in its documented constant-metric mode, which its own docstring calls equivalent to
+dense-mass MALA, not the full Riemannian variant. Only `hmc` has tuned numbers behind it
+here — the others use jaxpe's library-default acceptance targets, which are literature
+values not measured on this posterior.
+
+### Posteriors, all samplers overlaid
+
+One figure per binary, every kernel on common axes, injection marked. The 1-D marginals
+are **densities rather than counts** — the kernels return different numbers of samples,
+and a count histogram would read a longer run as a taller posterior. Axis ranges are the
+union of each kernel's 0.5–99.5 percentile box, so a kernel that sampled somewhere else
+widens the frame rather than vanishing off the edge of its own comparison.
+
+![All five samplers overlaid, 2.8 solar mass BNS](assets/sampler_corner_inj00_M2.8.png)
+
+![All five samplers overlaid, 4.1 solar masses](assets/sampler_corner_inj01_M4.1.png)
+
+![All five samplers overlaid, 5.9 solar masses](assets/sampler_corner_inj02_M5.9.png)
+
+![All five samplers overlaid, 8.6 solar masses](assets/sampler_corner_inj03_M8.6.png)
+
+![All five samplers overlaid, 26.2 solar masses](assets/sampler_corner_inj06_M26.2.png)
+
+![All five samplers overlaid, 55.1 solar masses](assets/sampler_corner_inj08_M55.1.png)
+
+![All five samplers overlaid, 80.0 solar masses](assets/sampler_corner_inj09_M80.0.png)
+
+The four coloured contour sets sit on top of one another in every panel of every figure;
+the black dashed ULD contours sit somewhere else entirely. At 5.9 M☉ ULD puts η at ~0.205
+against a truth of 0.25 and m₁ at ~4.8 M☉ against 2.95 — a different posterior, not a
+noisier one.
+
+The spin panels show the expected χ_eff physics at these SNRs: individual aligned spins
+are barely measured, and at 55.1 M☉ the injected +0.590/−0.622 pair (χ_eff ≈ −0.016)
+recovers as two broad marginals peaked near zero with the *combination* constrained —
+which is why χ_eff is carried as its own panel rather than left to be reconstructed.
+
+Raw per-kernel output: [`sampler_sweep_hmc.csv`](assets/sampler_sweep_hmc.csv) and the
+four alongside it. Figures via
+`python bin/make_sampler_comparison_figures.py --root <sweep root>`.
+
 ---
 
 ## What is left, if you want to go further
@@ -322,6 +583,14 @@ in both directions.
   of fp32. A100/H100-class parts (1/2 rate) are the ones that change this arithmetic. A
   larger card also lifts the 4 GB constraint that forces setup onto the CPU, and makes
   large chain counts cheap enough to be worth revisiting.
+
+  **The CPU is closer than the fp64 rates suggest, but does not win.** Measured per
+  production block on four injections, the T2000 is **1.9–2.6× faster** than the 12-core
+  Xeon W-10855M (4.1–5.3 s/block against 10.1–10.4 s/block). That is a far smaller margin
+  than a GPU-versus-CPU comparison normally implies — the card's 1/32 fp64 rate puts it
+  near 40 GFLOPS against ~149 GFLOPS fp64 measured on the CPU, and the GPU wins anyway on
+  memory bandwidth and on vmapping 64 chains — but it does mean a CPU-only run of this
+  pipeline is perfectly practical, at roughly 2.3× the wall clock.
 - **A cheaper exact gradient**, e.g. a reduced-order or surrogate waveform. That is a
   different accuracy contract from trimming PhenomD and needs its own validation.
 - **Skipping unused waveform regions** is *ruled out*, not deferred. `Phase`/`Amp`
@@ -338,6 +607,7 @@ in both directions.
 
 ```bash
 python bin/make_bns_ce_figures.py     # reads examples/output/bns_ce_rb_hmc/
+python bin/make_sampler_comparison_figures.py --root <dir of per-kernel sweeps>
 ```
 
 [`bin/make_bns_ce_figures.py`](../bin/make_bns_ce_figures.py) rebuilds all three figures
