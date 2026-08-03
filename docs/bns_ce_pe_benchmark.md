@@ -384,7 +384,9 @@ classified NS below 3 M☉ and BH at or above, aligned-spin truth drawn per comp
 ±0.05 (NS) or ±0.9 (BH), recovery prior widened to the symmetric range of the wider
 component, distance solved per injection to a comparable-but-not-identical network SNR
 (~18–23). Each is then sampled by **all five `jaxpe.kernels` transition kernels** on the
-same 12-minute budget and the same R̂ < 1.01 / ESS ≥ 2000 gate used everywhere else here.
+same 90-minute budget and the same R̂ < 1.01 / ESS ≥ 2000 gate used everywhere else here.
+Seven of the ten are reported: the other three refine to 6 375–7 900 relative-binning bins
+and are measured below as infeasible on this hardware.
 
 ### Two defects a ±0.9 spin prior exposed
 
@@ -423,9 +425,14 @@ injected 1.21877.
 > (1.77× wider in its tightest direction under the corrected criterion) and 38.0 M☉ (57×,
 > one of the three that never produced a result). So the caveat is narrow but not empty,
 > and it is *not* neutral for the cross-kernel comparison: a metric that is too tight
-> penalises single-step kernels far more than HMC, which is quantified at the end of this
-> section. Re-running the suite against the corrected cache remains the obvious follow-up
-> and has not been done.
+> penalises single-step kernels far more than HMC.
+>
+> **The suite below has since been re-run in full against the corrected cache**, so the
+> results reported here are no longer subject to this caveat. It is kept because the
+> difference mattered: measured against the corrected metric, the cross-kernel divergences
+> that the first pass reported (12–32× the Monte-Carlo floor) fall to 3.6–5.1×. A metric
+> defect that agrees to 3 % on eight of ten injections still moved the headline conclusion
+> of a kernel comparison by roughly a factor of four.
 
 **2. Relative-binning resolution is set by the prior volume, not the source.** The
 heterodyne's linear-in-f ratio model must hold across the parameters actually *proposed*,
@@ -449,6 +456,20 @@ kernels alone. Two further corrections were needed before the comparison meant a
   default of 80, MALA hit the cap on 6 of 10 injections having spent only 6.4 of its 12
   allowed minutes. A fixed block cap penalises exactly the kernels that take smaller steps
   per block, so the comparison would have measured the cap. Default raised to 400.
+- **The 12-minute budget itself was binding**, and it was the single largest source of
+  "did not converge" in the first pass of this suite: 13 of 35 runs ended on
+  `production wall-clock budget exhausted` with R̂ still falling monotonically block over
+  block and no stuck chains. Those were unfinished runs, not failures. Raised to
+  **90 minutes**, which converts every one of them except MMALA's two. A budget-limited
+  run is reported as not converged either way — the point is that reading it as a
+  statement about the *kernel* was wrong.
+- **ULD's step size was never a measured choice.** It has no acceptance signal to adapt
+  on, so `--step-size` is held fixed for the whole run, and the first pass left it at the
+  default of 0.5 while the MH kernels' own adaptation selected **0.006–0.033** on these
+  same posteriors. Running an unadjusted integrator at 15–80× the step the geometry
+  supports does not measure the cost of dropping the accept/reject step; it measures a
+  broken step size. It now takes MALA's adapted value per injection via
+  `--step-size-from`, and the difference is not subtle — see the ULD discussion below.
 - **Everything runs on CPU, not the GPU** — because mid-suite the CUDA driver wedged
   (`cuInit` → `CUDA_ERROR_UNKNOWN`, while `nvidia-smi` continued to report a perfectly
   healthy card). This is a fallback, not a preference: measured per production block, the
@@ -467,23 +488,32 @@ kernels alone. Two further corrections were needed before the comparison meant a
 
 ### Results
 
-Whether a run passes the gate at all is governed by the relative-binning cost, **not by
-the kernel** (what the resulting posteriors look like is a separate question, and the
-next subsection shows they differ):
+**30 of 35 runs pass the gate.** End-to-end minutes on identical CPU hardware, against
+the corrected setup cache and the 90-minute budget:
 
 | M_tot (M☉) | bins | HMC | MALA | MMALA | RandomWalk | ULD |
 |---:|---:|:--|:--|:--|:--|:--|
-| 2.8 | 125 | ✅ 14.1 | ✅ 8.8 | ✅ 10.5 | ✅ 8.5 | ✗ R̂ 1.843 |
-| 4.1 | 499 | ✗ R̂ 1.023 | ✗ R̂ 1.030 | ✗ R̂ 1.033 | ✗ R̂ 1.019 | ✗ R̂ 2.257 |
-| 5.9 | 125 | ✅ 8.8 | ✅ 9.8 | ✅ 8.7 | ✅ 8.1 | ✗ R̂ 1.352 |
-| 8.6 | 499 | ✗ R̂ 1.037 | ✗ R̂ 1.019 | ✗ R̂ 1.195 | ✗ R̂ 1.019 | ✗ R̂ 3.116 |
-| 26.2 | 125 | ✅ 12.2 | ✅ 10.6 | ✅ 7.4 | ✅ 9.5 | ✗ R̂ 2.175 |
-| 55.1 | 490 | ✗ R̂ 1.031 | ✗ R̂ 1.038 | ✗ R̂ 1.019 | ✗ R̂ 1.033 | ✗ R̂ 2.383 |
-| 80.0 | 124 | ✅ 6.6 | ✗ R̂ 1.026 | ✅ 9.1 | ✅ 12.2 | ✗ R̂ 2.857 |
+| 2.8 | 125 | ✅ 21.8 | ✅ 19.1 | ✅ 19.7 | ✅ 12.5 | ✅ 20.9 |
+| 4.1 | 499 | ✅ 69.0 | ✅ 69.0 | ✗ R̂ 1.0136 | ✅ 42.8 | ✅ 50.1 |
+| 5.9 | 125 | ✅ 11.4 | ✅ 17.1 | ✅ 17.8 | ✅ 10.1 | ✅ 10.7 |
+| 8.6 | 499 | ✅ 64.8 | ✅ 46.8 | ✗ R̂ 1.0320 | ✅ 60.7 | ✗ R̂ 1.0355 |
+| 26.2 | 125 | ✅ 26.1 | ✗ R̂ 1.0129 | ✅ 35.4 | ✅ 48.6 | ✅ 61.9 |
+| 55.1 | 490 | ✅ 46.5 | ✅ 62.4 | ✅ 35.5 | ✅ 35.7 | ✅ 35.6 |
+| 80.0 | 124 | ✅ 13.1 | ✅ 31.0 | ✅ 42.1 | ✅ 31.4 | ✗ R̂ 1.0114 |
 
 ✅ = passed the gate, with end-to-end minutes; ✗ = budget exhausted, with the R̂ reached.
-Every 125-bin injection converges for all four MH-corrected kernels; no 490+ bin injection
-converges for any of them.
+HMC and RandomWalk are 7/7, MALA 6/7, MMALA and ULD 5/7. The earlier reading of this
+table — that bin count, not kernel, decides whether a run converges — **was an artefact
+of too small a budget**: with 90 minutes the 490+ bin injections converge for almost
+everything, and the two remaining MMALA failures are the longest runs in the suite
+(96 and 95 minutes) rather than the most expensive posteriors.
+
+**Passing the gate and getting the right answer are not the same thing, and this suite
+separates them in both directions.** ULD at 55.1 M☉ *converged* — R̂ 1.0095, ESS 7531 —
+and is 51× the Monte-Carlo floor away from HMC on η. MALA at 26.2 M☉ and ULD at 80.0 M☉
+*failed* the gate and are statistically indistinguishable from HMC (0.9–2.6× and
+0.5–2.0× the floor). R̂ measures whether chains agree with each other, which is not the
+same as agreeing with the target; the next subsection measures the second thing.
 
 **Three injections are absent from this table entirely** (12.4, 18.0 and 38.0 M☉, the
 ones the parity guard pushed to 6 375–7 888 bins), and they are the clearest statement of
@@ -499,107 +529,94 @@ sampler was given an advantage, because none of them got a result.
 The figure is grouped by binary rather than plotted against mass on purpose: cost here
 tracks bin count, and a line against a mass axis would draw a trend that does not exist.
 
-### Medians agree; the distributions do not
+### Medians agree; the distributions differ at the boundary
 
-Comparing posterior *medians* against HMC's, in units of HMC's own posterior σ, over the
-four binaries where HMC passed the gate (2.8, 5.9, 26.2, 80.0 M☉):
+Posterior *medians* against HMC's, in units of HMC's own posterior σ, worst over all four
+sampled parameters and all seven binaries:
 
 | kernel | worst median shift vs HMC |
 |---|---:|
-| MALA | 0.32 σ |
-| MMALA | 0.23 σ |
-| RandomWalk | 0.15 σ |
-| **ULD** | **218 σ** |
+| MALA | 0.48 σ (η, 8.6 M☉) |
+| MMALA | 0.40 σ (η, 8.6 M☉) |
+| RandomWalk | 0.17 σ (η, 8.6 M☉) |
+| ULD | 0.50 σ (η, 55.1 M☉) |
 
-Read alone, that table says the three MH-corrected alternatives are interchangeable with
-HMC. **It is misleading, and the rest of this section is why.** A median is one number
-from a four-dimensional distribution, and it is the number these kernels get right.
+All four land in the right place to within half a σ. A median is one number from a
+four-dimensional distribution, and it is the number every kernel here gets right.
 
 Jensen–Shannon divergence against HMC (same estimator as
-[`compare_bns_posteriors.py`](../bin/compare_bns_posteriors.py)) tells a different story.
-Against a null built by splitting HMC's *own* chains in half at the same ESS — the honest
-Monte-Carlo floor for each run — the MH-corrected kernels sit at:
+[`compare_bns_posteriors.py`](../bin/compare_bns_posteriors.py)) is more discriminating.
+Referred to a null built by splitting HMC's *own* chains in half — the honest Monte-Carlo
+floor, since any two finite samples of the same distribution have JS > 0 — the median
+over all 28 (binary, parameter) pairs is:
 
-| binary | MALA | MMALA | RandomWalk |
-|---|---:|---:|---:|
-| 2.8 M☉ | 19–32× floor | 13–24× | 1.6–7.7× |
-| 5.9 M☉ | 1.2–3.5× | 3.0–13× | 0.3–0.6× |
-| 26.2 M☉ | 8.2–15× | 3.5–15× | 1.5–4.7× |
-| 80.0 M☉ | 0.5–5.8× | 0.8–8.1× | 0.4–2.6× |
+| kernel | median | worst |
+|---|---:|---:|
+| RandomWalk | 1.7× floor | 6.7× (η, 55.1 M☉) |
+| ULD | 3.5× | 51× (η, 55.1 M☉) |
+| MALA | 3.6× | 26× (η, 8.6 M☉) |
+| MMALA | 5.1× | 37× (η, 55.1 M☉) |
 
-Twelve to thirty-two times the noise floor is not sampling scatter. These are genuinely
-different distributions.
+**This is the number that most changed when the suite was re-run properly.** The first
+pass of this comparison put MALA and MMALA at 12–32× the floor and concluded the
+MH-corrected kernels were substantially under-dispersed relative to HMC. Against the
+corrected mass matrix and an adequate budget the medians are 3.6× and 5.1×. Most of that
+gap was **a suboptimal shared metric being amplified by single-step kernels, not a
+property of the kernels** — which the earlier text could only spot-check on one binary
+and now holds across all seven.
 
-**The difference is under-dispersion, and it is one-sided.** Every non-HMC kernel returns
-a *narrower* posterior than HMC, on every parameter of every binary — never wider. The
-90 % credible widths run from 0.44× to 1.01× HMC's, and the M_c–η correlation is
-systematically weaker too (−0.95 → −0.90/−0.91/−0.93 at 2.8 M☉).
+**What survives is narrower, one-sided, and concentrated at the prior boundary.** Every
+non-HMC kernel returns a *narrower* 90 % credible interval than HMC on almost every
+parameter of every binary: median width ratios 0.80 (MALA), 0.84 (MMALA and ULD), 0.92
+(RandomWalk), and only 0–11 % of the 28 comparisons come out wider at all.
 
-Two measurements locate it. First, the deficit *shrinks* with credible level (η at
-26.2 M☉: 0.53× at 50 %, 0.83× at 99 % for MALA), so it is not tail truncation. Second,
-the prior-boundary accumulation is missing: HMC places 11.8 % of its 26.2 M☉ posterior
-within 10⁻³ of the η = 0.25 edge, MALA 0.35 % — **34× less**. That accumulation is the
-feature this page's sampler was built around ("the η → 1/4 and spin → 0 pileups that no
-fixed mass matrix equilibrates"), and it is precisely what the single-step kernels miss.
+The sharpest discriminator is the η = 0.25 pileup — the feature this page's sampler was
+built around ("the η → 1/4 and spin → 0 pileups that no fixed mass matrix equilibrates").
+Fraction of the posterior within 10⁻³ of that edge:
 
-Because η_true = 0.25 sits *on* that boundary for equal-mass injections, "reaches the
-pileup" and "recovers the truth" are the same statement there — so the aligned spins,
-whose truths are interior, are the control. They show the same deficit: at 26.2 M☉ the
-spin marginals are 0.44–0.67× HMC's width with the truth nowhere near an edge. The
-under-dispersion is a general exploration failure, not an artefact of where η's truth sits.
+| M_tot (M☉) | HMC | MALA | MMALA | RandomWalk | ULD |
+|---:|---:|---:|---:|---:|---:|
+| 2.8 | 15.9 % | 0.11 % | 5.3 % | 9.6 % | 1.5 % |
+| 8.6 | 3.4 % | 0.00 % | 0.22 % | 1.2 % | 0.00 % |
+| 26.2 | 9.0 % | 3.1 % | 3.7 % | 6.5 % | 5.9 % |
+| 55.1 | 13.9 % | 1.8 % | 0.37 % | 5.5 % | **0.01 %** |
+| 80.0 | 14.4 % | 7.6 % | 10.5 % | 10.6 % | 8.8 % |
 
-It has a consequence for accuracy. HMC's η median is closer to the truth than every other
-kernel's, on every binary — 1.12 σ vs 1.36–1.87 σ at 2.8 M☉, 0.82 σ vs 1.09–1.42 σ at
-26.2 M☉ — and the ordering (HMC, then RandomWalk, then MMALA/MALA) tracks the boundary
-occupancy exactly.
+HMC reaches the boundary more than every other kernel on every binary, and the ordering
+(HMC, then RandomWalk, then MMALA/MALA/ULD) is the same ordering as the JS table. The
+55.1 M☉ row is the extreme case and is visible directly in that binary's corner figure:
+because η = 0.25 means m₁ = m₂, a kernel that misses the pileup pushes the derived m₁
+marginal to higher masses, and ULD's modal m₁ sits at 35.0 M☉ against HMC's 29.2 (the
+injected value being 27.6).
 
-**Mechanism, and how much of it is the kernel.** It is the local move length, not the
-Metropolis correction. HMC integrates for T = ε × n_leapfrog ≈ 1.0–3.7 per trajectory;
-the single-step kernels displace ~ε per step, measured at 0.006–0.08, with production
-acceptance drifting well off target (MMALA 0.53 → 0.16, RandomWalk 0.15 → 0.06). Their
-local kernel therefore contributes almost no displacement, and reaching the boundary
-falls to the flow's global proposals — which are fitted to those same chains' spread.
-Narrow chains train a narrow flow, which proposes narrowly, which keeps the chains
-narrow. HMC breaks that loop by transporting chains into the pileup along the curved
-valley, which then trains a flow that can propose there.
+**Is HMC right, or merely different?** Two arguments that it is the least truncated, and
+one reason to keep the question open. η_true = 0.25 exactly for these equal-mass
+injections *and* is a hard prior edge, so genuine posterior mass there is expected, and
+HMC's η median is the closest to truth on every binary checked. The unconstrained-space
+bijection sends η = 0.25 to +∞, so reaching it requires long excursions, and HMC's 32
+leapfrog steps travel ~32× further per proposal than any single-step kernel — the
+mechanism predicts exactly the observed ordering. But this is an argument from mechanism
+plus a self-consistency check, **not an independent verification of the boundary mass**;
+nothing here measures it against a reference that is not itself one of these samplers.
 
-That mechanism predicts something testable: a kernel whose entire step is set by the
-preconditioner should be far more sensitive to the *quality* of the shared mass matrix
-than one whose trajectories bend along the true curvature. It is, and it matters for how
-much of the above should be read as intrinsic. Re-running 26.2 M☉ against the corrected
-setup cache (whose metric is 1.77× wider in its tightest direction — see the caveat
-above) moves MALA's 90 % widths from 0.66/0.70/0.44/0.45 to **0.92/0.91/0.54/0.56** of
-HMC's, while HMC itself barely moves (JS 0.005–0.021 between the two metrics). So on that
-binary **most of the M_c–η under-dispersion was a suboptimal shared metric being
-amplified by a single-step kernel, not a property of MALA.**
+**ULD needs its previous entry on this page retracted.** The first pass reported it as
+catastrophically broken: up to 27 % non-finite draws, JS 0.15–1.00 against a ~0.005
+floor, a chirp-mass median 218 σ from HMC's, and never passing the gate at any mass.
+**Every one of those numbers was measuring a step size of 0.5 that nothing had chosen** —
+15–80× what the MH kernels' adaptation selects on the same posteriors. Run at MALA's
+adapted step per injection, ULD produces **zero** non-finite draws, a worst median shift
+of 0.50 σ, a median JS of 3.5× the floor, and passes the gate on 5 of 7 binaries. It is
+an ordinary member of this comparison, not an outlier.
 
-What survives that correction is still real, and is the honest residual: the spin
-marginals stay 0.54–0.56× (from 0.44), and the η boundary occupancy stays at 0.03× HMC's
-— unmoved. And at 2.8 M☉, where the two metrics agree to within 1 %, the deficit is
-undiminished (0.68–0.82× widths, 19–32× the JS floor). The exploration deficit is
-therefore genuine but **smaller than the suite's headline numbers suggest**, because those
-numbers were measured against a metric that handicapped the single-step kernels more than
-it handicapped HMC.
-
-So the Metropolis correction buys **unbiasedness in the limit**, which is real and is why
-all four land in the right place. It does not buy *sufficient exploration in finite time*,
-and on this posterior that is the binding constraint — but a meaningful share of the
-measured gap is metric quality, which is fixable, rather than kernel choice, which is not.
-Re-running the suite against the corrected cache is the experiment that would separate
-them cleanly, and it has not been done.
-
-ULD is a different and much larger failure, and it is worth keeping the two apart. The
-under-dispersion above is a *finite-time exploration* deficit in kernels that would
-converge to the right answer eventually. ULD has no Metropolis step at all, so its
-stationary distribution carries an O(ε²) discretisation bias **by construction**
-(`jaxpe/kernels/uld.py`) — it does not converge to the right answer at any run length at
-fixed ε. With the step size inherited from the HMC-tuned default it is not merely biased
-but unstable: on five of the seven binaries **up to 27 % of its stored draws are
-non-finite** (0 % on the cheapest, 80 M☉ one), its JS divergence from HMC is 0.15–1.00
-against a floor of ~0.005, and the survivors put the chirp-mass median 218 σ from HMC's.
-It never passes the gate at any mass. This is not a tuning failure to be fixed before
-publishing the comparison — it is the measurement of what dropping the accept/reject step
-costs.
+The genuine cost of dropping the accept/reject step is narrower and better localised:
+ULD has no Metropolis correction, so its stationary distribution carries an O(ε²)
+discretisation bias **by construction** (`jaxpe/kernels/uld.py`) and does not converge to
+the right answer at any run length at fixed ε. That bias is what the 55.1 M☉ result
+shows — converged by R̂ (1.0095, ESS 7531), 51× the floor from HMC on η, and 0.01 %
+boundary occupancy against HMC's 13.9 %, i.e. **1400× less**. Its chains agree with each
+other and disagree with the target. This is the honest measurement of the unadjusted
+tradeoff, and it is much smaller than the previous text claimed while being a sharper
+statement of the same thing.
 
 Two structural caveats that no amount of budget addresses: `mala`, `uld` and
 `random-walk` use their `scale` **elementwise** in `jaxpe.kernels`, so they receive
@@ -608,7 +625,8 @@ and `mmala` get, and cannot see the ~97 % M_c–η anti-correlation at all; and 
 in its documented constant-metric mode, which its own docstring calls equivalent to
 dense-mass MALA, not the full Riemannian variant. Only `hmc` has tuned numbers behind it
 here — the others use jaxpe's library-default acceptance targets, which are literature
-values not measured on this posterior.
+values not measured on this posterior, and production acceptance drifts well off even
+those. Retuning them is a confound this suite does not remove.
 
 ### Posteriors, all samplers overlaid
 
@@ -632,10 +650,15 @@ widens the frame rather than vanishing off the edge of its own comparison.
 
 ![All five samplers overlaid, 80.0 solar masses](assets/sampler_corner_inj09_M80.0.png)
 
-The four coloured contour sets sit on top of one another in every panel of every figure;
-the black dashed ULD contours sit somewhere else entirely. At 5.9 M☉ ULD puts η at ~0.205
-against a truth of 0.25 and m₁ at ~4.8 M☉ against 2.95 — a different posterior, not a
-noisier one.
+All five contour sets now sit on top of one another in most panels of most figures —
+including ULD's, which in the first pass of this suite sat somewhere else entirely. Where
+they separate, they separate at the η = 0.25 edge and in the m₁/m₂ marginals that edge
+controls. The 55.1 M☉ figure is the one to read: every kernel passed the gate there (the
+info box lists all five), yet ULD's m₁ marginal peaks at 35.0 M☉ where HMC's peaks at
+29.2 against an injected 27.6 — entirely because ULD put 0.01 % of its samples against
+the equal-mass boundary and HMC put 13.9 %. A figure in which every curve overlaps and
+one derived marginal does not is the clearest picture on this page of what the
+convergence gate does and does not certify.
 
 The spin panels show the expected χ_eff physics at these SNRs: individual aligned spins
 are barely measured, and at 55.1 M☉ the injected +0.590/−0.622 pair (χ_eff ≈ −0.016)
@@ -686,6 +709,30 @@ in both directions.
 ```bash
 python bin/make_bns_ce_figures.py     # reads examples/output/bns_ce_rb_hmc/
 python bin/make_sampler_comparison_figures.py --root <dir of per-kernel sweeps>
+```
+
+The five-kernel sweep behind that second figure, on a machine with two GPUs. The setup
+cache must be built **once and serially** first — it is what makes every kernel sample a
+bit-identical likelihood and mass matrix, and two concurrent sweeps pointed at an empty
+cache dir race to write the same file:
+
+```bash
+ROOT=examples/output/sampler_sweep
+COMMON="--n-injections 10 --max-minutes 90 --setup-cache $ROOT/cache --require-gpu"
+
+CUDA_VISIBLE_DEVICES=0 python bin/run_mass_sweep_pe.py $COMMON \
+    --outdir $ROOT/_setup --extra-args --setup-only
+
+CUDA_VISIBLE_DEVICES=0 bash -c 'for k in hmc mmala; do
+    python bin/run_mass_sweep_pe.py '"$COMMON"' --kernel $k --outdir '"$ROOT"'/$k; done' &
+CUDA_VISIBLE_DEVICES=1 bash -c 'for k in mala random-walk; do
+    python bin/run_mass_sweep_pe.py '"$COMMON"' --kernel $k --outdir '"$ROOT"'/$k; done' &
+wait
+
+# uld last: it has no acceptance signal to adapt on, so it takes MALA's adapted
+# step size per injection rather than a default nothing chose
+CUDA_VISIBLE_DEVICES=0 python bin/run_mass_sweep_pe.py $COMMON \
+    --kernel uld --outdir $ROOT/uld --step-size-from $ROOT/mala
 ```
 
 [`bin/make_bns_ce_figures.py`](../bin/make_bns_ce_figures.py) rebuilds all three figures
