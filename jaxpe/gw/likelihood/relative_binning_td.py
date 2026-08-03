@@ -81,6 +81,41 @@ def time_bin_edges(reference_mode, phase_per_bin: float = 0.5, amp_floor: float 
     return lo + np.unique(local)
 
 
+import functools
+
+
+@functools.partial(jax.jit, static_argnames=["n_bins", "n"])
+def _compute_summary_data(w, u0_s, dt, bin_id, pts_j, n_bins, n, _x):
+    idx = jnp.asarray(bin_id)
+    nb = n_bins
+
+    A0 = jax.ops.segment_sum(w * u0_s, idx, num_segments=nb)
+    A1 = jax.ops.segment_sum(w * u0_s * dt, idx, num_segments=nb)
+
+    onehot = (idx[None, :] == jnp.arange(nb)[:, None]).astype(jnp.float64)
+
+    def _inv_masked(rows_over_support):
+        full = jnp.zeros((rows_over_support.shape[0], n), dtype=jnp.complex128)
+        full = full.at[:, pts_j].set(rows_over_support)
+        inv = jax.vmap(
+            lambda v: inverse_matvec(_x, jnp.real(v))
+            + 1j * inverse_matvec(_x, jnp.imag(v))
+        )
+        return inv(full)
+
+    v0 = _inv_masked(onehot * u0_s[None, :])[:, pts_j]
+    v1 = _inv_masked(onehot * (u0_s * dt)[None, :])[:, pts_j]
+
+    red = jax.vmap(lambda row: jax.ops.segment_sum(row, idx, num_segments=nb))
+    B0 = red(u0_s[None, :] * v0).T
+    B1 = red(u0_s[None, :] * v1).T
+    B2 = red(u0_s[None, :] * jnp.conj(v0)).T
+    B3 = red(u0_s[None, :] * jnp.conj(v1)).T
+    B3b = red((u0_s * dt)[None, :] * jnp.conj(v0)).T
+
+    return A0, A1, B0, B1, B2, B3, B3b
+
+
 class RelativeBinningTDLikelihood:
     """Dominant-mode time-domain heterodyned likelihood for one detector.
 
@@ -118,6 +153,7 @@ class RelativeBinningTDLikelihood:
         )  # C^{-1} generator (Levinson, once)
 
         # w = C^{-1} d and the theta-independent 1/2 <d|d>
+        self._d = np.asarray(d)
         w = np.asarray(inverse_matvec(self._x, jnp.asarray(d)))
         self.half_dd = 0.5 * float(d @ w)
 
@@ -136,42 +172,29 @@ class RelativeBinningTDLikelihood:
         dt = t[pts] - t_c[bin_id]  # (t_j - t_c(bin j)) over the support
         u0_s = u0[pts]
 
-        # --- A summary data (complex, per bin)
-        self.A0 = jnp.asarray(_bin_reduce(w[pts] * u0_s, bin_id, self.n_bins))
-        self.A1 = jnp.asarray(_bin_reduce(w[pts] * u0_s * dt, bin_id, self.n_bins))
         self.u0_edges = jnp.asarray(u0[edges])
 
-        # --- B summary data (complex, n_bins x n_bins). For each bin b2 apply C^{-1} to
-        # the fiducial mode masked to b2 (and to u0*dt masked to b2); C^{-1} is real, so
-        # the conjugate-mode tensors reuse these solves.
-        pts_j = jnp.asarray(pts)
-        onehot = (bin_id[None, :] == np.arange(self.n_bins)[:, None]).astype(float)
-        v0 = self._inverse_of_masked(onehot * u0_s[None, :], pts_j, n)[
-            :, pts_j
-        ]  # (nb, npts)
-        v1 = self._inverse_of_masked(onehot * (u0_s * dt)[None, :], pts_j, n)[:, pts_j]
+        w_pts_j = jax.jit(inverse_matvec)(self._x, jnp.asarray(d))[pts]
 
-        u0p = jnp.asarray(u0_s)  # (npts,)
-        dtp = jnp.asarray(dt)  # (npts,)
-        idx = jnp.asarray(bin_id)  # (npts,)
-        nb = self.n_bins
-        red = jax.vmap(lambda row: jax.ops.segment_sum(row, idx, num_segments=nb))
-        # red(X)[b2] = bin-sum over b1 of X[b2]; transpose to index [b1, b2]
-        self.B0 = red(u0p[None, :] * v0).T
-        self.B1 = red(u0p[None, :] * v1).T
-        self.B2 = red(u0p[None, :] * jnp.conj(v0)).T
-        self.B3 = red(u0p[None, :] * jnp.conj(v1)).T
-        self.B3b = red((u0p * dtp)[None, :] * jnp.conj(v0)).T
-
-    def _inverse_of_masked(self, rows_over_support, pts_j, n):
-        """C^{-1} of each support-masked complex row, returned on the full grid (nb, N)."""
-        full = jnp.zeros((rows_over_support.shape[0], n), dtype=complex)
-        full = full.at[:, pts_j].set(jnp.asarray(rows_over_support))
-        inv = jax.vmap(
-            lambda v: inverse_matvec(self._x, jnp.real(v))
-            + 1j * inverse_matvec(self._x, jnp.imag(v))
+        # --- Summary data (complex), computed on GPU
+        A0, A1, B0, B1, B2, B3, B3b = _compute_summary_data(
+            w_pts_j,
+            jnp.asarray(u0_s),
+            jnp.asarray(dt),
+            jnp.asarray(bin_id),
+            jnp.asarray(pts),
+            self.n_bins,
+            n,
+            self._x,
         )
-        return inv(full)
+
+        self.A0 = A0
+        self.A1 = A1
+        self.B0 = B0
+        self.B1 = B1
+        self.B2 = B2
+        self.B3 = B3
+        self.B3b = B3b
 
     def _ratio_coeffs(self, trial_mode_edges):
         r = jnp.asarray(trial_mode_edges) / self.u0_edges  # (n_bins+1,)
@@ -244,8 +267,10 @@ class RelativeBinningTDLikelihoodHM:
 
         self.mode_keys = keys
         self.times = t
+        self._d = np.asarray(data)
+        d = jnp.asarray(data)
         self._x = jnp.asarray(inverse_generator(acf))
-        w = np.asarray(inverse_matvec(self._x, jnp.asarray(d)))
+        w = np.asarray(inverse_matvec(self._x, d))
         self.half_dd = 0.5 * float(d @ w)
 
         # shared bins from the mode with the largest total phase advance (fastest)
@@ -396,6 +421,71 @@ class RelativeBinningTDNetwork:
         )
 
     __call__ = log_likelihood
+
+    @classmethod
+    def from_likelihood(
+        cls,
+        like,
+        fiducial_params: dict,
+        *,
+        phase_per_bin: float = 0.5,
+    ) -> "RelativeBinningTDNetwork":
+        """Share grids, data, PSDs and conventions with an existing TD likelihood.
+
+        Evaluates the fiducial mode dictionary and computes the noise ACF from the PSDs
+        before constructing the per-detector RelativeBinningTDLikelihood instances.
+        """
+        from .toeplitz import autocorrelation_from_psd
+        from ..detectors import gmst_from_gps, time_delay_from_geocenter
+
+        st = like._static()
+        times = np.asarray(st["times"])
+
+        # Calculate t_c and gmst
+        t_c = float(fiducial_params.get("geocent_time", 0.0))
+        ra = float(fiducial_params.get("ra", 0.0))
+        dec = float(fiducial_params.get("dec", 0.0))
+        gmst = gmst_from_gps(t_c)
+        dt_geocent = float(fiducial_params.get("time_shift", 0.0))  # just in case
+
+        det_likes = []
+        for det in like.detectors:
+            # Calculate time delay
+            dt_gw = time_delay_from_geocenter(det, ra, dec, gmst)
+
+            # Evaluate u0 at times - (dt_gw - dt_geocent)
+            shifted_times = times - float(dt_gw - dt_geocent)
+            modes = like.waveform.mode_dict(fiducial_params, jnp.asarray(shifted_times))
+            u0 = np.asarray(modes[(2, 2)])
+
+            # TD data from stored FD data
+            data_td = np.fft.irfft(np.asarray(st["data"][det.name])) / float(st["dt"])
+
+            print(
+                f"DEBUG {det.name}: dt_gw={dt_gw} dt_geocent={dt_geocent}", flush=True
+            )
+            print(
+                f"DEBUG {det.name}: argmax(u0)={np.argmax(np.abs(u0))} argmax(d)={np.argmax(np.abs(data_td))}",
+                flush=True,
+            )
+
+            hp, hc = like.waveform(fiducial_params, jnp.asarray(times))
+            print(f"DEBUG {det.name}: argmax(hp)={jnp.argmax(jnp.abs(hp))}", flush=True)
+
+            # Replace np.inf with a finite but large number to avoid ill-conditioned C
+            psd_safe = np.asarray(like.psds[det.name])
+            in_band_max = np.max(psd_safe[~np.isinf(psd_safe)])
+            psd_safe = np.where(np.isinf(psd_safe), 1e6 * in_band_max, psd_safe)
+
+            acf = autocorrelation_from_psd(psd_safe, dt=float(st["dt"]))
+
+            det_likes.append(
+                RelativeBinningTDLikelihood(
+                    u0, shifted_times, data_td, acf, phase_per_bin=phase_per_bin
+                )
+            )
+
+        return cls(det_likes)
 
 
 def td_dense_loglikelihood_hm(trial_modes_full, p, data, acf):
