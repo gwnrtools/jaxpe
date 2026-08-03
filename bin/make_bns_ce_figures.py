@@ -284,7 +284,9 @@ def mass_sweep_corner_figures(sweep_dir, csv, assets):
     wall-clock time each injection took (not stored in samples.npz itself) and
     the injection index -> output-directory mapping.
     """
-    rows = list(np.genfromtxt(csv, delimiter=",", names=True, dtype=None, encoding="utf-8"))
+    rows = list(
+        np.genfromtxt(csv, delimiter=",", names=True, dtype=None, encoding="utf-8")
+    )
     written = []
     for row in rows:
         idx = int(row["index"])
@@ -468,9 +470,7 @@ def speed_stages_figure(csv, out):
         (15.42, " round-1: 15.4 min", MUTED, "left"),
     ):
         ax.axvline(x, color=col, linestyle=":", linewidth=1.4)
-        ax.text(
-            x, len(rows) - 0.45, txt, fontsize=9, color=col, va="bottom", ha=ha
-        )
+        ax.text(x, len(rows) - 0.45, txt, fontsize=9, color=col, va="bottom", ha=ha)
 
     ax.legend(
         frameon=False,

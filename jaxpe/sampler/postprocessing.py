@@ -53,7 +53,9 @@ class PostProcessor:
         try:
             import emcee
         except ImportError:
-            raise ImportError("emcee is required for autocorrelation computation. Install with `pip install jaxpe[postprocess]`.")
+            raise ImportError(
+                "emcee is required for autocorrelation computation. Install with `pip install jaxpe[postprocess]`."
+            )
 
         try:
             tau = emcee.autocorr.integrated_time(self.samples, tol=tol)

@@ -132,8 +132,17 @@ def _params(npz, mc_true_offset):
     )
     good = np.isfinite(x).all(axis=1)
     bad_frac = 1.0 - good.mean()
-    t = np.array([0.0, truth[i["eta"]], truth[i["spin1z"]], truth[i["spin2z"]],
-                  m1_t, m2_t, chieff_t])
+    t = np.array(
+        [
+            0.0,
+            truth[i["eta"]],
+            truth[i["spin1z"]],
+            truth[i["spin2z"]],
+            m1_t,
+            m2_t,
+            chieff_t,
+        ]
+    )
     return x[good], t, bad_frac, d
 
 
@@ -211,7 +220,10 @@ def corner_overlay(runs, truth, out, *, title, info_lines, dropped=None):
     dropped = dropped or {}
     handles = [
         plt.Line2D(
-            [], [], color=KERNEL_STYLE[k][1], linestyle=KERNEL_STYLE[k][2],
+            [],
+            [],
+            color=KERNEL_STYLE[k][1],
+            linestyle=KERNEL_STYLE[k][2],
             linewidth=2.0,
             label=KERNEL_STYLE[k][0]
             + (f"  [{dropped[k]:.0%} non-finite dropped]" if dropped.get(k) else ""),
@@ -227,8 +239,9 @@ def corner_overlay(runs, truth, out, *, title, info_lines, dropped=None):
         labelcolor=INK,
     )
     fig.suptitle(title, fontsize=13.5, color=INK, y=1.012)
-    fig.text(0.60, 0.80, info_lines, fontsize=10, color=MUTED, va="top",
-             linespacing=1.55)
+    fig.text(
+        0.60, 0.80, info_lines, fontsize=10, color=MUTED, va="top", linespacing=1.55
+    )
     fig.savefig(out, dpi=135, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     return out
@@ -282,8 +295,11 @@ def timing_figure(found, out):
     # an injection is missing. One group per binary, annotated with its bin count,
     # says what actually varies.
     idx = sorted(set().union(*(set(r) for r, _ in found.values())))
-    idx = [i for i in idx
-           if any(np.isfinite(_val(found[k][0].get(i), "total")) for k in found)]
+    idx = [
+        i
+        for i in idx
+        if any(np.isfinite(_val(found[k][0].get(i), "total")) for k in found)
+    ]
     names = list(found)
     w = 0.8 / len(names)
 
@@ -309,29 +325,51 @@ def timing_figure(found, out):
             conv = np.array([_conv(rows.get(i)) for i in idx])
             # hatched = did not pass the gate, so the bar is a budget floor rather
             # than a cost; a 2px surface gap keeps adjacent bars readable
-            ax.bar(xs, np.nan_to_num(vals), width=w * 0.92, color=color, label=label,
-                   edgecolor="white", linewidth=1.6,
-                   hatch=["" if c else "///" for c in conv], zorder=3)
+            ax.bar(
+                xs,
+                np.nan_to_num(vals),
+                width=w * 0.92,
+                color=color,
+                label=label,
+                edgecolor="white",
+                linewidth=1.6,
+                hatch=["" if c else "///" for c in conv],
+                zorder=3,
+            )
         ax.set_title(title, fontsize=11, color=INK, loc="left")
         ax.set_ylabel("wall clock  [min]", fontsize=10.5, color=INK)
 
     ref = found[names[0]][0]
     axes[1].set_xticks(np.arange(len(idx)))
     axes[1].set_xticklabels(
-        [f"{_val(ref.get(i), 'total_mass'):.1f} $M_\\odot$\n"
-         f"{_val(ref.get(i), 'rb_n_bins'):.0f} bins" for i in idx],
-        fontsize=9.5, color=INK,
+        [
+            f"{_val(ref.get(i), 'total_mass'):.1f} $M_\\odot$\n"
+            f"{_val(ref.get(i), 'rb_n_bins'):.0f} bins"
+            for i in idx
+        ],
+        fontsize=9.5,
+        color=INK,
     )
     # legend sits ABOVE the axes: the bars run to the budget ceiling on the
     # hatched groups, so any in-axes placement collides with data
-    axes[0].legend(frameon=False, fontsize=9.5, labelcolor=INK, loc="lower left",
-                   bbox_to_anchor=(0.0, 1.06), ncol=5, columnspacing=1.6,
-                   handlelength=1.5)
+    axes[0].legend(
+        frameon=False,
+        fontsize=9.5,
+        labelcolor=INK,
+        loc="lower left",
+        bbox_to_anchor=(0.0, 1.06),
+        ncol=5,
+        columnspacing=1.6,
+        handlelength=1.5,
+    )
     fig.suptitle(
         "Mass sweep at Cosmic Explorer: cost per sampler, on identical CPU hardware\n"
         "hatched = budget exhausted without passing the R-hat/ESS gate "
         "(that bar is a floor, not a convergence time)",
-        fontsize=12.0, color=INK, x=0.015, ha="left",
+        fontsize=12.0,
+        color=INK,
+        x=0.015,
+        ha="left",
     )
     fig.tight_layout(rect=(0, 0, 1, 0.92))
     fig.savefig(out, dpi=140, bbox_inches="tight", facecolor="white")
@@ -341,8 +379,11 @@ def timing_figure(found, out):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--root", default="examples/output/sampler_sweep",
-                    help="directory holding one <kernel>/ subdirectory per sweep")
+    ap.add_argument(
+        "--root",
+        default="examples/output/sampler_sweep",
+        help="directory holding one <kernel>/ subdirectory per sweep",
+    )
     ap.add_argument("--assets", default="docs/assets")
     args = ap.parse_args()
 
@@ -361,18 +402,26 @@ def main():
         mc_ref = float(next(iter(found.values()))[0][idx]["mc"])
         for name, (rows, sweep_dir) in found.items():
             row = rows[idx]
-            npz = sweep_dir / f"inj_{idx:02d}_M{float(row['total_mass']):.1f}" / "samples.npz"
+            npz = (
+                sweep_dir
+                / f"inj_{idx:02d}_M{float(row['total_mass']):.1f}"
+                / "samples.npz"
+            )
             if not npz.exists():
                 print(f"  injection {idx}, kernel {name}: no {npz}, skipping series")
                 continue
             x, t, bad_frac, _ = _params(npz, mc_ref)
             if x.shape[0] < 100:
-                print(f"  injection {idx}, kernel {name}: only {x.shape[0]} finite "
-                      "draws, skipping series")
+                print(
+                    f"  injection {idx}, kernel {name}: only {x.shape[0]} finite "
+                    "draws, skipping series"
+                )
                 continue
             if bad_frac > 0:
-                print(f"  injection {idx}, kernel {name}: dropped "
-                      f"{bad_frac:.1%} non-finite draws")
+                print(
+                    f"  injection {idx}, kernel {name}: dropped "
+                    f"{bad_frac:.1%} non-finite draws"
+                )
                 dropped[name] = max(dropped.get(name, 0.0), bad_frac)
             runs[name], truth, ref_row = x, t, row
         if not runs:
@@ -391,7 +440,9 @@ def main():
         )
         out = assets / f"sampler_corner_inj{idx:02d}_M{mtot:.1f}.png"
         corner_overlay(
-            runs, truth, out,
+            runs,
+            truth,
+            out,
             title=f"$M_{{\\rm tot}}$ = {mtot:.2f} $M_\\odot$ — all samplers overlaid",
             info_lines=info,
             dropped=dropped,

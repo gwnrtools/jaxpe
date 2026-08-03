@@ -312,7 +312,9 @@ def _adapted_step_size(row, sweep_dir):
     Raises rather than falling back to a default: a silently-wrong step size is
     precisely the failure this function exists to prevent.
     """
-    log = Path(sweep_dir) / f"inj_{row['index']:02d}_M{row['total_mass']:.1f}" / "run.log"
+    log = (
+        Path(sweep_dir) / f"inj_{row['index']:02d}_M{row['total_mass']:.1f}" / "run.log"
+    )
     if not log.exists():
         raise FileNotFoundError(
             f"--step-size-from: no run log at {log} (is it the same grid, and did "

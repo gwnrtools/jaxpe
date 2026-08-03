@@ -31,7 +31,9 @@ def main():
     mtot = [float(r["total_mass"]) for r in rows]
     total_min = [float(r["total"]) / 60.0 if r["total"] else float("nan") for r in rows]
     converged = [r["converged"] == "True" for r in rows]
-    snr = [float(r["achieved_snr"]) if r["achieved_snr"] else float("nan") for r in rows]
+    snr = [
+        float(r["achieved_snr"]) if r["achieved_snr"] else float("nan") for r in rows
+    ]
 
     import matplotlib
 
@@ -43,24 +45,45 @@ def main():
     ax.plot(
         [m for m, c in zip(mtot, ok) if c],
         [t for t, c in zip(total_min, ok) if c],
-        "o-", color="#2a78d6", ms=7, lw=1.5, zorder=3, label="converged",
+        "o-",
+        color="#2a78d6",
+        ms=7,
+        lw=1.5,
+        zorder=3,
+        label="converged",
     )
     bad_m = [m for m, c in zip(mtot, ok) if not c]
     bad_t = [t for t, c in zip(total_min, ok) if not c]
     if bad_m:
-        ax.plot(bad_m, bad_t, "x", color="#c0392b", ms=10, mew=2, zorder=4,
-                 label="NOT converged / failed")
+        ax.plot(
+            bad_m,
+            bad_t,
+            "x",
+            color="#c0392b",
+            ms=10,
+            mew=2,
+            zorder=4,
+            label="NOT converged / failed",
+        )
 
     for m, t, s in zip(mtot, total_min, snr):
         if t == t:  # not nan
-            ax.annotate(f"SNR {s:.0f}", (m, t), textcoords="offset points",
-                        xytext=(6, 6), fontsize=8, color="#555555")
+            ax.annotate(
+                f"SNR {s:.0f}",
+                (m, t),
+                textcoords="offset points",
+                xytext=(6, 6),
+                fontsize=8,
+                color="#555555",
+            )
 
     ax.set_xscale("log")
     ax.set_xlabel(r"Total mass $M_1+M_2$ [$M_\odot$]")
     ax.set_ylabel("Wall-clock time to convergence [min]")
     ax.set_title("BNS -> BBH mass sweep: PE completion time vs total mass")
-    ymin, ymax = min(t for t in total_min if t == t), max(t for t in total_min if t == t)
+    ymin, ymax = min(t for t in total_min if t == t), max(
+        t for t in total_min if t == t
+    )
     pad = 0.12 * (ymax - ymin)
     ax.set_ylim(ymin - pad, ymax + 2.2 * pad)
     ax.grid(True, which="both", alpha=0.3)
@@ -68,7 +91,11 @@ def main():
         ax.legend(frameon=False)
     fig.tight_layout()
 
-    out_path = Path(args.out) if args.out else csv_path.with_name("completion_time_vs_mass.png")
+    out_path = (
+        Path(args.out)
+        if args.out
+        else csv_path.with_name("completion_time_vs_mass.png")
+    )
     fig.savefig(out_path, dpi=140)
     print(f"wrote {out_path}")
 

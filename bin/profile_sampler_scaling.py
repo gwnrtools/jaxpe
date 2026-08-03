@@ -219,9 +219,7 @@ def section_global(problem, y_c, args):
     logp = problem.log_posterior
     x0 = _start(y_c, args.n_chains)
     lp0 = jax.vmap(logp)(x0)
-    train = y_c[None, :] + 0.5 * jax.random.normal(
-        jax.random.key(9), (4096, y_c.size)
-    )
+    train = y_c[None, :] + 0.5 * jax.random.normal(jax.random.key(9), (4096, y_c.size))
     flow = make_flow(
         jax.random.key(1),
         y_c.size,
@@ -233,9 +231,7 @@ def section_global(problem, y_c, args):
     print(f"{'globals':>9} {'time s':>9}")
     for gsz in args.globals_:
         dt = warm_time(
-            lambda gsz=gsz: _global_block(
-                flow, jax.random.key(3), x0, lp0, logp, gsz
-            )
+            lambda gsz=gsz: _global_block(flow, jax.random.key(3), x0, lp0, logp, gsz)
         )
         xs.append(gsz)
         ys.append(dt)
@@ -263,9 +259,7 @@ def section_flow(problem, y_c, args):
     logp = problem.log_posterior
     x0 = _start(y_c, args.n_chains)
     lp0 = jax.vmap(logp)(x0)
-    train = y_c[None, :] + 0.5 * jax.random.normal(
-        jax.random.key(9), (4096, y_c.size)
-    )
+    train = y_c[None, :] + 0.5 * jax.random.normal(jax.random.key(9), (4096, y_c.size))
     g = args.globals_[-1]
     print(f"{'layers':>7} {'width':>6} {'block s':>9} {'per step ms':>12}")
     for layers, width in args.flow_grid:
@@ -294,7 +288,9 @@ def section_init(problem, y_c, args):
     jitted_fn = jax.jit(jax.vmap(lambda x: kern.init(x, logp)))
     jitted = warm_time(lambda: jitted_fn(x0))
     print(f"  eager  vmap(kernel.init): {eager:7.3f} s")
-    print(f"  jitted vmap(kernel.init): {jitted:7.3f} s   ({eager / max(jitted, 1e-9):.0f}x)")
+    print(
+        f"  jitted vmap(kernel.init): {jitted:7.3f} s   ({eager / max(jitted, 1e-9):.0f}x)"
+    )
     print(
         "  run_chains must initialise INSIDE the jit. It did not until this was found:\n"
         "  the eager path dispatched the target's ~3600-instruction gradient graph one\n"
@@ -310,7 +306,11 @@ def main():
     ap.add_argument("--chains", type=int, nargs="+", default=[32, 64, 256, 1024])
     ap.add_argument("--steps", type=int, nargs="+", default=[6, 12, 25, 50])
     ap.add_argument(
-        "--globals", dest="globals_", type=int, nargs="+", default=[300, 600, 1200, 2400]
+        "--globals",
+        dest="globals_",
+        type=int,
+        nargs="+",
+        default=[300, 600, 1200, 2400],
     )
     ap.add_argument("--flow-layers", type=int, default=4)
     ap.add_argument("--flow-width", type=int, default=64)

@@ -153,7 +153,9 @@ def _make_kernel(name, step_size, *, n_leapfrog, friction, cov):
     """
     diag_scale = np.sqrt(np.diag(cov))
     if name == "hmc":
-        return HMC(step_size=step_size, n_leapfrog=n_leapfrog, scale=np.linalg.cholesky(cov))
+        return HMC(
+            step_size=step_size, n_leapfrog=n_leapfrog, scale=np.linalg.cholesky(cov)
+        )
     if name == "mala":
         return MALA(step_size=step_size, scale=diag_scale)
     if name == "mmala":
@@ -779,7 +781,12 @@ def run_pe(problem, y_map, cov0, args, timings):
     # flow-only, which loses the local moves that cover wherever the flow is wrong.
     # Fall back to the (conservative, too-narrow but valid) Laplace metric. HMC-only,
     # same reason as the swap above (rebuilds an HMC(...) with the Laplace scale).
-    if args.kernel == "hmc" and acc_rt is not None and acc_rt < 0.05 and args.ensemble_metric:
+    if (
+        args.kernel == "hmc"
+        and acc_rt is not None
+        and acc_rt < 0.05
+        and args.ensemble_metric
+    ):
         print(
             f"  local acceptance {acc_rt:.2f} after retune -> reverting to the "
             "Laplace metric"
@@ -991,7 +998,10 @@ def run_pe(problem, y_map, cov0, args, timings):
                 # reproducibility, and it keeps its guard.
                 key, k_fitw = jax.random.split(key)
                 flow_wide, _ = fit_flow(
-                    k_fitw, flow_wide, flow_train_set(k_fitw), n_epochs=15,
+                    k_fitw,
+                    flow_wide,
+                    flow_train_set(k_fitw),
+                    n_epochs=15,
                     batch_size=512,
                 )
     timings["production"] = time.perf_counter() - t0
@@ -1032,10 +1042,16 @@ def main():
         "--spin-max", type=float, default=0.05, help="upper edge of the spin priors"
     )
     ap.add_argument(
-        "--spin1z", type=float, default=0.0, help="injected aligned-spin truth, component 1"
+        "--spin1z",
+        type=float,
+        default=0.0,
+        help="injected aligned-spin truth, component 1",
     )
     ap.add_argument(
-        "--spin2z", type=float, default=0.0, help="injected aligned-spin truth, component 2"
+        "--spin2z",
+        type=float,
+        default=0.0,
+        help="injected aligned-spin truth, component 2",
     )
     ap.add_argument("--chi", type=float, default=1.0)
     ap.add_argument("--epsilon", type=float, default=0.25, help="RB phase per bin")
@@ -1445,7 +1461,14 @@ def main():
         for attempt in range(0 if cached is not None else args.max_rb_refinements + 1):
             try:
                 wb, wr = validate_rb(
-                    rb, dense_like, loglike, prior, truth, x_true, sigma_phys, rng,
+                    rb,
+                    dense_like,
+                    loglike,
+                    prior,
+                    truth,
+                    x_true,
+                    sigma_phys,
+                    rng,
                     args.f32,
                 )
                 break
@@ -1487,9 +1510,16 @@ def main():
         elif cache_path is not None:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             np.savez(
-                cache_path, distance=args.distance, epsilon=epsilon, y_map=y_map,
-                cov0=cov0, logp_map=logp_map, net_snr=net_snr, n_bins=n_bins,
-                parity_bulk=wb, parity_tail=wr,
+                cache_path,
+                distance=args.distance,
+                epsilon=epsilon,
+                y_map=y_map,
+                cov0=cov0,
+                logp_map=logp_map,
+                net_snr=net_snr,
+                n_bins=n_bins,
+                parity_bulk=wb,
+                parity_tail=wr,
             )
             print(f"setup cache: wrote {cache_path}")
         print(

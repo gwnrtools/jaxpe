@@ -31,8 +31,10 @@ def corner_plot(samples, names=None, truths=None, **kwargs):
     try:
         import corner as corner_module
     except ImportError:
-        raise ImportError("corner is required for corner_plot. Install with `pip install jaxpe[plot]`.")
-    
+        raise ImportError(
+            "corner is required for corner_plot. Install with `pip install jaxpe[plot]`."
+        )
+
     samples = np.asarray(samples)
     if samples.ndim == 3:
         samples = samples.reshape(-1, samples.shape[-1])
@@ -74,10 +76,13 @@ def trace_plot(xs, names=None, max_chains: int = 8):
     """
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except ImportError:
-        raise ImportError("matplotlib is required for trace_plot. Install with `pip install jaxpe[plot]`.")
+        raise ImportError(
+            "matplotlib is required for trace_plot. Install with `pip install jaxpe[plot]`."
+        )
 
     xs = np.asarray(xs)
     n_dim = xs.shape[-1]
