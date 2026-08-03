@@ -29,7 +29,14 @@ from .likelihood import (
 )
 from .priors import bbh_priors, ebbh_priors
 from .psd import aligo_zdhp_psd, psd_from_file, welch_psd
-from .cbc_models import IMRPhenomD, ESIGMAInspiral, NRSur7dq4, WaveformModel
+from .cbc_models import (
+    IMRPhenomD,
+    ESIGMAInspiral,
+    NRSur7dq4,
+    WaveformModel,
+    IMRPhenomT,
+    IMRPhenomTHM,
+)
 from .waveform import ToyChirp, ToyChirpFDHM, mismatch_f32_f64
 
 __all__ = [
@@ -67,6 +74,8 @@ __all__ = [
     "spin_weighted_ylm",
     "ESIGMAInspiral",
     "IMRPhenomD",
+    "IMRPhenomT",
+    "IMRPhenomTHM",
     "NRSur7dq4",
     "ExternalModeModel",
     "ModeCache",
