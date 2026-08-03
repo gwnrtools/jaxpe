@@ -83,6 +83,24 @@ What is assumed and NOT swept (stated explicitly; change if you need otherwise)
   ``hmc`` has validated numbers behind it; see ``run_bns_ce_pe.py``'s own
   docstring for what the other four (``mala``, ``mmala``, ``random-walk``,
   ``uld``) assume, and ``uld``'s unadjusted (biased-by-construction) caveat.
+  ``uld`` additionally needs ``--step-size-from`` pointed at a completed MH
+  sweep: it has no acceptance signal to adapt on, so its step size is a choice
+  made before the run, and the default was measured to be 15-80x too long on
+  this posterior (see ``_adapted_step_size``).
+
+Running one grid on several GPUs
+--------------------------------
+This script is deliberately single-process (see above), so multi-GPU means
+several *independent* invocations, one per device, not a change in here:
+
+    CUDA_VISIBLE_DEVICES=0 python bin/run_mass_sweep_pe.py --kernel hmc  ... &
+    CUDA_VISIBLE_DEVICES=1 python bin/run_mass_sweep_pe.py --kernel mala ... &
+
+Split by ``--kernel`` (each gets its own ``--outdir``), not by injection: a
+kernel comparison wants every kernel to see a bit-identical likelihood and mass
+matrix, which is what a shared ``--setup-cache`` gives it. Build that cache ONCE
+and serially first (``--extra-args --setup-only``) -- two concurrent sweeps
+pointed at an empty cache dir will race to write the same ``inj_NN.npz``.
 
 Convergence, per injection: exactly the gate already in ``run_bns_ce_pe.py`` --
 rank-normalized split-Rhat over the global-subseries < ``--rhat-target``, Geyer
@@ -132,6 +150,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -237,7 +256,11 @@ def build_grid(args):
     for i, (mtot, snr_i) in enumerate(zip(total_masses, target_snrs)):
         m1, m2 = component_masses(float(mtot), args.mass_ratio)
         duration = estimate_duration(
-            m1, m2, args.f_min, args.duration_safety, args.duration_min,
+            m1,
+            m2,
+            args.f_min,
+            args.duration_safety,
+            args.duration_min,
             args.duration_max,
         )
         bound1, bound2 = spin_bound(m1, args), spin_bound(m2, args)
@@ -267,38 +290,116 @@ def build_grid(args):
 
 
 # ------------------------------------------------------------------------- driver
+def _adapted_step_size(row, sweep_dir):
+    """Final adapted step size a completed sweep's run settled on, from its log.
+
+    Why this exists: ``uld`` has no Metropolis-Hastings acceptance to regress
+    on, so ``run_bns_ce_pe.py`` holds ``--step-size`` fixed for its entire run
+    (it prints exactly that, and ``Kernel.has_accept_prob`` is the library's own
+    switch for it). The value is therefore a *choice made before the run*, not
+    something the run discovers -- and left at the default it is arbitrary.
+    Measured on the CE spinning-binary suite: the default 0.5 against the
+    0.006-0.033 that the MH kernels' Robbins-Monro adaptation selects on the
+    same injections and the same mass matrix, i.e. 15-80x too long a step. That
+    showed up as Rhat 1.35-3.12 on every ULD run and a flow global acceptance
+    pinned at exactly 0.00 -- a mis-specified step, not slow mixing.
+
+    So: harvest, per injection, the step size an EARLIER sweep's adaptation
+    converged on. This reads the run log rather than ``sweep_summary.json``
+    because the adapted step size is printed by the warmup/retune phases and is
+    not one of ``TIMING_KEYS``.
+
+    Raises rather than falling back to a default: a silently-wrong step size is
+    precisely the failure this function exists to prevent.
+    """
+    log = Path(sweep_dir) / f"inj_{row['index']:02d}_M{row['total_mass']:.1f}" / "run.log"
+    if not log.exists():
+        raise FileNotFoundError(
+            f"--step-size-from: no run log at {log} (is it the same grid, and did "
+            "that sweep actually run this injection?)"
+        )
+    text = log.read_text()
+    if "no MH step" in text:
+        # A kernel with has_accept_prob=False still PRINTS a "re-tuned
+        # step_size -> ..." line during equilibration, but the number is the
+        # fixed input echoed back, not an adapted value. Harvesting it would
+        # launder a default into a measurement, so refuse by the marker the
+        # engine prints for exactly this case rather than by the number.
+        raise RuntimeError(
+            f"--step-size-from: {log} is an unadjusted-kernel run whose step "
+            "size was held fixed, so it has no adapted value to harvest. Point "
+            "this at an MH-kernel sweep (hmc/mala/mmala/random-walk)."
+        )
+    hits = re.findall(r"step_size -> ([0-9.eE+-]+)", text)
+    if not hits:
+        raise RuntimeError(f"--step-size-from: {log} records no adapted step size.")
+    return float(hits[-1])
+
+
 def _build_cmd(row, args, outdir):
-    return [
-        sys.executable,
-        str(args.run_script),
-        "--outdir", str(outdir),
-        "--mass1", f"{row['m1']:.6f}",
-        "--mass2", f"{row['m2']:.6f}",
-        "--distance", f"{args.reference_distance:.3f}",
-        "--target-snr", f"{row['target_snr']:.4f}",
-        "--duration", f"{row['duration']:.3f}",
-        "--sampling-rate", f"{args.sampling_rate:.1f}",
-        "--f-min", f"{args.f_min:.3f}",
-        "--eta-min", f"{args.eta_min:.4f}",
-        "--spin1z", f"{row['spin1z']:.6f}",
-        "--spin2z", f"{row['spin2z']:.6f}",
-        "--spin-min", f"{row['spin_min']:.6f}",
-        "--spin-max", f"{row['spin_max']:.6f}",
-        "--seed", str(row["seed"]),
-        "--max-minutes", f"{args.max_minutes:.2f}",
-        "--rhat-target", f"{args.rhat_target:.4f}",
-        "--ess-target", f"{args.ess_target:.1f}",
-        "--kernel", args.kernel,
-        "--friction", f"{args.friction:.4f}",
-    ] + (
-        ["--setup-cache", str(Path(args.setup_cache) / f"inj_{row['index']:02d}.npz")]
-        if args.setup_cache
-        else []
-    ) + (
-        ["--target-acceptance", f"{args.target_acceptance:.4f}"]
-        if args.target_acceptance is not None
-        else []
-    ) + shlex.split(args.extra_args)
+    return (
+        [
+            sys.executable,
+            str(args.run_script),
+            "--outdir",
+            str(outdir),
+            "--mass1",
+            f"{row['m1']:.6f}",
+            "--mass2",
+            f"{row['m2']:.6f}",
+            "--distance",
+            f"{args.reference_distance:.3f}",
+            "--target-snr",
+            f"{row['target_snr']:.4f}",
+            "--duration",
+            f"{row['duration']:.3f}",
+            "--sampling-rate",
+            f"{args.sampling_rate:.1f}",
+            "--f-min",
+            f"{args.f_min:.3f}",
+            "--eta-min",
+            f"{args.eta_min:.4f}",
+            "--spin1z",
+            f"{row['spin1z']:.6f}",
+            "--spin2z",
+            f"{row['spin2z']:.6f}",
+            "--spin-min",
+            f"{row['spin_min']:.6f}",
+            "--spin-max",
+            f"{row['spin_max']:.6f}",
+            "--seed",
+            str(row["seed"]),
+            "--max-minutes",
+            f"{args.max_minutes:.2f}",
+            "--rhat-target",
+            f"{args.rhat_target:.4f}",
+            "--ess-target",
+            f"{args.ess_target:.1f}",
+            "--kernel",
+            args.kernel,
+            "--friction",
+            f"{args.friction:.4f}",
+        ]
+        + (
+            [
+                "--setup-cache",
+                str(Path(args.setup_cache) / f"inj_{row['index']:02d}.npz"),
+            ]
+            if args.setup_cache
+            else []
+        )
+        + (
+            ["--target-acceptance", f"{args.target_acceptance:.4f}"]
+            if args.target_acceptance is not None
+            else []
+        )
+        + (
+            ["--step-size", f"{_adapted_step_size(row, args.step_size_from):.6g}"]
+            if args.step_size_from
+            else []
+        )
+        + shlex.split(args.extra_args)
+    )
 
 
 def _subprocess_env(args):
@@ -346,7 +447,10 @@ def check_gpu_or_die(args):
     )
     proc = subprocess.run(
         [sys.executable, "-c", probe],
-        env=_subprocess_env(args), capture_output=True, text=True, timeout=300,
+        env=_subprocess_env(args),
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
     if proc.returncode != 0:
         tail = (proc.stderr or proc.stdout).strip().splitlines()[-3:]
@@ -400,8 +504,11 @@ def _run_with_timeout(cmd, log_path, args, timeout_s):
         with open(log_path, "w") as logf:
             try:
                 proc = subprocess.run(
-                    cmd, stdout=logf, stderr=subprocess.STDOUT,
-                    env=_subprocess_env(args), timeout=timeout_s,
+                    cmd,
+                    stdout=logf,
+                    stderr=subprocess.STDOUT,
+                    env=_subprocess_env(args),
+                    timeout=timeout_s,
                 )
                 return proc.returncode, False
             except subprocess.TimeoutExpired:
@@ -439,11 +546,15 @@ def _prime_cache(row, args, outdir):
     cmd = _build_cmd(row, args, warm_outdir) + ["--max-production-blocks", "1"]
     log_path = warm_outdir / "run.log"
     t0 = time.perf_counter()
-    _rc, timed_out = _run_with_timeout(cmd, log_path, args, args.injection_timeout * 60.0)
+    _rc, timed_out = _run_with_timeout(
+        cmd, log_path, args, args.injection_timeout * 60.0
+    )
     wall = time.perf_counter() - t0
     backend = _parse_backend(log_path)
     note = " (TIMED OUT)" if timed_out else ""
-    print(f"  priming cache: {wall:.1f}s, backend={backend}  [{log_path}]  (discarded){note}")
+    print(
+        f"  priming cache: {wall:.1f}s, backend={backend}  [{log_path}]  (discarded){note}"
+    )
 
 
 def run_injection(row, args):
@@ -514,7 +625,9 @@ def run_injection(row, args):
             )
     except Exception as exc:  # noqa: BLE001 -- deliberately broad, see docstring
         result["parse_error"] = f"{type(exc).__name__}: {exc}"
-        print(f"  WARNING: could not parse outputs for this injection: {result['parse_error']}")
+        print(
+            f"  WARNING: could not parse outputs for this injection: {result['parse_error']}"
+        )
 
     status = "OK" if returncode == 0 else f"FAILED (exit {returncode})"
     conv = "converged" if result["converged"] else "NOT converged"
@@ -589,7 +702,9 @@ def main():
         default=0.2,
         help="recovery-prior lower edge on eta, forwarded to run_bns_ce_pe.py",
     )
-    ap.add_argument("--target-snr", type=float, default=20.0, help="baseline network SNR")
+    ap.add_argument(
+        "--target-snr", type=float, default=20.0, help="baseline network SNR"
+    )
     ap.add_argument(
         "--snr-jitter",
         type=float,
@@ -627,9 +742,13 @@ def main():
     )
     ap.add_argument("--outdir", default="examples/output/mass_sweep_pe")
     ap.add_argument(
-        "--run-script", default=str(HERE / "run_bns_ce_pe.py"), help="single-injection engine"
+        "--run-script",
+        default=str(HERE / "run_bns_ce_pe.py"),
+        help="single-injection engine",
     )
-    ap.add_argument("--max-minutes", type=float, default=20.0, help="per-injection budget")
+    ap.add_argument(
+        "--max-minutes", type=float, default=20.0, help="per-injection budget"
+    )
     ap.add_argument("--rhat-target", type=float, default=1.01)
     ap.add_argument("--ess-target", type=float, default=2000.0)
     ap.add_argument(
@@ -662,7 +781,9 @@ def main():
         "bit-identical likelihood and metric instead of merely equivalent ones "
         "(and the second and later sweeps skip minutes of setup per injection)",
     )
-    ap.add_argument("--seed", type=int, default=42, help="master seed; injection i uses seed+i")
+    ap.add_argument(
+        "--seed", type=int, default=42, help="master seed; injection i uses seed+i"
+    )
     ap.add_argument(
         "--extra-args",
         default="",
@@ -718,6 +839,25 @@ def main():
         "start-index are pulled from an existing sweep_summary.json in --outdir "
         "if present, so the report still covers the full grid",
     )
+    ap.add_argument(
+        "--only-indices",
+        default=None,
+        help="comma-separated injection indices to actually run, e.g. '0,2,6,9'. "
+        "The GRID is still built from the full --n-injections (so masses, "
+        "durations, SNR jitter and seeds are bit-identical to an unfiltered "
+        "sweep); this only selects which of those rows are executed. Use it to "
+        "drop injections measured to be infeasible on the hardware at hand "
+        "rather than lowering --n-injections, which would silently redefine "
+        "every other injection in the sweep.",
+    )
+    ap.add_argument(
+        "--step-size-from",
+        default=None,
+        help="directory of a COMPLETED sweep (same grid) whose per-injection "
+        "adapted step size should be forwarded as --step-size. Intended for "
+        "--kernel uld, which has no acceptance signal to adapt on and so holds "
+        "--step-size fixed for the whole run -- see _adapted_step_size().",
+    )
     args = ap.parse_args()
 
     if not (0.0 < args.mass_ratio <= 1.0):
@@ -736,14 +876,32 @@ def main():
     if args.injection_timeout is None:
         args.injection_timeout = 2.0 * args.max_minutes + 15.0
 
+    # The grid is ALWAYS built from the full --n-injections, then filtered:
+    # build_grid's mass ladder, duration sizing, SNR jitter and per-injection
+    # seeds are all functions of N, so shrinking N to skip an injection would
+    # silently redefine every other injection in the sweep.
     rows = build_grid(args)
+    if args.only_indices is not None:
+        wanted = {int(tok) for tok in args.only_indices.replace(",", " ").split()}
+        unknown = wanted - {r["index"] for r in rows}
+        if unknown:
+            raise ValueError(
+                f"--only-indices {sorted(unknown)} not in the grid "
+                f"0..{args.n_injections - 1}"
+            )
+        rows = [r for r in rows if r["index"] in wanted]
+        print(f"--only-indices: running {len(rows)} of {args.n_injections} injections")
 
-    print(f"mass sweep: {args.n_injections} injections, "
-          f"M_tot in [{args.total_mass_min:.1f}, {args.total_mass_max:.1f}] Msun, "
-          f"mass ratio {args.mass_ratio:.3f} (eta={eta_fixed:.4f}), "
-          f"target SNR {args.target_snr:.1f} +- {100 * args.snr_jitter:.0f}%")
-    print(f"worst-case wall time: {args.n_injections} x {args.max_minutes:.0f} min "
-          f"= {args.n_injections * args.max_minutes:.0f} min, run strictly sequentially")
+    print(
+        f"mass sweep: {args.n_injections} injections, "
+        f"M_tot in [{args.total_mass_min:.1f}, {args.total_mass_max:.1f}] Msun, "
+        f"mass ratio {args.mass_ratio:.3f} (eta={eta_fixed:.4f}), "
+        f"target SNR {args.target_snr:.1f} +- {100 * args.snr_jitter:.0f}%"
+    )
+    print(
+        f"worst-case wall time: {len(rows)} x {args.max_minutes:.0f} min "
+        f"= {len(rows) * args.max_minutes:.0f} min, run strictly sequentially"
+    )
     for r in rows:
         print(
             f"  [{r['index']}] M_tot={r['total_mass']:7.2f}  m1={r['m1']:6.2f}({r['regime1']})  "
@@ -765,7 +923,9 @@ def main():
         if prior_json.exists():
             with open(prior_json) as f:
                 results = [r for r in json.load(f) if r["index"] < args.start_index]
-            print(f"resuming from index {args.start_index}: kept {len(results)} prior result(s)")
+            print(
+                f"resuming from index {args.start_index}: kept {len(results)} prior result(s)"
+            )
 
     ran_one = False
     for row in rows:
@@ -782,14 +942,23 @@ def main():
             # take the rest of the sweep down with it (see run_injection's own
             # internal guard for the common case; this is the outer net for
             # anything unexpected, e.g. failing to even create the outdir).
-            print(f"  UNHANDLED ERROR on injection {row['index']}: {type(exc).__name__}: {exc}")
+            print(
+                f"  UNHANDLED ERROR on injection {row['index']}: {type(exc).__name__}: {exc}"
+            )
             result = dict(row)
             result.update(
                 {k: None for k in TIMING_KEYS}
                 | dict(
-                    returncode=-1, timed_out=False, wall_clock_driver=None,
-                    backend=None, log=None, converged=False, rhat_max=None,
-                    ess_min=None, achieved_snr=None, worst_recovery_sigma=None,
+                    returncode=-1,
+                    timed_out=False,
+                    wall_clock_driver=None,
+                    backend=None,
+                    log=None,
+                    converged=False,
+                    rhat_max=None,
+                    ess_min=None,
+                    achieved_snr=None,
+                    worst_recovery_sigma=None,
                     parse_error=f"{type(exc).__name__}: {exc}",
                 )
             )
