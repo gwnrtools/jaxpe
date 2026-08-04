@@ -5,12 +5,12 @@ import numpy as np
 
 def js_divergence(a, b, bins=120):
     """Jensen-Shannon divergence (base 2) between two 1-D sample sets.
-    
+
     Args:
         a: Array of samples from distribution P.
         b: Array of samples from distribution Q.
         bins: Number of histogram bins.
-        
+
     Returns:
         The JS divergence (base 2). 0 = identical, 1 = disjoint.
     """

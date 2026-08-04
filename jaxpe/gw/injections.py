@@ -2,14 +2,15 @@
 
 import xml.etree.ElementTree as ET
 
+
 def parse_sim_inspiral_table(xml_path):
     """Parse a LIGOLW sim_inspiral table from an XML file into a list of dicts.
-    
+
     Args:
         xml_path (str or Path): Path to the XML file.
-        
+
     Returns:
-        list of dict: A list where each element is a dictionary representing 
+        list of dict: A list where each element is a dictionary representing
             an injection's parameters.
     """
     tree = ET.parse(xml_path)
