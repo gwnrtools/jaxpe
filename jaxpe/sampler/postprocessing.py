@@ -78,10 +78,25 @@ class PostProcessor:
         if tau is None:
             tau = self.compute_autocorr()
 
-        max_tau = int(np.max(tau))
-        if np.isnan(max_tau) or max_tau <= 0:
-            print("WARNING: Max tau is NaN or <= 0. Defaulting to 100 for safety.")
+        # Screen for non-finite tau BEFORE converting to int: int(nan) raises
+        # ValueError, so an is-nan check on the converted value can never run.
+        tau_arr = np.atleast_1d(np.asarray(tau, dtype=float))
+        finite = tau_arr[np.isfinite(tau_arr)]
+        if finite.size == 0 or np.max(finite) <= 0:
+            print(
+                "WARNING: no finite, positive autocorrelation time could be estimated "
+                f"(tau={tau_arr}). The chains are almost certainly too short. "
+                "Defaulting to 100 for safety; treat the resulting sample count as "
+                "an upper bound, not an effective sample size."
+            )
             max_tau = 100
+        else:
+            if finite.size != tau_arr.size:
+                print(
+                    f"WARNING: tau was non-finite for {tau_arr.size - finite.size} of "
+                    f"{tau_arr.size} parameters; using the finite entries only."
+                )
+            max_tau = int(np.ceil(np.max(finite)))
 
         burnin = max(int(burnin_multiplier * max_tau), min_burnin)
         thin = max_tau
