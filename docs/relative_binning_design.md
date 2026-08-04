@@ -1,7 +1,8 @@
 ---
 layout: default
 title: Design — Relative binning (FD & TD heterodyned likelihoods)
-nav_order: 102
+nav_order: 2
+parent: Ongoing
 ---
 
 # Design Note: Relative Binning in jaxpe (Fourier- and Time-Domain)

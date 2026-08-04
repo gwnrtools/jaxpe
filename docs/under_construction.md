@@ -1,7 +1,8 @@
 ---
 layout: default
 title: Under Construction (Experiments)
-nav_order: 99
+nav_order: 6
+parent: Ongoing
 ---
 
 # XLA Compilation Memory Optimization for JAXPE
@@ -122,14 +123,14 @@ This document meticulously records the experiments, observations, and key learni
   time XLA_FLAGS="--xla_cpu_parallel_codegen_split_count=1" MALLOC_ARENA_MAX=1 JAX_PLATFORMS=cpu conda run -n lalsuite-dev python examples/05_esigma_injection.py --n-chains 20 --n-epochs 10 --n-production 100 --pn-order 8
   ```
 - **Result**: The compilation succeeded beautifully again (in just ~6m40s!), proving that `1024` steps safely fits in RAM! However, the eccentric solver *still* ran out of steps at runtime.
-- **Learning**: A 4PN eccentric binary with `e=0.15` is astronomically stiff at periapsis passages. It requires significantly more than 1024 steps to resolve the ODE dynamics accurately. Since we empirically know `max_ode_steps=2048` triggers an $O(N^2)$ compilation complexity explosion and crashes the LLVM compiler, we cannot increase `max_steps` further on a 31GB RAM machine. The physical stiffness of this specific highly eccentric system simply exceeds our hardware's compilation limits.
+- **Learning**: A 4PN eccentric binary with `e=0.15` is astronomically stiff at periapsis passages. It requires significantly more than 1024 steps to resolve the ODE dynamics accurately. Since we empirically know `max_ode_steps=2048` triggers an $$O(N^2)$$ compilation complexity explosion and crashes the LLVM compiler, we cannot increase `max_steps` further on a 31GB RAM machine. The physical stiffness of this specific highly eccentric system simply exceeds our hardware's compilation limits.
 
 ## 12. Current Run: Mild Eccentricity (e=0.05)
 - **Configuration**:
   - `4PN`
   - `ode_eps=1e-3`, `max_ode_steps=1024`, `n_ode_grid=1024`
   - **The Fix**: Reduced the injection parameter `eccentricity` from `0.15` to `0.05`.
-- **Hypothesis**: A mildly eccentric binary ($e=0.05$) will exhibit much milder frequency oscillations, drastically reducing the ODE stiffness. The Tsit5 solver should easily complete the inspiral well within the 1024 step bound, allowing us to successfully perform our end-to-end 4PN MCMC!
+- **Hypothesis**: A mildly eccentric binary ($$e=0.05$$) will exhibit much milder frequency oscillations, drastically reducing the ODE stiffness. The Tsit5 solver should easily complete the inspiral well within the 1024 step bound, allowing us to successfully perform our end-to-end 4PN MCMC!
 - **Command Line**:
   ```bash
   time XLA_FLAGS="--xla_cpu_parallel_codegen_split_count=1" MALLOC_ARENA_MAX=1 JAX_PLATFORMS=cpu conda run -n lalsuite-dev python examples/05_esigma_injection.py --n-chains 20 --n-epochs 10 --n-production 100 --pn-order 8
@@ -176,75 +177,75 @@ direction, with one refinement that decides whether it actually helps.** Two thi
 easy to conflate:
 
 **1. What the sampler fundamentally needs.** MALA (used in `05_esigma_injection.py`)
-and HMC both need exactly one object: $\nabla_\vartheta \log \pi(\vartheta)$, the gradient
-of the *scalar* log-posterior, where $\vartheta$ is the **full** sampled (unconstrained)
+and HMC both need exactly one object: $$\nabla_\vartheta \log \pi(\vartheta)$$, the gradient
+of the *scalar* log-posterior, where $$\vartheta$$ is the **full** sampled (unconstrained)
 parameter vector. Because the ODE trajectory depends on the **intrinsic** subset of
-$\vartheta$ — chirp mass, mass ratio, eccentricity, mean anomaly, spins (the $\lesssim 6$
-parameters that enter the RHS, denoted $\theta$ below) — that gradient genuinely contains
-the parameter-sensitivities $\partial y/\partial\theta$. So one **cannot** simply
+$$\vartheta$$ — chirp mass, mass ratio, eccentricity, mean anomaly, spins (the $$\lesssim 6$$
+parameters that enter the RHS, denoted $$\theta$$ below) — that gradient genuinely contains
+the parameter-sensitivities $$\partial y/\partial\theta$$. So one **cannot** simply
 `stop_gradient` the ODE output — that yields a wrong gradient. (Aside: for MCMC a wrong
 gradient is only an *efficiency* loss, not a correctness bug — MALA's MH ratio and HMC's
-leapfrog+accept still target $\pi$ exactly, as long as the drift is used consistently.
+leapfrog+accept still target $$\pi$$ exactly, as long as the drift is used consistently.
 But we need not lean on that, because the methods below give the *exact* gradient.)
 
 **2. *How* those sensitivities are computed — this is where the insight is right.**
 "Differentiate the individual ODE steps" is one specific method: reverse-mode backprop
 through the solver's internal `while_loop` (`RecursiveCheckpointAdjoint`). That is
 precisely the operation that materializes the transpose of the giant RHS — the 40–270×
-blowup measured in §14.2. It is *not* the only way to obtain $\partial y/\partial\theta$.
+blowup measured in §14.2. It is *not* the only way to obtain $$\partial y/\partial\theta$$.
 The clean alternative:
 
-> **Forward sensitivity equations.** Write the inspiral ODE as $\dot y = f(y,\theta)$,
-> where $\dot{(\,)} \equiv \mathrm{d}/\mathrm{d}s$ over the reparametrized integration
-> variable $s\in[0,1]$ (the `_rhs` domain), the **state** is
-> $y=(x,e,l,\phi)\in\mathbb{R}^{n}$ with $n=4$ — inverse orbital radius / PN frequency
-> variable $x$, eccentricity $e$, mean anomaly $l$, orbital phase $\phi$.
+> **Forward sensitivity equations.** Write the inspiral ODE as $$\dot y = f(y,\theta)$$,
+> where $$\dot{(\,)} \equiv \mathrm{d}/\mathrm{d}s$$ over the reparametrized integration
+> variable $$s\in[0,1]$$ (the `_rhs` domain), the **state** is
+> $$y=(x,e,l,\phi)\in\mathbb{R}^{n}$$ with $$n=4$$ — inverse orbital radius / PN frequency
+> variable $$x$$, eccentricity $$e$$, mean anomaly $$l$$, orbital phase $$\phi$$.
 >
-> The **parameter vector** $\theta\in\mathbb{R}^{p}$ is the set of inputs the ODE
+> The **parameter vector** $$\theta\in\mathbb{R}^{p}$$ is the set of inputs the ODE
 > actually depends on — and it is deliberately *not* the full MCMC sample vector. It is
-> the small subset ($p\lesssim 6$) of **intrinsic** parameters that enter the dynamics:
-> chirp mass $\mathcal{M}$, mass ratio $q$, initial eccentricity $e_0$, initial mean
-> anomaly $l_0$, and the aligned spins $S_{1z},S_{2z}$. The code maps these to the actual
-> RHS arguments $(\eta,m_1,m_2,S_{1z},S_{2z})$, the initial state $y(0)$, and the
-> time-scale $t_{\max}$, all of which are smooth closed-form functions of $\theta$. The
+> the small subset ($$p\lesssim 6$$) of **intrinsic** parameters that enter the dynamics:
+> chirp mass $$\mathcal{M}$$, mass ratio $$q$$, initial eccentricity $$e_0$$, initial mean
+> anomaly $$l_0$$, and the aligned spins $$S_{1z},S_{2z}$$. The code maps these to the actual
+> RHS arguments $$(\eta,m_1,m_2,S_{1z},S_{2z})$$, the initial state $$y(0)$$, and the
+> time-scale $$t_{\max}$$, all of which are smooth closed-form functions of $$\theta$$. The
 > remaining sampled (**extrinsic**) parameters — luminosity distance, inclination, phase,
-> sky position $(\alpha,\delta)$, polarization, coalescence time — never appear in $f$;
+> sky position $$(\alpha,\delta)$$, polarization, coalescence time — never appear in $$f$$;
 > they act *downstream* of the solve (distance rescales the amplitude, the angles enter
 > the spin-weighted harmonics and detector response) and are differentiated by ordinary
-> reverse-mode AD, so they are absent from $\theta$. In other words, the full log-posterior
-> gradient $\nabla\log\pi$ reaches the intrinsic parameters *only* through $\partial y/\partial\theta$
-> — which is exactly the quantity $S$ supplies — while everything else is cheap. Here
-> $f:\mathbb{R}^{n}\times\mathbb{R}^{p}\to\mathbb{R}^{n}$ is the vector field (the PN
+> reverse-mode AD, so they are absent from $$\theta$$. In other words, the full log-posterior
+> gradient $$\nabla\log\pi$$ reaches the intrinsic parameters *only* through $$\partial y/\partial\theta$$
+> — which is exactly the quantity $$S$$ supplies — while everything else is cheap. Here
+> $$f:\mathbb{R}^{n}\times\mathbb{R}^{p}\to\mathbb{R}^{n}$$ is the vector field (the PN
 > right-hand side).
 >
-> Define the **sensitivity matrix** $S \equiv \partial y/\partial\theta \in \mathbb{R}^{n\times p}$,
-> i.e. $S_{ij} = \partial y_i/\partial\theta_j$ — how state component $i$ responds to
-> parameter $j$. Differentiating $\dot y = f(y,\theta)$ with respect to $\theta$ gives the
+> Define the **sensitivity matrix** $$S \equiv \partial y/\partial\theta \in \mathbb{R}^{n\times p}$$,
+> i.e. $$S_{ij} = \partial y_i/\partial\theta_j$$ — how state component $$i$$ responds to
+> parameter $$j$$. Differentiating $$\dot y = f(y,\theta)$$ with respect to $$\theta$$ gives the
 > **variational (sensitivity) equation**
 >
-> $\dot S \;=\; J\,S \;+\; \frac{\partial f}{\partial\theta}, \qquad J \equiv \frac{\partial f}{\partial y}\in\mathbb{R}^{n\times n}, \quad \frac{\partial f}{\partial\theta}\in\mathbb{R}^{n\times p}, \qquad S(0) = \frac{\partial y(0)}{\partial\theta},$
+> $$\dot S \;=\; J\,S \;+\; \frac{\partial f}{\partial\theta}, \qquad J \equiv \frac{\partial f}{\partial y}\in\mathbb{R}^{n\times n}, \quad \frac{\partial f}{\partial\theta}\in\mathbb{R}^{n\times p}, \qquad S(0) = \frac{\partial y(0)}{\partial\theta},$$
 >
-> where $J=\partial f/\partial y$ is the **state Jacobian** of the vector field,
-> $\partial f/\partial\theta$ is its **explicit parameter Jacobian**, and the initial
-> condition $S(0)$ is generally nonzero because $y(0)$ itself depends on $\theta$
-> (e.g. $x(0)$ depends on the masses; $e(0),l(0)$ are sampled directly). Both Jacobians
-> are formed by **forward-mode AD (a `jvp`) of the RHS** — cost $\sim 2\text{–}3\times$ the
-> primal RHS, and, crucially, *never* the reverse transpose of $f$ that blows up the
+> where $$J=\partial f/\partial y$$ is the **state Jacobian** of the vector field,
+> $$\partial f/\partial\theta$$ is its **explicit parameter Jacobian**, and the initial
+> condition $$S(0)$$ is generally nonzero because $$y(0)$$ itself depends on $$\theta$$
+> (e.g. $$x(0)$$ depends on the masses; $$e(0),l(0)$$ are sampled directly). Both Jacobians
+> are formed by **forward-mode AD (a `jvp`) of the RHS** — cost $$\sim 2\text{–}3\times$$ the
+> primal RHS, and, crucially, *never* the reverse transpose of $$f$$ that blows up the
 > compile graph.
 >
-> Integrate the augmented system $(y,S)\in\mathbb{R}^{n}\times\mathbb{R}^{n\times p}$ with
+> Integrate the augmented system $$(y,S)\in\mathbb{R}^{n}\times\mathbb{R}^{n\times p}$$ with
 > the *same* solver and step sequence as the primal, treating the solver's adaptive
 > control flow (step acceptance, PID controller) as a non-differentiated black box.
 > Finally wrap the whole solve in a `jax.custom_vjp`: the **forward pass** returns the
-> saved trajectory $Y\in\mathbb{R}^{G\times n}$ ($G=$ `n_ode_grid` output points) and
-> stashes $S\in\mathbb{R}^{G\times n\times p}$ as the residual; the **backward pass**,
-> given the incoming cotangent $\bar Y\in\mathbb{R}^{G\times n}$ (same shape as the
+> saved trajectory $$Y\in\mathbb{R}^{G\times n}$$ ($$G=$$ `n_ode_grid` output points) and
+> stashes $$S\in\mathbb{R}^{G\times n\times p}$$ as the residual; the **backward pass**,
+> given the incoming cotangent $$\bar Y\in\mathbb{R}^{G\times n}$$ (same shape as the
 > trajectory), returns the parameter cotangent by one contraction,
-> $\bar\theta_j = \sum_{g=1}^{G}\sum_{i=1}^{n} \bar Y_{gi}\,S_{gij}$ — no differentiation
+> $$\bar\theta_j = \sum_{g=1}^{G}\sum_{i=1}^{n} \bar Y_{gi}\,S_{gij}$$ — no differentiation
 > of any individual integrator step.
 
 That path never reverse-differentiates a single integrator step. The only derivative of
-the RHS it ever builds is a **forward-mode jvp** ($\sim 2\text{–}3\times$ the primal — the
+the RHS it ever builds is a **forward-mode jvp** ($$\sim 2\text{–}3\times$$ the primal — the
 flat orange curve), not the reverse transpose. That is the mechanism that collapses the
 compile graph, and it yields the *exact* gradient (same discretization as the primal),
 not an approximation.
@@ -255,13 +256,13 @@ not an approximation.
 - **Forward sensitivity (`custom_vjp`)** → builds only the jvp → compile graph collapses.
   This is the route that realizes the insight.
 - **Continuous adjoint (`BacksolveAdjoint`)** also avoids reverse-through-the-loop, *but*
-  its backward ODE's RHS still contains the RHS **transpose** ($\partial f/\partial y$
+  its backward ODE's RHS still contains the RHS **transpose** ($$\partial f/\partial y$$
   applied to the adjoint), so it does not obviously shrink the graph. On the cheap proxy
   it compiled *larger* than `RecursiveCheckpointAdjoint` (6,604 vs 4,965 HLO lines); it
   has **not** been measured on the real RHS, so it cannot yet be recommended.
 
 Two structural facts favour the forward-sensitivity route here: (i) the number of ODE
-parameters is tiny ($\lesssim 6$), and forward-sensitivity cost scales with that count
+parameters is tiny ($$\lesssim 6$$), and forward-sensitivity cost scales with that count
 and can be batched so the *graph* does not grow with it; (ii) the extrinsic parameters
 (distance, inclination, phase, sky position, coalescence time) never touch the ODE — they
 are applied downstream in ordinary, cheaply-differentiable array math.
@@ -304,8 +305,8 @@ same `RecursiveCheckpointAdjoint(checkpoints=16)` used in production.
 | 80  | 1,560 | 159,682 | 102× |
 | 160 | 2,280 | 608,722 | 267× |
 
-Reverse-mode grows **super-linearly** (slope $\approx 1.4$ in log-log; roughly $\times 3\text{–}4$
-graph for every $\times 2$ in RHS size), while the forward-only primal is nearly flat.
+Reverse-mode grows **super-linearly** (slope $$\approx 1.4$$ in log-log; roughly $$\times 3\text{–}4$$
+graph for every $$\times 2$$ in RHS size), while the forward-only primal is nearly flat.
 The reverse transpose of a large RHS is the entire problem.
 
 **Compile-graph size vs `max_ode_steps`** (fixed `cost=40`, reverse-mode):
@@ -335,7 +336,7 @@ and `checkpoints` (4→256) were likewise flat (45,562 → 45,338 lines).
    independent contributor to be quantified next.
 
 **Caveats (rigor).** The measurement uses a *proxy* RHS, so the exact exponent
-($\approx 1.4$) is proxy-specific; what generalizes is (a) reverse-mode scales
+($$\approx 1.4$$) is proxy-specific; what generalizes is (a) reverse-mode scales
 super-linearly with RHS size, and (b) `max_steps`/`n_ode_grid`/`checkpoints` do not
 change the graph. Direct confirmation of the `max_steps`-independence on the *real*
 esigma RHS (at 0PN) is still pending.
@@ -470,7 +471,7 @@ MALA's `jax.value_and_grad(log_posterior)` reverse-differentiates the whole chai
 `_compute → _integrate → diffeqsolve`, which materializes the RHS transpose measured in
 §14.2. The solve's gradient-carrying inputs are the eight derived scalars
 `(x_init, e0, l0, eta, m1, m2, s1z, s2z)` passed at L199 — themselves smooth closed-form
-functions of the $\le 6$ sampled intrinsics.
+functions of the $$\le 6$$ sampled intrinsics.
 
 **Constraints.**
 - Gradient must stay *exact* (correctness > speed). MALA/HMC tolerate approximate
@@ -481,14 +482,14 @@ functions of the $\le 6$ sampled intrinsics.
 - diffrax 0.7.2 exposes `ForwardMode`. It has been checked end-to-end in the §14.1 harness:
   on the cheap 2-D solve, `ForwardMode` + `jacfwd` reproduced the
   `RecursiveCheckpointAdjoint` reverse-mode gradient to all printed digits
-  ($-3.8438\times10^{1}$) and compiled to **1,170** HLO lines vs **4,965** for reverse-mode
+  ($$-3.8438\times10^{1}$$) and compiled to **1,170** HLO lines vs **4,965** for reverse-mode
   — a 4× smaller graph even before the RHS is large.
 
 **Design (Phase A).**
 
 1. Factor the θ-dependent solve into a pure function of a single packed vector
-   $\theta\in\mathbb{R}^{p}$ (start with the $p=8$ derived scalars; optionally push the
-   boundary up to the $p=6$ sampled intrinsics by moving the mass algebra inside):
+   $$\theta\in\mathbb{R}^{p}$$ (start with the $$p=8$$ derived scalars; optionally push the
+   boundary up to the $$p=6$$ sampled intrinsics by moving the mass algebra inside):
 
    ```python
    def _solve_ys(self, theta, adjoint):
@@ -506,7 +507,7 @@ functions of the $\le 6$ sampled intrinsics.
        return sol.ys                       # (G, 4)
    ```
 
-2. Wrap it in a `custom_vjp` that computes $\partial y/\partial\theta$ by forward-mode and
+2. Wrap it in a `custom_vjp` that computes $$\partial y/\partial\theta$$ by forward-mode and
    stashes it as the residual:
 
    ```python
@@ -534,24 +535,24 @@ functions of the $\le 6$ sampled intrinsics.
    again inside `jacfwd`; the two can be fused with a single `jax.jvp` sweep over a basis if
    the extra primal solve matters.)
 
-**Tradeoffs.** Forward-mode costs $p{+}1$ solves' worth of work per gradient (one primal +
-$p$ tangents) versus reverse's forward+backward, where $p$ is the number of *independent*
+**Tradeoffs.** Forward-mode costs $$p{+}1$$ solves' worth of work per gradient (one primal +
+$$p$$ tangents) versus reverse's forward+backward, where $$p$$ is the number of *independent*
 gradient-carrying inputs. The naive 8-scalar interface
 `(x_init, e0, l0, eta, m1, m2, s1z, s2z)` over-counts, and it mixes two physically distinct
-kinds of quantity: **parameters** that stay fixed through the inspiral — $\eta,m_1,m_2$
-(mass reparametrizations of $(\mathcal{M},q)$) and the spins $S_{1z},S_{2z}$ — and **initial
-conditions** of the evolved state $y=(x,e,l,\phi)$, namely $x_{\text{init}},e_0,l_0$. In
-particular $x_{\text{init}}$ is *not* a mass constant: it is the initial value of the evolved
-kinematic variable $x=(M\omega_{\text{orb}})^{2/3}$ (set by the binary's orbital angular
-velocity $\omega_{\text{orb}}$), which this code merely *pins* through the fixed start
-frequency, $x_{\text{init}}=(M\pi f_{\text{lower}})^{2/3}$ — so only because
-$f_{\text{lower}}$ is held constant does it, like $\eta,m_1,m_2$, reduce to a deterministic
-function of $(\mathcal{M},q)$. Pushing the `custom_vjp` boundary up to the sampled intrinsics
+kinds of quantity: **parameters** that stay fixed through the inspiral — $$\eta,m_1,m_2$$
+(mass reparametrizations of $$(\mathcal{M},q)$$) and the spins $$S_{1z},S_{2z}$$ — and **initial
+conditions** of the evolved state $$y=(x,e,l,\phi)$$, namely $$x_{\text{init}},e_0,l_0$$. In
+particular $$x_{\text{init}}$$ is *not* a mass constant: it is the initial value of the evolved
+kinematic variable $$x=(M\omega_{\text{orb}})^{2/3}$$ (set by the binary's orbital angular
+velocity $$\omega_{\text{orb}}$$), which this code merely *pins* through the fixed start
+frequency, $$x_{\text{init}}=(M\pi f_{\text{lower}})^{2/3}$$ — so only because
+$$f_{\text{lower}}$$ is held constant does it, like $$\eta,m_1,m_2$$, reduce to a deterministic
+function of $$(\mathcal{M},q)$$. Pushing the `custom_vjp` boundary up to the sampled intrinsics
 themselves therefore collapses the interface to the true independent set —
-$(\mathcal{M},q,e_0,l_0)$ plus the aligned spins if they are sampled, i.e. $p=4$–$6$ — so the
-backward is ~$5$–$7$ forward solves. The ODE is a small share of runtime, and this buys us
+$$(\mathcal{M},q,e_0,l_0)$$ plus the aligned spins if they are sampled, i.e. $$p=4$$–$$6$$ — so the
+backward is ~$$5$$–$$7$$ forward solves. The ODE is a small share of runtime, and this buys us
 out of a hard compile-time OOM. Residual memory for `jac` is
-$G\times4\times p\times N_{\text{chains}} \lesssim 1024\times4\times6\times20 \approx 5$ MB —
+$$G\times4\times p\times N_{\text{chains}} \lesssim 1024\times4\times6\times20 \approx 5$$ MB —
 negligible.
 
 **Validation (before → after; must all pass).**
@@ -570,8 +571,8 @@ pipeline compile.** §14.2 flags a second contributor — the per-sample mode fu
 reverse-differentiated in the `hlm_batch` block (esigma.py L224–252). If they still
 overflow, **Phase B** applies the same forward-sensitivity `custom_vjp` to the
 intrinsic→modes map. Phase B is more invasive because the detector-grid remap
-$t_{\text{geo}} = (\text{times} - t_c)/m_{\text{sec}} + t_{\text{isco}}$ and the tapers mix
-the intrinsic $\theta$ with the extrinsic $t_c$; the boundary must keep $t_c$ (and the
+$$t_{\text{geo}} = (\text{times} - t_c)/m_{\text{sec}} + t_{\text{isco}}$$ and the tapers mix
+the intrinsic $$\theta$$ with the extrinsic $$t_c$$; the boundary must keep $$t_c$$ (and the
 angles/distance) on the ordinary-AD side. Decide Phase B only on measured evidence.
 
 **Rollback.** Keep the gradient path selectable (constructor arg or env flag:
@@ -597,11 +598,11 @@ The numerical gradients perfectly matched to machine precision, confirming the m
 
 This explicitly confirms the caveat flagged in Section 14.3/14.5: while we successfully bypassed the reverse-transpose of the ODE loop, **the vast majority of the 608,000+ line graph is generated by reverse-differentiating the downstream mode functions** (`hlmGOresult_jax`, `dphi_dt_jax`, `separation_jax`).
 
-To completely resolve the compiler OOM and collapse the graph, we must proceed to **Phase B**: applying the forward-sensitivity `custom_vjp` to the intrinsic $\to$ modes map.
+To completely resolve the compiler OOM and collapse the graph, we must proceed to **Phase B**: applying the forward-sensitivity `custom_vjp` to the intrinsic $$\to$$ modes map.
 
 ## 16. Phase B Validation & Production Timing Estimate
 
-Following the Phase A findings, we applied **Phase B**: wrapping the entire intrinsic-to-mode map (the ODE integration plus downstream `hlm_batch` projection) inside a single `jax.custom_vjp`. The boundary passes $p=7$ scalars (`mc, q, e0, l0, s1z, s2z, t_c`) into the forward-sensitivity ODE, shielding the 600,000+ line symbolic graph from JAX's reverse-mode AD pass.
+Following the Phase A findings, we applied **Phase B**: wrapping the entire intrinsic-to-mode map (the ODE integration plus downstream `hlm_batch` projection) inside a single `jax.custom_vjp`. The boundary passes $$p=7$$ scalars (`mc, q, e0, l0, s1z, s2z, t_c`) into the forward-sensitivity ODE, shielding the 600,000+ line symbolic graph from JAX's reverse-mode AD pass.
 
 ### 16.1. Compiler Footprint Collapse
 Re-running the compile size test on the CPU yielded the final confirmation:
@@ -626,9 +627,9 @@ We benchmarked a single step of the HLO-optimized Phase B graph with production-
 - **Evaluation Time (Value + Gradient)**: 831.84 ms per step
 
 **Production Projection:**
-Modern gradient-based samplers like MALA or HMC typically require roughly $O(10^5)$ gradient evaluations per chain to thoroughly explore the posterior landscape and yield $O(10^4)$ independent samples.
+Modern gradient-based samplers like MALA or HMC typically require roughly $$O(10^5)$$ gradient evaluations per chain to thoroughly explore the posterior landscape and yield $$O(10^4)$$ independent samples.
 - **Total Evaluations**: 100,000 steps per chain
-- **Time per Chain (CPU)**: $100,000 \times 0.831 \text{ s} \approx 23 \text{ hours}$
+- **Time per Chain (CPU)**: $$100,000 \times 0.831 \text{ s} \approx 23 \text{ hours}$$
 
 **Conclusion**:
 A comprehensive 4PN eccentric, spinning PE on GW150914 can run end-to-end on a single CPU core in under 24 hours. Because the graph size is now strictly constrained, running this same Phase B graph on an accelerator (GPU/TPU) will further drop the per-evaluation time significantly, easily reducing the end-to-end production PE wall-clock to just a couple of hours per chain.

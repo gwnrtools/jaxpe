@@ -1,6 +1,6 @@
 ---
 title: gw
-parent: jaxpe
+parent: API Reference
 layout: default
 nav_order: 2
 ---
@@ -21,31 +21,31 @@ $$
 R_{\mu\nu} - \frac{1}{2}g_{\mu\nu}R = \frac{8\pi G}{c^4} T_{\mu\nu}
 $$
 
-where $R_{\mu\nu}$ is the Ricci curvature tensor, $R$ is the Ricci scalar, $g_{\mu\nu}$ is the metric tensor, and $T_{\mu\nu}$ is the stress-energy tensor describing the matter source. To understand the Ricci tensor, we must trace back to the Riemann curvature tensor $R^\rho{}_{\sigma\mu\nu}$, which measures the failure of a vector to return to its original orientation when parallel-transported around a closed loop. The Riemann tensor is defined entirely in terms of the Levi-Civita connection (the Christoffel symbols $\Gamma^\rho_{\mu\nu}$):
+where $$R_{\mu\nu}$$ is the Ricci curvature tensor, $$R$$ is the Ricci scalar, $$g_{\mu\nu}$$ is the metric tensor, and $$T_{\mu\nu}$$ is the stress-energy tensor describing the matter source. To understand the Ricci tensor, we must trace back to the Riemann curvature tensor $$R^\rho{}_{\sigma\mu\nu}$$, which measures the failure of a vector to return to its original orientation when parallel-transported around a closed loop. The Riemann tensor is defined entirely in terms of the Levi-Civita connection (the Christoffel symbols $$\Gamma^\rho_{\mu\nu}$$):
 
 $$
 R^\rho{}_{\sigma\mu\nu} = \partial_\mu \Gamma^\rho_{\nu\sigma} - \partial_\nu \Gamma^\rho_{\mu\sigma} + \Gamma^\rho_{\mu\lambda}\Gamma^\lambda_{\nu\sigma} - \Gamma^\rho_{\nu\lambda}\Gamma^\lambda_{\mu\sigma}
 $$
 
-The Ricci tensor is simply the contraction $R_{\mu\nu} = R^\rho{}_{\mu\rho\nu}$. Far from the coalescing binary, in the weak-field regime, we can decompose the full spacetime metric into a flat Minkowski background $\eta_{\mu\nu}$ and a small perturbation $h_{\mu\nu}$:
+The Ricci tensor is simply the contraction $$R_{\mu\nu} = R^\rho{}_{\mu\rho\nu}$$. Far from the coalescing binary, in the weak-field regime, we can decompose the full spacetime metric into a flat Minkowski background $$\eta_{\mu\nu}$$ and a small perturbation $$h_{\mu\nu}$$:
 
 $$
-g_{\mu\nu} \approx \eta_{\mu\nu} + h_{\mu\nu} \quad \text{where} \quad |h_{\mu\nu}| \ll 1
+g_{\mu\nu} \approx \eta_{\mu\nu} + h_{\mu\nu} \quad \text{where} \quad \lvert h_{\mu\nu}\rvert \ll 1
 $$
 
-By defining the trace-reversed perturbation $\bar{h}_{\mu\nu} = h_{\mu\nu} - \frac{1}{2}\eta_{\mu\nu}h^\alpha{}_\alpha$, and imposing the Lorenz gauge condition $\partial^\mu \bar{h}_{\mu\nu} = 0$, the linearized Einstein equations beautifully decouple into a classical inhomogeneous wave equation:
+By defining the trace-reversed perturbation $$\bar{h}_{\mu\nu} = h_{\mu\nu} - \frac{1}{2}\eta_{\mu\nu}h^\alpha{}_\alpha$$, and imposing the Lorenz gauge condition $$\partial^\mu \bar{h}_{\mu\nu} = 0$$, the linearized Einstein equations beautifully decouple into a classical inhomogeneous wave equation:
 
 $$
 \square \bar{h}_{\mu\nu} = -\frac{16\pi G}{c^4} T_{\mu\nu}
 $$
 
-where $\square = \eta^{\alpha\beta} \partial_\alpha \partial_\beta$ is the d'Alembertian operator.
+where $$\square = \eta^{\alpha\beta} \partial_\alpha \partial_\beta$$ is the d'Alembertian operator.
 
 ### The Transverse-Traceless (TT) Gauge
 
-In vacuum ($T_{\mu\nu} = 0$), the gravitational waves freely propagate. We can further exhaust our gauge freedom to adopt the Transverse-Traceless (TT) gauge. In this coordinate system, the perturbation is purely spatial ($h_{0\mu}^{TT} = 0$), transverse to the direction of propagation ($\partial^j h_{ij}^{TT} = 0$), and traceless ($\delta^{ij} h_{ij}^{TT} = 0$).
+In vacuum ($$T_{\mu\nu} = 0$$), the gravitational waves freely propagate. We can further exhaust our gauge freedom to adopt the Transverse-Traceless (TT) gauge. In this coordinate system, the perturbation is purely spatial ($$h_{0\mu}^{TT} = 0$$), transverse to the direction of propagation ($$\partial^j h_{ij}^{TT} = 0$$), and traceless ($$\delta^{ij} h_{ij}^{TT} = 0$$).
 
-The two independent degrees of freedom of the metric tensor survive as the physical polarization states of the gravitational wave, which manifest in our interferometers as the metric strain components $h_+(t)$ and $h_\times(t)$.
+The two independent degrees of freedom of the metric tensor survive as the physical polarization states of the gravitational wave, which manifest in our interferometers as the metric strain components $$h_+(t)$$ and $$h_\times(t)$$.
 
 ## Waveform Approximants: From Multipoles to Numerical Relativity
 
@@ -53,57 +53,65 @@ To solve the wave equation for an actual binary system, we rely on a triad of so
 
 ### The Quadrupole Moment and Post-Newtonian (PN) Theory
 
-In the lowest-order (Newtonian) limit, the solution to the wave equation is dominated by the second time derivative of the reduced mass quadrupole moment tensor $I_{ij}$:
+In the lowest-order (Newtonian) limit, the solution to the wave equation is dominated by the second time derivative of the reduced mass quadrupole moment tensor $$I_{ij}$$:
 
 $$
 h_{ij}^{TT}(t, \mathbf{x}) = \frac{2G}{c^4 r} \Lambda_{ij}{}^{kl}(\mathbf{n}) \frac{d^2}{dt^2} I_{kl}(t_r)
 $$
 
-where the quadrupole moment is defined by the volume integral over the source density $\rho$:
+where the quadrupole moment is defined by the volume integral over the source density $$\rho$$:
 
 $$
 I_{ij} = \int \rho(t, \mathbf{x}) \left( x_i x_j - \frac{1}{3} \delta_{ij} r^2 \right) d^3x
 $$
 
-and $\Lambda_{ij}{}^{kl}(\mathbf{n})$ is the TT projection operator along the line of sight $\mathbf{n}$.
+and $$\Lambda_{ij}{}^{kl}(\mathbf{n})$$ is the TT projection operator along the line of sight $$\mathbf{n}$$.
 
-During the early inspiral, where orbital velocities are small ($v \ll c$), we expand the two-body dynamics in a perturbative series in powers of the dimensionless velocity $v/c$. This is the Post-Newtonian (PN) expansion [1]. The gravitational-wave phase $\Phi(f)$ in the frequency domain is expanded as:
+During the early inspiral, where orbital velocities are small ($$v \ll c$$), we expand the two-body dynamics in a perturbative series in powers of the dimensionless velocity $$v/c$$. This is the Post-Newtonian (PN) expansion [1]. The gravitational-wave phase $$\Phi(f)$$ in the frequency domain is expanded as:
 
 $$
 \Phi(f) = 2 \pi f t_c - \phi_c + \frac{3}{128 \eta v^5} \sum_{k=0}^N \left( \alpha_k + \beta_k \ln v \right) v^k
 $$
 
-where $\eta = m_1 m_2 / (m_1+m_2)^2$ is the symmetric mass ratio. The coefficients $\alpha_k$ and $\beta_k$ are derived from increasingly complex loop integrals in the effective field theory of General Relativity.
+where $$\eta = m_1 m_2 / (m_1+m_2)^2$$ is the symmetric mass ratio. The coefficients $$\alpha_k$$ and $$\beta_k$$ are derived from increasingly complex loop integrals in the effective field theory of General Relativity.
 
 ### Self-Force (SF) Formalism
 
-In the Extreme Mass Ratio Inspiral (EMRI) regime, where the mass ratio $q = m_1 / m_2 \ll 1$, the Post-Newtonian expansion converges poorly. We treat the smaller body as a mere perturbation on the exact background spacetime of the supermassive primary (such as the Kerr metric).
+In the Extreme Mass Ratio Inspiral (EMRI) regime, where the mass ratio $$q = m_1 / m_2 \ll 1$$, the Post-Newtonian expansion converges poorly. We treat the smaller body as a mere perturbation on the exact background spacetime of the supermassive primary (such as the Kerr metric).
 
-The small body travels on a geodesic that is gently nudged by a local gravitational self-force $f^\alpha$ generated by its own back-scattered field [2]. The forced geodesic equation becomes:
+The small body travels on a geodesic that is gently nudged by a local gravitational self-force $$f^\alpha$$ generated by its own back-scattered field [2]. The forced geodesic equation becomes:
 
 $$
 u^\beta \nabla_\beta u^\alpha = f^\alpha
 $$
 
-Solving this tracking differential equation allows us to map Extreme Mass Ratio Inspirals (EMRIs) with astonishing precision. In `jaxpe`, we provide the ESIGMA model for EMRIs, which can be instantiated as:
+Solving this tracking differential equation allows us to map Extreme Mass Ratio Inspirals
+with astonishing precision. **`jaxpe` does not currently ship a self-force/EMRI model** —
+the formalism is included here because it bounds the regime the supplied approximants
+cover, not because it is implemented. All models in
+[`jaxpe.gw.cbc_models`](#waveform-models) target comparable-mass binaries.
+
+The eccentric-inspiral model `ESIGMAInspiral` is sometimes mistaken for an EMRI model
+because of the acronym; it is not one. It evolves a *comparable-mass*, spinning, eccentric
+binary through a coupled system of post-Newtonian ODEs:
 
 ```python
-from jaxpe.gw.esigma import ESIGMAInspiral
+from jaxpe.gw import ESIGMAInspiral
 
 waveform = ESIGMAInspiral()
-h_plus, h_cross = waveform(params, times)
+h_plus, h_cross = waveform(params, times)   # params include eccentricity, mean_anomaly
 ```
 
 
 ### Numerical Relativity (NR)
 
-Finally, in the chaotic final moments of coalescence, the binary enters the highly non-linear, strong-field regime where all perturbative expansions shatter. Here, we must solve the full, unadulterated Einstein field equations. This is typically achieved using the 3+1 ADM decomposition [3]. We slice four-dimensional spacetime into three-dimensional spatial hypersurfaces $\Sigma_t$ evolving in time. The line element is cast as:
+Finally, in the chaotic final moments of coalescence, the binary enters the highly non-linear, strong-field regime where all perturbative expansions shatter. Here, we must solve the full, unadulterated Einstein field equations. This is typically achieved using the 3+1 ADM decomposition [3]. We slice four-dimensional spacetime into three-dimensional spatial hypersurfaces $$\Sigma_t$$ evolving in time. The line element is cast as:
 
 $$
 ds^2 = -\alpha^2 dt^2 + \gamma_{ij} (dx^i + \beta^i dt)(dx^j + \beta^j dt)
 $$
 
-where $\alpha$ is the lapse function dictating the rate of proper time flow, $\beta^i$ is the shift vector governing coordinate drift, and $\gamma_{ij}$ is the induced spatial metric. The evolution of the spacetime is then dictated by the time derivative of the spatial metric and its conjugate momentum, the extrinsic curvature $K_{ij}$:
+where $$\alpha$$ is the lapse function dictating the rate of proper time flow, $$\beta^i$$ is the shift vector governing coordinate drift, and $$\gamma_{ij}$$ is the induced spatial metric. The evolution of the spacetime is then dictated by the time derivative of the spatial metric and its conjugate momentum, the extrinsic curvature $$K_{ij}$$:
 
 $$
 \partial_t \gamma_{ij} = -2\alpha K_{ij} + \nabla_i \beta_j + \nabla_j \beta_i
@@ -119,46 +127,188 @@ $$
 d(t) = F^+(\alpha_s, \delta_s, \psi_s) h_+(t; \boldsymbol{\theta}) + F^\times(\alpha_s, \delta_s, \psi_s) h_\times(t; \boldsymbol{\theta}) + n(t)
 $$
 
-where $F^{+,\times}$ are the antenna pattern functions of the detector, dependent on the source right ascension $\alpha_s$, declination $\delta_s$, and polarization angle $\psi_s$. Assuming the detector noise $n(t)$ is stationary and Gaussian with a one-sided power spectral density $S_n(f)$, the probability of observing data $d$ given our source parameters $\theta^\mu$ is governed by the Whittle likelihood [4].
+where $$F^{+,\times}$$ are the antenna pattern functions of the detector, dependent on the source right ascension $$\alpha_s$$, declination $$\delta_s$$, and polarization angle $$\psi_s$$. Assuming the detector noise $$n(t)$$ is stationary and Gaussian with a one-sided power spectral density $$S_n(f)$$, the probability of observing data $$d$$ given our source parameters $$\theta^\mu$$ is governed by the Whittle likelihood [4].
 
 $$
-\ln \mathcal{L}(d | \theta^\mu) \propto -\frac{1}{2} (d - h(\theta^\mu) | d - h(\theta^\mu))
+\ln \mathcal{L}(d \mid \theta^\mu) \propto -\frac{1}{2} \big(d - h(\theta^\mu) \mid d - h(\theta^\mu)\big)
 $$
 
 where the noise-weighted inner product is given by the integral:
 
 $$
-(a | b) = 4 \Re \int_{0}^{\infty} \frac{\tilde{a}^*(f) \tilde{b}(f)}{S_n(f)} df
+(a \mid b) = 4 \Re \int_{0}^{\infty} \frac{\tilde{a}^*(f) \tilde{b}(f)}{S_n(f)} df
 $$
 
-In `jaxpe`, this entire likelihood framework is robustly encapsulated by the [`NetworkLikelihood`](#networklikelihood) class, which projects the waveforms onto a network of [`Detector`](#detector) instances:
+In `jaxpe`, this framework is encapsulated by the [`NetworkLikelihood`](#the-likelihood-hierarchy)
+hierarchy, which projects waveforms onto a network of [`Detector`](#detectors-and-geometry)
+instances. `NetworkLikelihood` is an *abstract* base — instantiate one of its concrete
+subclasses, which differ only in how they produce the polarizations:
 
 ```python
-from jaxpe.gw.likelihood import NetworkLikelihood
-from jaxpe.gw.detectors import Detector
+from jaxpe.gw import FDNetworkLikelihood, DETECTORS, IMRPhenomD
 
-H1 = Detector(name="H1", ...)
-likelihood = NetworkLikelihood(detectors=[H1], waveform=waveform, data=d_fd, psd=S_n)
-log_L = likelihood.log_likelihood(params)
+like = FDNetworkLikelihood(
+    waveform=IMRPhenomD(),
+    detectors=(DETECTORS["H1"], DETECTORS["L1"]),
+    data_fd=d_fd,          # {name: complex (n_f,)}, continuum convention
+    psds=psds,             # {name: (n_f,)}, one-sided; may be inf out of band
+    freqs=freqs, times=times, f_min=20.0, f_max=1024.0,
+    gmst_ref=gmst_ref, t_ref=t_ref,
+)
+log_L = like.log_likelihood(params)
 ```
 
-### `make_injection` & GW Priors
+Sidereal time enters through a linearization, $$\mathrm{GMST}(t_c) = \mathrm{GMST}_{\rm ref}
++ \Omega_\oplus (t_c - t_{\rm ref})$$, which is exact to microradians over the sub-second
+coalescence-time priors used in practice — this keeps $$t_c$$ differentiable without
+re-deriving Earth orientation inside the trace. The constant cache is built eagerly in
+`__post_init__`, deliberately *outside* any trace: constants created during tracing are
+tracers, and caching a tracer leaks it into every later trace.
 
-The module provides tools to construct mock injections and evaluate standard Binary Black Hole (BBH) priors over the parameter manifold, strictly validated in robust `float64` precision to avoid catastrophic numerical cancellations during the evaluation of the highly oscillatory frequency-domain likelihoods.
+---
 
 ## API Reference
 
-### `ESIGMAInspiral`
-**`jaxpe.gw.esigma.ESIGMAInspiral`**
-Computes Extreme Mass Ratio Inspiral (EMRI) waveforms using the ESIGMA self-force model. Generates the strain components $h_+$ and $h_\times$ given a dictionary of binary parameters.
+### Waveform models
 
-### `Detector`
-**`jaxpe.gw.detectors.Detector(NamedTuple)`**
-Represents a gravitational-wave interferometer (e.g., LIGO Hanford `H1`). Contains properties like the geographic location, arm geometry, and computes antenna pattern functions.
+All models implement one interface (`jaxpe.gw.cbc_models.WaveformModel`):
 
-### `NetworkLikelihood`
-**`jaxpe.gw.likelihood.NetworkLikelihood`**
-Evaluates the multi-detector Whittle likelihood in the frequency domain. It handles waveform generation, detector projection (time delays and antenna patterns), and noise-weighted inner products.
+```python
+h_plus, h_cross = model(params: dict, grid: jax.Array)
+```
+
+where `grid` is frequencies in Hz for frequency-domain models and times in seconds for
+time-domain ones; the class attribute `is_fd` distinguishes them, and
+`FrequencyDomainModel` / `TimeDomainModel` are the two intermediate bases.
+
+| model | domain | physics |
+|---|---|---|
+| `IMRPhenomD` | FD | Aligned-spin BBH, phenomenological inspiral–merger–ringdown in three frequency regions. The workhorse: vectorized, cheap, and the model every benchmark on this site uses. |
+| `IMRPhenomT` | TD | Aligned-spin BBH, time-domain phenomenological counterpart, dominant $$(2,2)$$ mode. |
+| `IMRPhenomTHM` | TD | As above with higher modes $$(2,2), (2,1), (3,3), (4,4), (5,5)$$; exposes `mode_dict(params, grid)`. |
+| `NRSur7dq4` | TD | Numerical-relativity surrogate for *generically precessing* BBH, via JaxNRSur. Highest fidelity, narrowest validity range ($$q \le 4$$). |
+| `ESIGMAInspiral` | TD | **Eccentric**, spinning inspiral: the binary is evolved through an eccentric PN ODE system (esigmapy's JAX backend). Exposes `mode_dict(params, times)`. Not an EMRI/self-force model. |
+
+Parameter dictionaries are keyed by a common vocabulary — `chirp_mass`, `mass_ratio`,
+`spin1z`/`spin2z` (and `spin1x,y`/`spin2x,y` for precessing models), `luminosity_distance`,
+`inclination`, `phase`, `geocent_time`, plus `eccentricity` and `mean_anomaly` for
+eccentric models. Not every model consumes every key.
+
+`jaxpe.gw.waveform` additionally supplies the analytic `ToyChirp` and `ToyChirpFDHM`
+models used in tests and tutorials, and `mismatch_f32_f64`, which quantifies the precision
+loss discussed in the benchmark pages.
+
+### The likelihood hierarchy
+
+Two abstract roots, distinguished by *who calls them*:
+
+**`NetworkLikelihood`** — `params dict -> JAX scalar`, differentiable, for gradient MCMC.
+Subclasses implement only `polarizations_fd`; the constant cache, GMST linearization,
+detector projection, Whittle sum, optimal SNR and `InferenceProblem` bundling are inherited.
+
+| class | source of polarizations |
+|---|---|
+| `FDNetworkLikelihood` | a frequency-domain model, evaluated directly on `freqs` |
+| `TDNetworkLikelihood` | a time-domain model, windowed and FFT-ed via `jaxpe.gw.conditioning` |
+| `ModesNetworkLikelihood` | precomputed spherical-harmonic modes, with extrinsic marginalization |
+
+**`IntrinsicLikelihood`** — `x array -> float`, host-side and *not* differentiable, for the
+active-learning surrogate of [`jaxpe.surrogate`]({{ site.baseurl }}/docs/api/surrogate.html).
+
+| class | marginalization |
+|---|---|
+| `PhaseDistanceMarginalLikelihood` | closed form: coalescence phase via $$\ln I_0$$, distance by quadrature; dominant-$$(2,2)$$ FD models only |
+| `MarginalizedIntrinsicLikelihood` | full extrinsic marginal by adaptive importance sampling; raises `LowEffectiveSampleSizeError` when an inner marginal falls below its ESS floor |
+
+`BalanceHeuristicAccumulator` recycles importance-sampling batches drawn from *different*
+proposals via the balance heuristic, so earlier draws are not discarded when the proposal
+is updated.
+
+`project_to_detector(...)` is the shared primitive: geocenter FD polarizations to
+detector-frame FD strain, applying antenna patterns and the propagation delay.
+
+### Relative binning (heterodyned likelihoods)
+
+The dominant cost of a long-inspiral likelihood is evaluating the waveform at every
+frequency bin. Relative binning evaluates it at $$O(10^2)$$ bin edges instead, exploiting
+that the *ratio* of a trial waveform to a fiducial one is smooth even when both are wildly
+oscillatory. Design and validation: [the relative-binning design
+note]({{ site.baseurl }}/docs/relative_binning_design.html).
+
+| object | role |
+|---|---|
+| `frequency_bin_edges` | FD bin edges (Zackay et al. 2018, Eqs. 8–10) |
+| `RelativeBinningFDLikelihood` | dominant-mode FD heterodyned likelihood |
+| `RelativeBinningFDLikelihoodHM` | higher-mode FD variant, operating on waveform modes |
+| `fd_dense_loglikelihood_modes` | exact dense reference, $$-\tfrac12 (d-h \mid d-h)$$ with $$h = \sum_a c_a h_a$$ |
+| `time_bin_edges` | adaptive TD bin edges from the fiducial mode's phase evolution |
+| `RelativeBinningTDLikelihood` / `...HM` | single-detector TD heterodyned likelihoods |
+| `RelativeBinningTDNetwork` | a detector network of the above |
+| `td_dense_loglikelihood`, `td_dense_loglikelihood_hm` | exact dense TD references |
+
+Every approximate path has a dense counterpart in this table on purpose: the binned
+likelihood is validated against the exact one rather than trusted.
+
+### Toeplitz machinery (`jaxpe.gw.likelihood.toeplitz`)
+
+Time-domain likelihoods need $$C^{-1}v$$ for a noise covariance $$C_{ij} = \rho(\lvert i-j
+\rvert)$$ that is symmetric Toeplitz by stationarity. Forming it costs $$O(N^2)$$ memory
+and inverting it $$O(N^3)$$ — both prohibitive at $$N \sim 10^6$$. This module never forms
+it: `toeplitz_matvec` applies $$C$$ in $$O(N \log N)$$ by circulant embedding, and
+`inverse_generator` / `inverse_matvec` apply $$C^{-1}$$ via the **Gohberg–Semencul**
+formula, which expresses the inverse of a Toeplitz matrix through two triangular Toeplitz
+products built from a single generator vector. `autocorrelation_from_psd` supplies
+$$\rho$$ from a one-sided PSD by inverse transform.
+
+### Detectors and geometry
+
+| object | meaning |
+|---|---|
+| `Detector` | `NamedTuple` of `name`, `location` (3-vector, Earth-fixed, metres) and `response` (the $$3\times3$$ detector tensor $$D = (\hat x \hat x^{\mathsf T} - \hat y \hat y^{\mathsf T})/2$$) |
+| `DETECTORS` | registry of LAL-cached geometry: `"H1"`, `"L1"`, `"V1"` |
+| `antenna_pattern(det, ra, dec, psi, gmst)` | $$(F^+, F^\times)$$ — traceable and differentiable in the angles |
+| `time_delay_from_geocenter(det, ra, dec, gmst)` | arrival-time delay in seconds |
+| `gmst_from_gps(gps_time)` | Greenwich mean sidereal time; host-side reference computation |
+| `spin_weighted_ylm(iota, phi, l, m, s)` | $${}_sY_{\ell m}$$ with *static* $$(\ell, m, s)$$, differentiable in the angles |
+
+### PSDs, data and conditioning
+
+| function | purpose |
+|---|---|
+| `aligo_zdhp_psd(freqs, f_low)` | analytic Advanced LIGO Zero-Detuning High-Power design curve |
+| `psd_from_file(path, freqs)` | two-column ASCII PSD, interpolated onto `freqs` (`inf` outside) |
+| `welch_psd(strain, sampling_rate, seg_duration, freqs)` | median-averaged Welch estimate from off-source strain |
+| `make_injection(...)` | inject a simulated signal into simulated coloured noise |
+| `simulate_noise_fd(rng, psd, duration)` | stationary Gaussian coloured noise, drawn in the frequency domain |
+| `fetch_open_strain(detector, gps_start, gps_end)` | open strain via gwpy (needs the `jaxpe[gwdata]` extra) |
+| `likelihood_from_strain(...)` | build a likelihood from real strain around a trigger time |
+| `tukey_window(n, alpha)` | host-side tapered-cosine window applied inside the jitted path |
+| `td_to_fd(h_td, dt, window)` | windowed FFT into the continuum normalization |
+| `time_shift(h_fd, freqs, delta_t)` | $$h(f) \mapsto h(f)\, e^{-2\pi i f \Delta t}$$ |
+| `rfft_freqs(n, dt)` | real-FFT frequency grid |
+
+Using `inf` for out-of-band PSD values rather than masking is deliberate: it drives the
+corresponding Whittle terms to zero exactly, with no branch inside the traced code.
+
+### External (non-JAX) models
+
+For waveform families with no JAX implementation — the EOB generators that motivate
+[`jaxpe.surrogate`]({{ site.baseurl }}/docs/api/surrogate.html) — `jaxpe.gw.external_models`
+supplies `ExternalModeModel` (a non-JAX model returning modes for intrinsic parameters),
+`ModesData` (modes of one evaluation on a uniform time grid), `ModeCache` (a disk cache
+keyed by the intrinsic-parameter dict, since each evaluation is expensive), and
+`reflect_modes`, which fills in missing negative-$$m$$ modes via the reality condition
+
+$$
+h_{\ell,-m} = (-1)^{\ell}\, h_{\ell m}^{*}.
+$$
+
+### Priors
+
+`bbh_priors(...)` and `ebbh_priors(...)` return prior sets matching the parameters of
+`ToyChirp` and `ESIGMAInspiral` respectively, with the eccentric variant adding
+`eccentricity`. They build on [`jaxpe.core.priors`]({{ site.baseurl }}/docs/api/core.html),
+so each carries the unconstraining transform the samplers require.
 
 ---
 

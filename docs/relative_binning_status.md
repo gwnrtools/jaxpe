@@ -1,7 +1,8 @@
 ---
 layout: default
 title: Status — Relative binning implementation
-nav_order: 103
+nav_order: 3
+parent: Ongoing
 ---
 
 # Relative Binning — Implementation Status

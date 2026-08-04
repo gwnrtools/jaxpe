@@ -1,7 +1,8 @@
 ---
 layout: default
 title: Design — Fusing GPry into jaxpe
-nav_order: 101
+nav_order: 1
+parent: Ongoing
 ---
 
 # Design Note: Fusing GPry into jaxpe for Expensive Non-JAX Waveform Models
@@ -159,20 +160,20 @@ Options considered:
 $$ \mathcal{L}(\theta_{\rm int}) \;=\; \log \int L(d \mid \theta_{\rm int}, \theta_{\rm ext})\,
    \pi(\theta_{\rm ext})\, d\theta_{\rm ext} $$
 
-with $\theta_{\rm ext} = (D_L, \alpha, \delta, \iota, \psi, \phi_c, t_c)$ (7D) handled
-analytically / by FFT / by low-D quadrature in jaxpe (§3), and $\theta_{\rm int}$ the GP's
+with $$\theta_{\rm ext} = (D_L, \alpha, \delta, \iota, \psi, \phi_c, t_c)$$ (7D) handled
+analytically / by FFT / by low-D quadrature in jaxpe (§3), and $$\theta_{\rm int}$$ the GP's
 domain:
 
 | target model | assumed physics | θ_int | dim |
 |---|---|---|---:|
-| SEOBNRv6EHM | eccentric, aligned-spin *(to-verify: v5EHM was aligned-spin eccentric; confirm v6EHM spin content)* | $(\mathcal{M}, q, \chi_{1z}, \chi_{2z}, e, \ell)$ | 6 |
-| TEOBResumS (precessing, quasi-circular) | precessing | $(\mathcal{M}, q, \vec\chi_1, \vec\chi_2)$ | 8 |
-| TEOBResumS (eccentric + precessing, if used) | both | $(\mathcal{M}, q, \vec\chi_1, \vec\chi_2, e, \ell)$ | 10 |
+| SEOBNRv6EHM | eccentric, aligned-spin *(to-verify: v5EHM was aligned-spin eccentric; confirm v6EHM spin content)* | $$(\mathcal{M}, q, \chi_{1z}, \chi_{2z}, e, \ell)$$ | 6 |
+| TEOBResumS (precessing, quasi-circular) | precessing | $$(\mathcal{M}, q, \vec\chi_1, \vec\chi_2)$$ | 8 |
+| TEOBResumS (eccentric + precessing, if used) | both | $$(\mathcal{M}, q, \vec\chi_1, \vec\chi_2, e, \ell)$$ | 10 |
 
 All within GPry's ceiling; 10D is the stress case.
 
-**A subtle but important bonus:** marginalizing over $(t_c, \phi_c)$ quotients out time/phase
-**alignment conventions** between models. This both smooths $\mathcal{L}(\theta_{\rm int})$
+**A subtle but important bonus:** marginalizing over $$(t_c, \phi_c)$$ quotients out time/phase
+**alignment conventions** between models. This both smooths $$\mathcal{L}(\theta_{\rm int})$$
 itself and — critically for D4/§4 — smooths the *discrepancy* between the expensive model and
 the cheap multifidelity mean, since overall alignment offsets between the two models no longer
 contribute.
@@ -191,7 +192,7 @@ by caching waveform modes regardless.*
 - A **likelihood surrogate** is per-event, data-adaptive: the acquisition spends expensive
   calls only where *this event's* posterior has support.
 - **Decision: likelihood surrogate, but cache all modes.** Every expensive call stores
-  $h_{\ell m}(t;\theta_{\rm int})$ (~MB each × few×10³ calls — trivial). The cache (a) enables
+  $$h_{\ell m}(t;\theta_{\rm int})$$ (~MB each × few×10³ calls — trivial). The cache (a) enables
   extrinsic-conditional sampling and mode-level diagnostics, and (b) doubles as free,
   posterior-concentrated ROM training data if we later want to amortize. Optionality at zero
   cost.
@@ -207,20 +208,20 @@ surrogate-drawn points, use them as importance-sampling (IS) weights to restore
 exactness, and reuse the same calls' waveform modes to sample the extrinsics. The IS
 effective sample size (ESS) doubles as the convergence diagnostic.*
 
-The GP posterior is an *estimate*; we restore exactness and recover $\theta_{\rm ext}$ with a
+The GP posterior is an *estimate*; we restore exactness and recover $$\theta_{\rm ext}$$ with a
 single post-processing budget of exact calls:
 
-1. Sample $\{\theta_{\rm int}^{(k)}\}$ from the surrogate posterior (GPry's final MC step /
+1. Sample $$\{\theta_{\rm int}^{(k)}\}$$ from the surrogate posterior (GPry's final MC step /
    BlackJAX interface).
 2. Spend a fixed budget (~500–2000) of **exact** expensive calls at (a thinned subset of)
    those draws. Each call yields:
-   - the true $\mathcal{L}$ → **importance weights**
-     $w_k = \exp[\mathcal{L}_{\rm true}(\theta^{(k)}) - \mathcal{L}_{\rm GP}(\theta^{(k)})]$,
+   - the true $$\mathcal{L}$$ → **importance weights**
+     $$w_k = \exp[\mathcal{L}_{\rm true}(\theta^{(k)}) - \mathcal{L}_{\rm GP}(\theta^{(k)})]$$,
      restoring asymptotic exactness; the effective sample size
-     ${\rm ESS} = (\sum w)^2/\sum w^2$ is the **built-in convergence diagnostic** — low ESS
+     $${\rm ESS} = (\sum w)^2/\sum w^2$$ is the **built-in convergence diagnostic** — low ESS
      means "acquire more and repeat", so failure is *visible*, never silent;
-   - the modes $h_{\ell m}$ → jaxpe samples the conditional
-     $p(\theta_{\rm ext} \mid \theta_{\rm int}^{(k)}, d)$ with its gradient sampler (7D,
+   - the modes $$h_{\ell m}$$ → jaxpe samples the conditional
+     $$p(\theta_{\rm ext} \mid \theta_{\rm int}^{(k)}, d)$$ with its gradient sampler (7D,
      differentiable given fixed modes, cheap). Joint posterior assembled hierarchically.
 
 *Rejected alternative:* delayed-acceptance MCMC — puts the expensive model back in the
@@ -272,11 +273,11 @@ X-dependent mean.*
 | Parallel truth evals | `gpry/mpi.py` | MPI batch evaluation built in |
 | Surrogate exploration | `gpry/ns_interfaces.py` — PolyChord/nessai/UltraNest/**BlackJAX** | JAX-adjacent already |
 | Robustness | `gpry/infinities_classifier.py` (SVM + trust region), `gpry/convergence.py` (CorrectCounter, GaussianKL) | do not reimplement |
-| **Multifidelity seam** | `gpry/preprocessing.py::PipelineY.transform(y)` is **y-only** (verified) — an X-dependent mean cannot go there | ⇒ subclass `GaussianProcessRegressor` with explicit prior mean $m(X)$ (§4); ~100 lines |
+| **Multifidelity seam** | `gpry/preprocessing.py::PipelineY.transform(y)` is **y-only** (verified) — an X-dependent mean cannot go there | ⇒ subclass `GaussianProcessRegressor` with explicit prior mean $$m(X)$$ (§4); ~100 lines |
 
-**Trap (verified reasoning):** do *not* feed the discrepancy $\delta$ directly as GPry's
+**Trap (verified reasoning):** do *not* feed the discrepancy $$\delta$$ directly as GPry's
 `loglike` — the acquisition and SVM target high-*posterior* regions of whatever the GP models,
-and high-$\delta$ ≠ high-posterior. The mean-function subclass is the correct route.
+and high-$$\delta$$ ≠ high-posterior. The mean-function subclass is the correct route.
 
 ---
 
@@ -304,19 +305,19 @@ Structure of the marginalization (all in float64):
 
 - **modes → detector**: condition (taper/resample to uniform Δt — reuse
   [`jaxpe/gw/conditioning.py`](../jaxpe/gw/conditioning.py)), FFT once per mode; polarizations
-  from $\sum_{\ell m} h_{\ell m}\, {}_{-2}Y_{\ell m}(\iota, \phi_c)$.
-- **$D_L$**: Gaussian in $u = d_{\rm ref}/D_L$ given $\langle d|h\rangle, \langle h|h\rangle$;
+  from $$\sum_{\ell m} h_{\ell m}\, {}_{-2}Y_{\ell m}(\iota, \phi_c)$$.
+- **$$D_L$$**: Gaussian in $$u = d_{\rm ref}/D_L$$ given $$\langle d\mid h\rangle, \langle h\mid h\rangle$$;
   power-law prior via **adaptive Gauss-Legendre on a peak-tracking window** (fixed nodes
-  under-resolve the width-$1/\sigma$ peak at realistic SNR; validated against the erf closed
-  form of the flat-in-$u$ prior).
-- **$t_c$**: FFT of the overlap integrand — all integer-sample shifts at once; uniform prior
+  under-resolve the width-$$1/\sigma$$ peak at realistic SNR; validated against the erf closed
+  form of the flat-in-$$u$$ prior).
+- **$$t_c$$**: FFT of the overlap integrand — all integer-sample shifts at once; uniform prior
   over a node window; GMST frozen at the window center (µrad-exact).
-- **$\phi_c$**: *(amended in Phase 0)* naive quadrature is **wrong** here — the integrand
-  $e^{\ln L(\phi_c)}$ carries harmonics up to $\sim \max|m|\,{\rm SNR}^2/2$, so ~32–64 nodes
+- **$$\phi_c$$**: *(amended in Phase 0)* naive quadrature is **wrong** here — the integrand
+  $$e^{\ln L(\phi_c)}$$ carries harmonics up to $$\sim \max\lvert m\rvert\,{\rm SNR}^2/2$$, so ~32–64 nodes
   fail already at SNR 10 (measured: 0.04 shift between 16 and 32 nodes). Instead the strain's
-  **exact azimuthal decomposition** $h_{\rm det} = \sum_M e^{iM\phi_c} G_M(f)$ (one FFT per
-  distinct $m$, not per node) makes dense $O({\rm SNR}^2)$-node grids essentially free.
-- **$(\alpha, \delta, \psi, \iota)$**: *(amended in Phase 0)* plain QMC/product grids are
+  **exact azimuthal decomposition** $$h_{\rm det} = \sum_M e^{iM\phi_c} G_M(f)$$ (one FFT per
+  distinct $$m$$, not per node) makes dense $$O({\rm SNR}^2)$$-node grids essentially free.
+- **$$(\alpha, \delta, \psi, \iota)$$**: *(amended in Phase 0)* plain QMC/product grids are
   **hopeless**, not merely slow: at network SNR 11 the measured ESS was 1.5/8192 (mass
   concentrated in ~10⁻⁴ of the extrinsic space) with seed-to-seed spreads of ~7 in log.
   Adopted: **defensive adaptive importance sampling** (pilot Sobol scan → wrapped/reflected
@@ -332,8 +333,8 @@ likelihood and the 3D marginal are **differentiable given modes** (used by the
 extrinsic-conditional sampler in D3 and the multifidelity mean in §4); the adaptive-IS full
 marginal is deliberately not differentiable end-to-end (GPry needs no gradients).
 
-**Precession notes:** modes are inertial-frame at a fixed `f_ref`; spins in $\theta_{\rm int}$
-are defined at `f_ref`. The $\iota$-dependence enters only through ${}_{-2}Y_{\ell m}$ — exact
+**Precession notes:** modes are inertial-frame at a fixed `f_ref`; spins in $$\theta_{\rm int}$$
+are defined at `f_ref`. The $$\iota$$-dependence enters only through $${}_{-2}Y_{\ell m}$$ — exact
 under quadrature. Convention alignment of `f_ref` between TEOBResumS/SEOBNRv6EHM and any
 cheap mean model must be checked explicitly (§4).
 
@@ -351,9 +352,9 @@ multifidelity is a per-target opt-in, gated by an explicit check that δ is actu
 easier to learn than 𝓛_expensive itself.*
 
 Subclass `gpry.gpr.GaussianProcessRegressor` with prior mean
-$m(\theta_{\rm int}) = \mathcal{L}_{\rm cheap}(\theta_{\rm int})$ (a case-(1) jaxpe model run
-through the *same* §3 marginalization): fit GP on residuals $y - m(X)$, add $m(X)$ back in
-`predict`, add $\nabla m$ (exact, from JAX) into `return_mean_grad`. Downstream acquisition /
+$$m(\theta_{\rm int}) = \mathcal{L}_{\rm cheap}(\theta_{\rm int})$$ (a case-(1) jaxpe model run
+through the *same* §3 marginalization): fit GP on residuals $$y - m(X)$$, add $$m(X)$$ back in
+`predict`, add $$\nabla m$$ (exact, from JAX) into `return_mean_grad`. Downstream acquisition /
 SVM / convergence see the composite prediction unchanged.
 
 **The mean-model gap — stated honestly.** No current case-(1) model covers eccentricity *and*
@@ -366,10 +367,10 @@ precession simultaneously:
 | TEOBResumS ecc+precessing | ESIGMA *or* NRSur7dq4 — neither covers both | the physics the mean lacks |
 
 Rule: **multifidelity is per-pair opt-in.** Before adopting a mean for a given target, evaluate
-$\delta = \mathcal{L}_{\rm exp} - \mathcal{L}_{\rm cheap}$ at ~20 scattered points; adopt only
-if δ is materially smaller/smoother than $\mathcal{L}_{\rm exp}$ itself. Otherwise run
+$$\delta = \mathcal{L}_{\rm exp} - \mathcal{L}_{\rm cheap}$$ at ~20 scattered points; adopt only
+if δ is materially smaller/smoother than $$\mathcal{L}_{\rm exp}$$ itself. Otherwise run
 single-fidelity (zero mean) — the architecture supports both per run. Recall §D1: the
-$(t_c,\phi_c)$ marginalization already removes alignment-convention roughness from δ.
+$$(t_c,\phi_c)$$ marginalization already removes alignment-convention roughness from δ.
 
 ---
 
@@ -436,7 +437,7 @@ ground truth is available at zero expensive-model cost. The final rung is the on
 brute-force run on the real model (the very thing §1.1 said we cannot afford
 routinely), done once per model family and kept as the reference.*
 
-1. **Marginalization correctness** (Phase 0): $\mathcal{L}(\theta_{\rm int})$ vs direct
+1. **Marginalization correctness** (Phase 0): $$\mathcal{L}(\theta_{\rm int})$$ vs direct
    high-resolution numerical integration over θ_ext on a case-(1) model; and joint-posterior
    consistency vs jaxpe direct gradient sampling. Exact ground truth, minutes.
 2. **Pseudo-black-box end-to-end** (Phase 1): run the *full* GPry loop treating a case-(1)
@@ -493,9 +494,9 @@ working-days of focused effort and are guesses, not commitments.
 |---|---|---|
 | 0.1 | `ExternalModeModel` protocol + mode cache (`surrogate/cache.py`) | round-trip test; θ-keyed HDF5 |
 | 0.2 | `gw/marginalized.py`: modes→detector conditioning path reusing `conditioning.py` + `likelihood.py` internals | vs `TDNetworkLikelihood` at fixed θ_ext (must agree to ~1e-10 before any marginalization) |
-| 0.3 | $D_L$, $t_c$ (FFT), $\phi_c$ (quadrature) marginalization | vs brute-force numerical integration on PhenomD, rel. err < 1e-4 |
-| 0.4 | $(\alpha,\delta,\psi,\iota)$ quadrature/QMC layer, `vmap`-ed; convergence study of node counts | grid-refinement convergence plot; per-point cost benchmark on GPU |
-| 0.5 | differentiability-given-modes + extrinsic-conditional sampler prototype | grad vs FD; posterior $p(\theta_{\rm ext}\vert\theta_{\rm int},d)$ vs direct sampling |
+| 0.3 | $$D_L$$, $$t_c$$ (FFT), $$\phi_c$$ (quadrature) marginalization | vs brute-force numerical integration on PhenomD, rel. err < 1e-4 |
+| 0.4 | $$(\alpha,\delta,\psi,\iota)$$ quadrature/QMC layer, `vmap`-ed; convergence study of node counts | grid-refinement convergence plot; per-point cost benchmark on GPU |
+| 0.5 | differentiability-given-modes + extrinsic-conditional sampler prototype | grad vs FD; posterior $$p(\theta_{\rm ext}\vert\theta_{\rm int},d)$$ vs direct sampling |
 
 **Gate G0:** marginalized ℒ validated against direct integration and direct sampling on
 case-(1) models; per-point cost ≤ 1 s on GPU.
@@ -505,13 +506,13 @@ case-(1) models; per-point cost ≤ 1 s on GPU.
 (`ModesNetworkLikelihood` subclassing `TDNetworkLikelihood` — Whittle sum/projection
 inherited, parity structural), 14 tests in `tests/test_marginalized.py`. Validation:
 fixed-extrinsic parity with the TD path at float64 round-off (incl. exact
-integer-sample $t_c$ shifts); $(\phi_c, t_c, D_L)$ marginal against an independent
-semi-brute-force reconstruction (per-node $(z, \sigma^2)$ solved from three
+integer-sample $$t_c$$ shifts); $$(\phi_c, t_c, D_L)$$ marginal against an independent
+semi-brute-force reconstruction (per-node $$(z, \sigma^2)$$ solved from three
 fixed-parameter lnL evaluations + erf distance integral) to <1e-6; adaptive-IS full
 marginal self-consistent across disjoint-randomness runs within MC error, ESS > 100;
 MALA extrinsic-conditional prototype recovers injected extrinsics from
 adaptive-IS-style initialization. **Two design amendments** (see §3): exact azimuthal
-decomposition for $\phi_c$; defensive adaptive IS for the sky layer. **Open for
+decomposition for $$\phi_c$$; defensive adaptive IS for the sky layer. **Open for
 Phase 1 profiling:** production-settings per-point cost on GPU (the 1 s gate was met
 only at reduced inner settings on CPU), and the t_c node spacing (one sample; refine
 by zero-padded upsampling if posterior structure demands).
@@ -705,40 +706,40 @@ case-(2) models. Four findings from getting both routes to converge:
 
 *Context for this block: the cross-validation above was on ESIGMA (time-domain,
 eccentric, multi-harmonic). Repeating the Route-A-vs-Route-B check on a frequency-domain
-dominant-$(2,2)$-mode model (IMRPhenomD) yielded a much cheaper Route-B marginalizer and
+dominant-$$(2,2)$$-mode model (IMRPhenomD) yielded a much cheaper Route-B marginalizer and
 let us measure the §D4 profiling checkpoint as a function of **signal duration** — the
 axis the single Phase-1 datum could only extrapolate over.*
 
 **PhenomD Route B via an exact closed-form marginal, and the duration-scaling profiling
 campaign (2026-07-16; marginal + cross-validation done, scaling campaign running).**
 
-*A cheaper Route B for dominant-mode FD models.* For a dominant-$(2,2)$-mode model
-$h_+ = h_0(1+\cos^2\iota)/2$ and $h_\times = -i h_0\cos\iota$ share one complex factor,
-and a coalescence-phase shift acts as $h_{\rm det}(\phi_c) = e^{\pm 2i\phi_c}
-h_{\rm det}(0)$ *exactly*, so the $\phi_c$ integral collapses to $\ln I_0(u|Z|)$ (a
-Bessel function) and only the $D_L$ integral remains (1-D quadrature) — no
+*A cheaper Route B for dominant-mode FD models.* For a dominant-$$(2,2)$$-mode model
+$$h_+ = h_0(1+\cos^2\iota)/2$$ and $$h_\times = -i h_0\cos\iota$$ share one complex factor,
+and a coalescence-phase shift acts as $$h_{\rm det}(\phi_c) = e^{\pm 2i\phi_c}
+h_{\rm det}(0)$$ *exactly*, so the $$\phi_c$$ integral collapses to $$\ln I_0(u\lvert Z\rvert)$$ (a
+Bessel function) and only the $$D_L$$ integral remains (1-D quadrature) — no
 spherical-harmonic-mode decomposition and no FFT, unlike the general
 `ModesNetworkLikelihood`. Landed as `PhaseDistanceMarginalLikelihood`
 (`jaxpe/gw/fd_marginal.py`, exported) with a **dominant-mode self-check** that measures
-the residual of $h_{\rm det}(\phi_c)/h_{\rm det}(0)$ from a pure phase and warns if a
+the residual of $$h_{\rm det}(\phi_c)/h_{\rm det}(0)$$ from a pure phase and warns if a
 higher-mode model is plugged in — the closed form is exact only for dominant-mode models.
 Validated (`tests/test_fd_marginal.py`) against an independent brute-force 2-D
-$(\phi_c, D_L)$ quadrature of the *full* likelihood ($<10^{-3}$); residual $\approx 0$ for
-PhenomD, above tolerance (warns) for ESIGMA $(2,2)+(3,3)$. This is now the natural Route B
+$$(\phi_c, D_L)$$ quadrature of the *full* likelihood ($$<10^{-3}$$); residual $$\approx 0$$ for
+PhenomD, above tolerance (warns) for ESIGMA $$(2,2)+(3,3)$$. This is now the natural Route B
 for FD dominant-mode models; the mode-based marginalizer stays for genuinely
 multi-harmonic ones (ESIGMA, precessing).
 
 *Three-route cross-validation.* On a zero-noise aligned-spin PhenomD injection (network
-SNR $\approx 13$), Route A (gradient, CPU **and** GPU) and Route B (closed-form marginal +
-GPry) recover the full intrinsic vector $(\mathcal{M}, q, \chi_{1z}, \chi_{2z})$ and agree
-at both a nonspin $(\mathcal{M}, q)$ and an aligned-spin stage
+SNR $$\approx 13$$), Route A (gradient, CPU **and** GPU) and Route B (closed-form marginal +
+GPry) recover the full intrinsic vector $$(\mathcal{M}, q, \chi_{1z}, \chi_{2z})$$ and agree
+at both a nonspin $$(\mathcal{M}, q)$$ and an aligned-spin stage
 (`examples/08_fd_dominant_mode_route_comparison.py`; overlays in
-`examples/output/phenomd_*_route_comparison.png`). Route B converges in $\sim 24$ (2-D) /
-$\sim 320$ (4-D) true evaluations vs $\sim 10^4$ gradient steps for Route A.
+`examples/output/phenomd_*_route_comparison.png`). Route B converges in $$\sim 24$$ (2-D) /
+$$\sim 320$$ (4-D) true evaluations vs $$\sim 10^4$$ gradient steps for Route A.
 
-*Finding #2 reversed on FD models.* On PhenomD the T2000 GPU is $\sim 1.2\times$ **faster**
-than CPU for Route-A gradient PE ($1123$ s GPU vs $1340$ s CPU nonspin; $1073$ vs $1314$
-aligned-spin) — the **opposite** of the ESIGMA result (finding #2: GPU $2.6\times$ slower).
+*Finding #2 reversed on FD models.* On PhenomD the T2000 GPU is $$\sim 1.2\times$$ **faster**
+than CPU for Route-A gradient PE ($$1123$$ s GPU vs $$1340$$ s CPU nonspin; $$1073$$ vs $$1314$$
+aligned-spin) — the **opposite** of the ESIGMA result (finding #2: GPU $$2.6\times$$ slower).
 That slowdown was ODE-architecture-specific: PhenomD's likelihood is a vectorized FD kernel
 with no sequential diffrax ODE and no forward-sensitivity tape, so the GPU's width is usable
 and fp64 throttling is outweighed. The lever is width, not depth.
@@ -747,18 +748,18 @@ and fp64 throttling is outweighed. The lever is width, not depth.
 `examples/08` now (i) reads/writes **bilby-convention** injection files (portable inputs:
 component masses, `a_i`/`tilt_i` spins, `theta_jn`), (ii) auto-sizes the analysis segment
 per injection (pycbc signal length; 0PN fallback; next power of two), and (iii) generates a
-**matched-SNR ($\approx 15$) total-mass sweep** $80\to 10\,M_\odot$ at fixed $q=0.8$,
-$\chi=+0.2/-0.1$. Lower total mass $\Rightarrow$ longer signal: the sweep spans segment
-durations $4$ s ($80\,M_\odot$, $n_{\rm freq}=4097$) to $32$ s ($10\,M_\odot$,
-$n_{\rm freq}=32769$) — an $8\times$ waveform-cost lever at fixed SNR. All three routes
+**matched-SNR ($$\approx 15$$) total-mass sweep** $$80\to 10\,M_\odot$$ at fixed $$q=0.8$$,
+$$\chi=+0.2/-0.1$$. Lower total mass $$\Rightarrow$$ longer signal: the sweep spans segment
+durations $$4$$ s ($$80\,M_\odot$$, $$n_{\rm freq}=4097$$) to $$32$$ s ($$10\,M_\odot$$,
+$$n_{\rm freq}=32769$$) — an $$8\times$$ waveform-cost lever at fixed SNR. All three routes
 (A-CPU, A-GPU, B) are timed across it; Route B additionally logs the wall-clock split
 between **waveform generation** (timed `PhaseDistanceMarginalLikelihood` calls) and **GPry
 GP-fit + acquisition** (the remainder of `engine.run()`) — precisely the split D4's port
 trigger is defined on. Run at `--config fast` (timing-oriented; per-step/per-eval rates,
 not convergence, carry the scaling signal). **Measured** (matched SNR 15, 4-D intrinsic
-$(\mathcal{M},q,\chi_{1z},\chi_{2z})$):
+$$(\mathcal{M},q,\chi_{1z},\chi_{2z})$$):
 
-| $M_{\rm tot}$ | dur. | $n_{\rm freq}$ | B evals | B total | · waveform | · GPry | A-CPU | A-GPU |
+| $$M_{\rm tot}$$ | dur. | $$n_{\rm freq}$$ | B evals | B total | · waveform | · GPry | A-CPU | A-GPU |
 |---|---|---|---|---|---|---|---|---|
 | 80 | 4 s | 4097 | 184 | 258 s | 2.6 s | 255 s | 187 s | 166 s |
 | 70 | 4 s | 4097 | 376 | 651 s | 3.5 s | 648 s | 168 s | 142 s |
@@ -768,168 +769,168 @@ $(\mathcal{M},q,\chi_{1z},\chi_{2z})$):
 | 30 | 8 s | 8193 | 392 | 812 s | 4.9 s | 807 s | 247 s | 162 s |
 | 20 | 16 s | 16385 | 504 | 1341 s | 9.1 s | 1332 s | 613 s | 210 s |
 
-($M_{\rm tot}=10$, 32 s: the gradient graph overflowed host-LLVM / T2000 memory — a 4 GB
+($$M_{\rm tot}=10$$, 32 s: the gradient graph overflowed host-LLVM / T2000 memory — a 4 GB
 hardware limit, not a code issue, and two A-GPU cells hit the same OOM; the Route-B point
 hit the *documented* UltraNest MLFriends fragility on its sharp posterior — both are
 known-issue limits, not new failures.) Scaling figure:
 [`examples/output/phenomd_duration_scaling.png`](../examples/output/phenomd_duration_scaling.png).
 
-*D4 assessment (measured).* **Route B is $\sim 99\%$ GPry across the whole sweep:** waveform
-generation is $0.5$–$1.1\%$ of wall-clock ($2.6$–$9.1$ s) while GP fit + NORA/UltraNest
-acquisition is the remaining $255$–$1332$ s — GPry outweighs the waveform by $\sim
-95$–$185\times$ with **no crossover**, because PhenomD is a vectorized $\sim 9$–$18$ ms/call
-kernel even at $16$ s. Route B's cost tracks the *evaluation count* ($176$–$504$, set by how
+*D4 assessment (measured).* **Route B is $$\sim 99\%$$ GPry across the whole sweep:** waveform
+generation is $$0.5$$–$$1.1\%$$ of wall-clock ($$2.6$$–$$9.1$$ s) while GP fit + NORA/UltraNest
+acquisition is the remaining $$255$$–$$1332$$ s — GPry outweighs the waveform by $$\sim
+95$$–$$185\times$$ with **no crossover**, because PhenomD is a vectorized $$\sim 9$$–$$18$$ ms/call
+kernel even at $$16$$ s. Route B's cost tracks the *evaluation count* ($$176$$–$$504$$, set by how
 sharp the intrinsic posterior is — lower masses are better-constrained), not the signal
-duration. So the D4 non-waveform share is $\sim 99\%$, far past the $30\%$ port trigger, and
+duration. So the D4 non-waveform share is $$\sim 99\%$$, far past the $$30\%$$ port trigger, and
 the indicated lever is the **acquisition** nested sampler (the **BlackJAX** backend already
 exposed at the `gpry/ns_interfaces.py` seam), *not* the GP fit or a waveform port. The two
 quantities this conclusion hinges on — the GP-fit-vs-acquisition split *within* that
-$\sim 99\%$, and the *actual* per-call cost of a production case-(2) EOB model (the design
-originally assumed $0.5$–$10$ min/call, $\sim 10^{4}\times$ PhenomD) — were still assumed
+$$\sim 99\%$$, and the *actual* per-call cost of a production case-(2) EOB model (the design
+originally assumed $$0.5$$–$$10$$ min/call, $$\sim 10^{4}\times$$ PhenomD) — were still assumed
 here; both were then **measured directly** (next two blocks), which confirms the port target
 and *relocates* the waveform-dominated regime. Separately, the **A-route GPU advantage grows
-with signal duration** ($1.1\times$ at $4$ s $\to 2.9\times$ at $16$ s: $613$ s CPU vs $210$ s
-GPU at $M_{\rm tot}=20$), reinforcing finding-#2-reversed: longer FD signals are *wider*
-(larger $n_{\rm freq}$), and width is the GPU's lever.
+with signal duration** ($$1.1\times$$ at $$4$$ s $$\to 2.9\times$$ at $$16$$ s: $$613$$ s CPU vs $$210$$ s
+GPU at $$M_{\rm tot}=20$$), reinforcing finding-#2-reversed: longer FD signals are *wider*
+(larger $$n_{\rm freq}$$), and width is the GPU's lever.
 
 *GP-fit vs acquisition, measured (Rec 1 — closes the split half of task 1.5).* `examples/08`
 now reads GPry's own per-iteration timing table (`gpry.progress.Progress`) after
 `engine.run()`, so the lumped "GPry" cost is broken into GP hyperparameter-refit
 (`time_fit`), acquisition nested sampling (`time_acquire`, NORA over the GP surrogate),
-convergence, and MC. Measured at two eval counts (the split is **$N$-dependent**, so a single
+convergence, and MC. Measured at two eval counts (the split is **$$N$$-dependent**, so a single
 point would mislead):
 
-| $M_{\rm tot}$ | evals $N$ | GPry | acquisition | GP fit | MC | acq/fit |
+| $$M_{\rm tot}$$ | evals $$N$$ | GPry | acquisition | GP fit | MC | acq/fit |
 |---|---|---|---|---|---|---|
-| 80 | 136 | 196 s | $151.5$ s ($1.11$/eval, $77\%$) | $9.1$ s ($0.07$/eval, $5\%$) | $\sim35$ s ($18\%$) | $17\times$ |
-| 20 | 560 | 1639 s | $1147$ s ($2.05$/eval, $70\%$) | $425$ s ($0.76$/eval, $26\%$) | $\sim66$ s ($4\%$) | $2.7\times$ |
+| 80 | 136 | 196 s | $$151.5$$ s ($$1.11$$/eval, $$77\%$$) | $$9.1$$ s ($$0.07$$/eval, $$5\%$$) | $$\sim35$$ s ($$18\%$$) | $$17\times$$ |
+| 20 | 560 | 1639 s | $$1147$$ s ($$2.05$$/eval, $$70\%$$) | $$425$$ s ($$0.76$$/eval, $$26\%$$) | $$\sim66$$ s ($$4\%$$) | $$2.7\times$$ |
 
-**Acquisition is the dominant cost at both ends ($70$–$77\%$)** — the primary port target — but
-the GP fit's $O(N^3)$ Cholesky grows from a negligible $5\%$ at $136$ points to a non-trivial
-$26\%$ at $560$, while acquisition (a nested sampler over the GP predictive, cheaper per added
+**Acquisition is the dominant cost at both ends ($$70$$–$$77\%$$)** — the primary port target — but
+the GP fit's $$O(N^3)$$ Cholesky grows from a negligible $$5\%$$ at $$136$$ points to a non-trivial
+$$26\%$$ at $$560$$, while acquisition (a nested sampler over the GP predictive, cheaper per added
 point) stays dominant. Implications for D4: **(i)** the acquisition NS is the port to do first
-($70$–$77\%$, and the `vmap`/BlackJAX-friendly part — it optimizes over the GP predictive with a
+($$70$$–$$77\%$$, and the `vmap`/BlackJAX-friendly part — it optimizes over the GP predictive with a
 *cached* factorization, so the poor-consumer-GPU-fp64 objection does **not** apply to it);
 **(ii)** the GP-fit fp64-Cholesky term the "don't rewrite" argument worried about is genuinely
-small only at *low* eval count — at the high-$N$ end (which is where high-dimensional case-(2)
-lives) it returns as $\sim$a quarter of the loop, so a *full* speedup there eventually needs the
+small only at *low* eval count — at the high-$$N$$ end (which is where high-dimensional case-(2)
+lives) it returns as $$\sim$$a quarter of the loop, so a *full* speedup there eventually needs the
 Cholesky ported too, and that is exactly the fp64-hostile piece the design flagged. So the port
 decision is not one-shot: acquisition always; GP fit only if profiling at the target
-dimensionality shows it dominating. Matches the Phase-1 demo datum (acquisition $\sim 83\%$) now
+dimensionality shows it dominating. Matches the Phase-1 demo datum (acquisition $$\sim 83\%$$) now
 on the real FD Route B.
 
 *Acquisition: overhead-bound, not flops-bound — measured per surrogate point (the CPU-port
-decision).* The split above says acquisition is $70$–$77\%$ of the loop; it does **not** say
+decision).* The split above says acquisition is $$70$$–$$77\%$$ of the loop; it does **not** say
 whether that time is the GP posterior predictive's linear algebra (which a JAX port could beat)
 or the nested sampler's own Python machinery (which only an end-to-end-jitted NS removes). GPry
 logs the denominator: `evals_acquire` counts surrogate **points** (`gpr.py`:
 `self.n_eval += len(X)`), so `time_acquire / evals_acquire` is a wall time *per acquisition
 point*. `examples/08` now records it. Measured on the M80 injection (CPU, `lalsuite-dev`;
-converged run, $336$ truth evals over $82$ iterations, $2.74\times 10^{6}$ acquisition points):
+converged run, $$336$$ truth evals over $$82$$ iterations, $$2.74\times 10^{6}$$ acquisition points):
 
-| $N$ (train) | acquisition $\mu$s/point | acq points / iter | GP fit ms/point |
+| $$N$$ (train) | acquisition $$\mu$$s/point | acq points / iter | GP fit ms/point |
 |---|---|---|---|
-| $<60$        | $185$ | $19{,}700$ | $1.8$ |
-| $60$–$120$   | $85$  | $39{,}000$ | $1.8$ |
-| $120$–$200$  | $89$  | $33{,}800$ | $5.3$ |
-| $200$–$280$  | $96$  | $35{,}900$ | $11.9$ |
-| $280$–$332$  | $102$ | $36{,}200$ | $18.7$ |
+| $$<60$$        | $$185$$ | $$19{,}700$$ | $$1.8$$ |
+| $$60$$–$$120$$   | $$85$$  | $$39{,}000$$ | $$1.8$$ |
+| $$120$$–$$200$$  | $$89$$  | $$33{,}800$$ | $$5.3$$ |
+| $$200$$–$$280$$  | $$96$$  | $$35{,}900$$ | $$11.9$$ |
+| $$280$$–$$332$$  | $$102$$ | $$36{,}200$$ | $$18.7$$ |
 
-Two things are decisive. **(a) The acquisition per-point cost is $N$-independent** ($\sim 90\,\mu$s
-from $N{=}60$ to $N{=}332$, a $5.5\times$ growth in $N$ producing only a $1.2\times$ change). A
-cost dominated by the GP predictive would rise with $N$ — the mean is $O(N)$/point and the
-posterior-variance triangular solve $O(N^2)$/point — so the *absence* of $N$-scaling proves the
-predictive is **not** what sets the acquisition cost. **(b) The measured $\sim 90\,\mu$s/point is
-$\sim 5$–$20\times$ the GP predictive's own vectorized cost** at these training sizes — a separate
-CPU microbenchmark (`scratchpad/bench_acq_cpu.py`, sklearn vs a jitted JAX twin, fp64, $d{=}4$)
-puts the predictive at $\sim 4$–$7\,\mu$s/point at $N{=}136$ and $\sim 17$–$27\,\mu$s/point at
-$N{=}560$ in the batched regime UltraNest uses. So **$\sim 80$–$90\%$ of acquisition wall-clock is
+Two things are decisive. **(a) The acquisition per-point cost is $$N$$-independent** ($$\sim 90\,\mu$$s
+from $$N{=}60$$ to $$N{=}332$$, a $$5.5\times$$ growth in $$N$$ producing only a $$1.2\times$$ change). A
+cost dominated by the GP predictive would rise with $$N$$ — the mean is $$O(N)$$/point and the
+posterior-variance triangular solve $$O(N^2)$$/point — so the *absence* of $$N$$-scaling proves the
+predictive is **not** what sets the acquisition cost. **(b) The measured $$\sim 90\,\mu$$s/point is
+$$\sim 5$$–$$20\times$$ the GP predictive's own vectorized cost** at these training sizes — a separate
+CPU microbenchmark (`scratchpad/bench_acq_cpu.py`, sklearn vs a jitted JAX twin, fp64, $$d{=}4$$)
+puts the predictive at $$\sim 4$$–$$7\,\mu$$s/point at $$N{=}136$$ and $$\sim 17$$–$$27\,\mu$$s/point at
+$$N{=}560$$ in the batched regime UltraNest uses. So **$$\sim 80$$–$$90\%$$ of acquisition wall-clock is
 the sampler's machinery** (MLFriends region rebuilds, slice/ellipsoid proposals, per-batch
 dispatch), not the GP linear algebra. Contrast the **GP fit**, whose per-point cost rises
-$1.8\to 18.7$ ms ($\sim 10\times$ over the same $N$ range) — that is the genuinely
-linear-algebra-bound, $O(N^3)$-driven term.
+$$1.8\to 18.7$$ ms ($$\sim 10\times$$ over the same $$N$$ range) — that is the genuinely
+linear-algebra-bound, $$O(N^3)$$-driven term.
 
 *Consequences for a JAX port, and specifically on CPU.* **(i)** A port of the GP *predictive
-alone* is the wrong target: it touches only the $\sim 10$–$20\%$ flops slice, and the same
-microbenchmark shows XLA-CPU at $0.3$–$3.2\times$ sklearn (mostly $\approx 1\times$ or worse) in
+alone* is the wrong target: it touches only the $$\sim 10$$–$$20\%$$ flops slice, and the same
+microbenchmark shows XLA-CPU at $$0.3$$–$$3.2\times$$ sklearn (mostly $$\approx 1\times$$ or worse) in
 the batch regime UltraNest occupies, because that work is already BLAS-bound — so on CPU even a
-perfect predictive port removes $\lesssim 3\%$ of the loop. **(ii)** The only lever that reaches
-the dominant $\sim 85\%$ is jitting the **whole** NS (`lax.scan` + `vmap` over the live points,
+perfect predictive port removes $$\lesssim 3\%$$ of the loop. **(ii)** The only lever that reaches
+the dominant $$\sim 85\%$$ is jitting the **whole** NS (`lax.scan` + `vmap` over the live points,
 e.g. BlackJAX-NSS), which wins by deleting the Python loop — a *hardware-independent* gain, so it
 would help on CPU too. **But GPry's existing BlackJAX seam cannot deliver it**: its
 `loglikelihood_fn` wraps the numpy acquisition in `jax.pure_callback(..., vmap_method="sequential")`
 returning a scalar per call, i.e. the jitted NS escapes to Python one point at a time — likely
 *slower* than the `vectorized=True` UltraNest we run today. A real port needs a **JAX-native GP
-predictive** inlined into the jitted NS (and, since $N$ grows every iteration, fixed-size padding
+predictive** inlined into the jitted NS (and, since $$N$$ grows every iteration, fixed-size padding
 + masking to avoid XLA recompiling each iteration — not free on CPU). **(iii)** The fp64 objection
 that shaped D4 is GPU-specific and simply *vanishes on CPU* (full-rate fp64) — but so does most of
 the predictive-port upside, since LAPACK is already near-optimal there. **(iv)** The cheapest,
-hardware-independent win attacks the true dominant term — the **eval count**: $2.74\times 10^6$
-surrogate points to acquire $336$ truth points is $\sim 8{,}000$ points per acquired point, at a
-fixed $\sim 90\,\mu$s each. Replacing the per-iteration NS with a gradient-multistart optimum
-(Option 2, using GPry's analytic `return_mean_grad`/`return_std_grad`) would use $\sim 10^2$–$10^3$
-points/iteration instead of $\sim 35{,}000$ — orders of magnitude, pure algorithm, no JAX, no GPU.
+hardware-independent win attacks the true dominant term — the **eval count**: $$2.74\times 10^6$$
+surrogate points to acquire $$336$$ truth points is $$\sim 8{,}000$$ points per acquired point, at a
+fixed $$\sim 90\,\mu$$s each. Replacing the per-iteration NS with a gradient-multistart optimum
+(Option 2, using GPry's analytic `return_mean_grad`/`return_std_grad`) would use $$\sim 10^2$$–$$10^3$$
+points/iteration instead of $$\sim 35{,}000$$ — orders of magnitude, pure algorithm, no JAX, no GPU.
 **So on CPU the ordering is: Option 0 (direct NS) and Option 2 (cheaper acquisition) before any
 JAX port; a JAX port pays only as an end-to-end-jitted NS, never as a predictive-only port, and
 Phase 2.5's "`vmap`-friendly, fp64 objection moot" rationale is a GPU argument that does not
 transfer to CPU.** (Caveat: GPry convergence is stochastic run-to-run — this converged M80 run
-took $336$ evals / $82$ iters, longer than the $136$-eval run in the split table above — so the
-robust quantity is the per-point *rate* ($\sim 90\,\mu$s, $N$-independent), not the totals.)
+took $$336$$ evals / $$82$$ iters, longer than the $$136$$-eval run in the split table above — so the
+robust quantity is the per-point *rate* ($$\sim 90\,\mu$$s, $$N$$-independent), not the totals.)
 
-*Real case-(2) EOB per-call cost, BBH$\to$BNS, measured (Rec 2 — the assumption D4 rested on).*
-The "interface, don't rewrite" call rested on production EOB waveforms costing $0.5$–$10$
+*Real case-(2) EOB per-call cost, BBH$$\to$$BNS, measured (Rec 2 — the assumption D4 rested on).*
+The "interface, don't rewrite" call rested on production EOB waveforms costing $$0.5$$–$$10$$
 min/call. `examples/08 --eob-timing` times real external models at the sweep's intrinsic
 configuration, **with the sampling rate set from the waveform's own highest frequency content**
-(the ringdown; Nyquist sized for the $(4,4)$ mode, higher-mode models capped at $(l,m)\le(4,4)$),
+(the ringdown; Nyquist sized for the $$(4,4)$$ mode, higher-mode models capped at $$(l,m)\le(4,4)$$),
 warmup-excluded, across a total-mass grid extended down to **BNS masses** where the long signal
 and high ringdown make the ODE integration expensive. `pyseobnr` (SEOBNRv5) was installed for
 this. **Measured** (median ms/call; fs in Hz set per point):
 
-| model | $M{=}80$ | $M{=}40$ | $M{=}20$ | $M{=}10$ | $M{=}4$ | $M{=}2.8$ (BNS) | crosses GPry ($\sim1.9$ s/eval) at |
+| model | $$M{=}80$$ | $$M{=}40$$ | $$M{=}20$$ | $$M{=}10$$ | $$M{=}4$$ | $$M{=}2.8$$ (BNS) | crosses GPry ($$\sim1.9$$ s/eval) at |
 |---|---|---|---|---|---|---|---|
-| TEOBResumS      | 13 | 15 | 21 | 77 | 1200 | 2170 | $M\!\approx\!3$ (BNS) |
-| SEOBNRv5HM      | 36 | 40 | 52 | 100 | 1640 | 3280 | $M\!\approx\!3$–$4$ |
-| SEOBNRv5PHM     | 62 | 84 | 127 | 287 | 3880 | 7200 | $M\!\approx\!4$–$5$ |
+| TEOBResumS      | 13 | 15 | 21 | 77 | 1200 | 2170 | $$M\!\approx\!3$$ (BNS) |
+| SEOBNRv5HM      | 36 | 40 | 52 | 100 | 1640 | 3280 | $$M\!\approx\!3$$–$$4$$ |
+| SEOBNRv5PHM     | 62 | 84 | 127 | 287 | 3880 | 7200 | $$M\!\approx\!4$$–$$5$$ |
 | SEOBNRv4\_opt   | 17 | 22 | 35 | 67 | 384 | 690 | none (in range) |
-| SEOBNRv4        | 234 | 393 | 790 | 2270 | 22600 | 50700 | $M\!\approx\!10$ |
-| SEOBNRv4HM      | 390 | 640 | 1770 | 7580 | 65000 | 218000 | $M\!\approx\!10$–$20$ |
+| SEOBNRv4        | 234 | 393 | 790 | 2270 | 22600 | 50700 | $$M\!\approx\!10$$ |
+| SEOBNRv4HM      | 390 | 640 | 1770 | 7580 | 65000 | 218000 | $$M\!\approx\!10$$–$$20$$ |
 
-(fs rises $2048\to 4096\to 8192\to 16384\to 32768$ Hz as $M$ drops, from the $(4,4)$-mode
-Nyquist; SEOBNRv5HM's native mode set already tops at $(4,4)$. Data:
+(fs rises $$2048\to 4096\to 8192\to 16384\to 32768$$ Hz as $$M$$ drops, from the $$(4,4)$$-mode
+Nyquist; SEOBNRv5HM's native mode set already tops at $$(4,4)$$. Data:
 [`examples/output/phenomd_eob_call_timing.json`](../examples/output/phenomd_eob_call_timing.json).)
 
-**The $0.5$–$10$ min/call premise is false for standard aligned-spin EOB.** Across the whole
-**stellar-mass BBH** range ($M\gtrsim 10$) every production model is $13$–$800$ ms/call —
-$10^{2}$–$10^{4}\times$ cheaper than assumed, i.e. *comparable to the JAX PhenomD FD kernel* —
-so Route B is GPry-dominated ($25$–$130\times$ for the fast models) and the acquisition NS is
-the sole bottleneck. The waveform overtakes the $\sim 1.9$ s/eval GPry overhead **only at low
+**The $$0.5$$–$$10$$ min/call premise is false for standard aligned-spin EOB.** Across the whole
+**stellar-mass BBH** range ($$M\gtrsim 10$$) every production model is $$13$$–$$800$$ ms/call —
+$$10^{2}$$–$$10^{4}\times$$ cheaper than assumed, i.e. *comparable to the JAX PhenomD FD kernel* —
+so Route B is GPry-dominated ($$25$$–$$130\times$$ for the fast models) and the acquisition NS is
+the sole bottleneck. The waveform overtakes the $$\sim 1.9$$ s/eval GPry overhead **only at low
 mass**, and the crossover mass is strongly model-dependent: fast models (TEOBResumS,
-SEOBNRv5HM) cross only at **BNS masses** ($M\!\approx\!3$); precessing/higher-mode/unoptimized
-models (SEOBNRv5PHM, SEOBNRv4HM, SEOBNRv4) cross at $M\!\approx\!4$–$20$; SEOBNRv4\_opt never
+SEOBNRv5HM) cross only at **BNS masses** ($$M\!\approx\!3$$); precessing/higher-mode/unoptimized
+models (SEOBNRv5PHM, SEOBNRv4HM, SEOBNRv4) cross at $$M\!\approx\!4$$–$$20$$; SEOBNRv4\_opt never
 crosses in range.
 
 *D4 reframed: a per-call-cost threshold, not a case-(1)/case-(2) dichotomy.* The port trigger
-is a waveform cost of $\sim 1.9$ s/call, and both cheap JAX FD models **and** standard
+is a waveform cost of $$\sim 1.9$$ s/call, and both cheap JAX FD models **and** standard
 aligned-spin EOB across the entire stellar-mass BBH range sit below it — so a **JAX/BlackJAX
 acquisition nested sampler is a broadly worthwhile partial port**, not an FD-only curiosity: it
 cuts real PE wall-clock for BBH parameter estimation with *any* of these waveform families. The
 waveform-dominated regime the design assumed is real but **relocated to BNS / very-low-mass
-($M\lesssim 3$–$5$) and the slow higher-mode variants**, where the surrogate's value is exactly
+($$M\lesssim 3$$–$$5$$) and the slow higher-mode variants**, where the surrogate's value is exactly
 its original one — minimizing expensive calls — and pure "interface" holds. Net: D4's
 "interface, don't rewrite the GP/robustness machinery" stands, but its escape-hatch clause is
 now *active for the acquisition component in the BBH regime*, and specifically names the
-acquisition NS (measured $70$–$77\%$), not the GP fit (measured $5$–$26\%$, $N$-dependent).
+acquisition NS (measured $$70$$–$$77\%$$), not the GP fit (measured $$5$$–$$26\%$$, $$N$$-dependent).
 
 *Eccentricity, measured (the real "minutes/call" candidate).* SEOBNRv5EHM (available via
-`pyseobnr`) at the same $(4,4)$ modes / physical fs costs **$\sim 4.5$–$12\times$ its aligned
-SEOBNRv5HM counterpart** — M40 $41\to 186$ ms, M20 $54\to 495$ ms, M10 $125\to 1522$ ms, M6
-$413\to 3725$ ms, M4 $1.65\to 8.6$ s — from the denser eccentric ODE, and nearly
-$e$-independent between $e=0.1$ and $0.3$. So eccentricity **moves the crossover up to
-$M\!\approx\!8$–$10$** (from $M\!\approx\!3$ aligned), but even eccentric SEOBNRv5 is
-*seconds*/call at worst ($8.6$ s at M4/$e{=}0.3$), **not** the assumed minutes: across
-stellar-mass BBH $M\gtrsim 20$ it is still GPry-dominated ($495$ ms $\ll 2.6$ s/eval). The
+`pyseobnr`) at the same $$(4,4)$$ modes / physical fs costs **$$\sim 4.5$$–$$12\times$$ its aligned
+SEOBNRv5HM counterpart** — M40 $$41\to 186$$ ms, M20 $$54\to 495$$ ms, M10 $$125\to 1522$$ ms, M6
+$$413\to 3725$$ ms, M4 $$1.65\to 8.6$$ s — from the denser eccentric ODE, and nearly
+$$e$$-independent between $$e=0.1$$ and $$0.3$$. So eccentricity **moves the crossover up to
+$$M\!\approx\!8$$–$$10$$** (from $$M\!\approx\!3$$ aligned), but even eccentric SEOBNRv5 is
+*seconds*/call at worst ($$8.6$$ s at M4/$$e{=}0.3$$), **not** the assumed minutes: across
+stellar-mass BBH $$M\gtrsim 20$$ it is still GPry-dominated ($$495$$ ms $$\ll 2.6$$ s/eval). The
 genuine minutes/call regime needs eccentricity **compounded** with a BNS-length signal (few
-$M_\odot$) and/or sub-$20$ Hz $f_{\rm low}$ — not reached here.
+$$M_\odot$$) and/or sub-$$20$$ Hz $$f_{\rm low}$$ — not reached here.
 
 *Remaining caveats.* Point-particle, aligned-spin timings; at BNS masses the standard models
 omit tides (an ODE-length cost *proxy*, not production BNS waveforms); SEOBNRv5PHM at aligned
@@ -940,28 +941,28 @@ config is a lower bound on precessing cost. The harness (`--eob-timing`) is one 
 posterior vs truth** are collected in the
 [D4 timing report]({{ '/examples/d4_timing_report.html' | relative_url }})
 (`examples/d4_timing_report.html`; figures regenerated by `examples/figures/make_d4_figures.py`).
-The posterior grid also records a validation datum worth flagging: at $M_{\rm tot}=20$ (sharp
-$16$ s posterior) the *converged* Route-A gradient sampler mislocates the aligned spins
-($\chi_{1z}\approx-0.15$) while Route B recovers $\chi_{1z}=+0.20,\ \chi_{2z}=-0.09$ (truth
-$+0.2/-0.1$) — the marginalized surrogate is the more robust route on sharp spin structure, at
-the higher masses all three routes agree, and $M_{\rm tot}=10$ (32 s) is Route-B-only (the
+The posterior grid also records a validation datum worth flagging: at $$M_{\rm tot}=20$$ (sharp
+$$16$$ s posterior) the *converged* Route-A gradient sampler mislocates the aligned spins
+($$\chi_{1z}\approx-0.15$$) while Route B recovers $$\chi_{1z}=+0.20,\ \chi_{2z}=-0.09$$ (truth
+$$+0.2/-0.1$$) — the marginalized surrogate is the more robust route on sharp spin structure, at
+the higher masses all three routes agree, and $$M_{\rm tot}=10$$ (32 s) is Route-B-only (the
 gradient graph exceeds the T2000's memory).
 
 ### Reducing the Route-B GPry bottleneck
 
-*Current state (measured).* Route B's wall-clock is GPry's per-eval overhead ($1.4$–$2.6$ s),
-of which **acquisition is $70$–$77\%$** and the **GP fit $5$–$26\%$** ($N$-dependent); the
-waveform is $\lesssim 1\%$ for every BBH model. So for cheap-waveform PE the bottleneck *is* the
-acquisition nested sampler, and secondarily the $O(N^3)$ GP refit at high eval count. Options to
+*Current state (measured).* Route B's wall-clock is GPry's per-eval overhead ($$1.4$$–$$2.6$$ s),
+of which **acquisition is $$70$$–$$77\%$$** and the **GP fit $$5$$–$$26\%$$** ($$N$$-dependent); the
+waveform is $$\lesssim 1\%$$ for every BBH model. So for cheap-waveform PE the bottleneck *is* the
+acquisition nested sampler, and secondarily the $$O(N^3)$$ GP refit at high eval count. Options to
 cut it, most-impactful first, each with its tradeoff:
 
 - **0 — Don't surrogate a cheap likelihood; sample the marginal directly.** GPry's whole purpose
   is minimizing *expensive* true-likelihood calls. When the marginalized intrinsic likelihood is
-  cheap ($13$–$800$ ms), a direct nested sampler / MCMC on it — no GP, no acquisition — pays only
+  cheap ($$13$$–$$800$$ ms), a direct nested sampler / MCMC on it — no GP, no acquisition — pays only
   the waveform per eval and is *exact* (no surrogate error, no IS reweighting). GPry earns its
-  overhead only when $t_{\rm wave} \gtrsim t_{\rm overhead}\,N_{\rm gpry}/(N_{\rm direct}-N_{\rm gpry})
-  \approx 2\,{\rm s}\times 300/10^4 \approx$ **tens of ms** (in 4-D). *Tradeoff:* direct NS scales
-  worse in dimension ($N_{\rm direct}\!\sim\!10^{5}$–$10^{6}$ at 10-D), so this wins for low-D BBH
+  overhead only when $$t_{\rm wave} \gtrsim t_{\rm overhead}\,N_{\rm gpry}/(N_{\rm direct}-N_{\rm gpry})
+  \approx 2\,{\rm s}\times 300/10^4 \approx$$ **tens of ms** (in 4-D). *Tradeoff:* direct NS scales
+  worse in dimension ($$N_{\rm direct}\!\sim\!10^{5}$$–$$10^{6}$$ at 10-D), so this wins for low-D BBH
   and cheap waveforms; GPry wins for high-D or expensive (eccentric/BNS) case-(2). **Cheapest
   experiment, biggest potential win — and no new GP code.** *Action:* benchmark a direct NS
   (nessai / dynesty / BlackJAX-NS) on the *same* marginal as the Route-B baseline; gate GPry on
@@ -969,49 +970,49 @@ cut it, most-impactful first, each with its tradeoff:
   ***Measured (2026-07, `bin/run_direct_ns.py`, M80 aligned-spin, 4-D).*** *BlackJAX-NSS run
   **directly** on the marginal, made a fair test by inlining a fully-jitted twin of the
   marginal into the NS step (a JAX reimplementation of the scipy `i0e`/`logsumexp` distance
-  marginalization, checked equal to the host `__call__` to $3\times10^{-14}$; the stock GPry
+  marginalization, checked equal to the host `__call__` to $$3\times10^{-14}$$; the stock GPry
   `pure_callback` path would have escaped to Python per point and lost for a plumbing reason).
-  Result: direct NS **$350$ s**, recovering truth (all $|z|<0.5$), vs Route-B **$258$ s (native
-  NORA) / $177$ s (JAX acquisition)** at the same mass — so **direct NS is $1.4$–$2\times$
+  Result: direct NS **$$350$$ s**, recovering truth (all $$\lvert z\rvert<0.5$$), vs Route-B **$$258$$ s (native
+  NORA) / $$177$$ s (JAX acquisition)** at the same mass — so **direct NS is $$1.4$$–$$2\times$$
   slower, not faster.** The crossover estimate above was too optimistic for direct NS: it assumed
-  cost $\approx N_{\rm direct}\times t_{\rm wave}$, but at M80 the direct NS is **NS-machinery
-  bound** ($\sim\!10^{5}$ evals of a $4097$-bin two-detector FD overlap $+$ BlackJAX slice
-  sampling $\approx 350$ s), not waveform-bound — the $\sim$sub-ms PhenomD call never dominates.
+  cost $$\approx N_{\rm direct}\times t_{\rm wave}$$, but at M80 the direct NS is **NS-machinery
+  bound** ($$\sim\!10^{5}$$ evals of a $$4097$$-bin two-detector FD overlap $$+$$ BlackJAX slice
+  sampling $$\approx 350$$ s), not waveform-bound — the $$\sim$$sub-ms PhenomD call never dominates.
   Takeaway: for **cheap-waveform 4-D BBH the surrogate is competitive-to-better**, so Option 0 is
   not the free win it looked like; its advantage should reappear only where the waveform genuinely
   dominates the per-eval cost (expensive EOB, or once tuned to far fewer NS evals). Both methods
   recover the same posterior (a useful exactness cross-check on Route B).*
-- **1 — JAX/BlackJAX acquisition NS (Phase 2.5).** Port the $70$–$77\%$: the acquisition
+- **1 — JAX/BlackJAX acquisition NS (Phase 2.5).** Port the $$70$$–$$77\%$$: the acquisition
   optimizes over the GP *predictive* with a cached factorization (fp64 Cholesky *not* re-run per
   eval), so it is `vmap`/GPU-friendly and the consumer-GPU-fp64 objection does not apply. **But
-  scope it correctly (measured above): $\sim 85\%$ of acquisition wall-clock is the sampler's own
-  Python machinery, not the predictive** ($\sim 90\,\mu$s/point, $N$-independent, vs $\sim 5$–$20\,\mu$s
+  scope it correctly (measured above): $$\sim 85\%$$ of acquisition wall-clock is the sampler's own
+  Python machinery, not the predictive** ($$\sim 90\,\mu$$s/point, $$N$$-independent, vs $$\sim 5$$–$$20\,\mu$$s
   for the predictive itself). So the port only pays as an **end-to-end-jitted NS** (`lax.scan` +
   `vmap`, removing the Python loop — a *hardware-independent* win, hence the one that also helps on
-  **CPU**); a predictive-only port touches the wrong $\sim 15\%$ and is $\approx$break-even on CPU.
+  **CPU**); a predictive-only port touches the wrong $$\sim 15\%$$ and is $$\approx$$break-even on CPU.
   GPry's existing BlackJAX seam does *not* qualify — it `pure_callback`s to numpy point-by-point
   (`vmap_method="sequential"`), likely slower than the `vectorized=True` UltraNest we run — so this
   needs a JAX-native predictive inlined into the jitted NS, with fixed-size padding/masking to stop
-  XLA recompiling as $N$ grows. *Tradeoff:* a wrong acquisition silently biases the posterior — must
+  XLA recompiling as $$N$$ grows. *Tradeoff:* a wrong acquisition silently biases the posterior — must
   reproduce GPry-native proposals within tolerance (gate G2.5), preserving NORA's batch/trust-region
   logic.
 - **2 — Cheaper acquisition than a full NS.** NORA runs a nested sampler over the acquisition
   surface *every* iteration; the GP exposes analytic mean/std gradients
   (`return_mean_grad`/`return_std_grad`, verified seam), so a multi-start gradient (L-BFGS)
   optimum is far cheaper and `vmap`-friendly. **This is the highest-leverage CPU lever
-  (measured):** acquisition cost is eval-count $\times$ a fixed $\sim 90\,\mu$s/point, and NORA
-  spends $\sim 2.74\times 10^6$ points ($\sim 35{,}000$/iteration) to acquire a few hundred truth
-  points; gradient multistart would use $\sim 10^2$–$10^3$/iteration — orders of magnitude fewer,
+  (measured):** acquisition cost is eval-count $$\times$$ a fixed $$\sim 90\,\mu$$s/point, and NORA
+  spends $$\sim 2.74\times 10^6$$ points ($$\sim 35{,}000$$/iteration) to acquire a few hundred truth
+  points; gradient multistart would use $$\sim 10^2$$–$$10^3$$/iteration — orders of magnitude fewer,
   pure algorithm, no JAX and no GPU. *Tradeoff:* gradient multistart can miss modes on the
-  SNR$^2$-amplified multi-lobed acquisition surfaces we have already seen — validate against NORA
-  before trusting. Orthogonal to (1) and strictly cheaper on CPU: it attacks the same $70$–$77\%$
+  SNR$$^2$$-amplified multi-lobed acquisition surfaces we have already seen — validate against NORA
+  before trusting. Orthogonal to (1) and strictly cheaper on CPU: it attacks the same $$70$$–$$77\%$$
   algorithmically rather than by compilation.
   *Status (2026-07): GPry already ships this as the `BatchOptimizer` acquisition class
   (gradient-multistart L-BFGS), now selectable first-class via `GPryEngine(acquisition=…)`
   (routing unit-tested; mutually exclusive with `jax_acquisition`). Two findings on measuring it:*
   ***(i)*** *an independent 2-D-Gaussian run reconfirms the overhead diagnosis — native NORA spends
-  $1.8\times10^{5}$ acquisition points in $28.5$ s $=158\,\mu$s/point (cf. the $\sim148\,\mu$s/point
-  M80 datum), for $20$ truth evals over $8$ iterations.* ***(ii)*** *native `BatchOptimizer` is
+  $$1.8\times10^{5}$$ acquisition points in $$28.5$$ s $$=158\,\mu$$s/point (cf. the $$\sim148\,\mu$$s/point
+  M80 datum), for $$20$$ truth evals over $$8$$ iterations.* ***(ii)*** *native `BatchOptimizer` is
   **blocked in this env by a `cobaya` dependency**: unlike NORA it produces no MC sample, so GPry's
   convergence step runs its own MCMC via `cobaya` (`convergence.py::_sample_mcmc`), which is not
   installed. So Option 2 is not a free config win here — it needs either `cobaya` installed to
@@ -1024,58 +1025,58 @@ cut it, most-impactful first, each with its tradeoff:
 
   | measure (M80, 4-D) | NORA (native) | BatchOptimizer |
   |---|---|---|
-  | acquisition | $413$ s ($3.0\times10^{6}$ evals) | $\mathbf{124}$ s ($1.5\times10^{5}$ evals) — $3.3\times$ / $20\times$ fewer |
-  | GP fit | $117$ s | $78$ s |
-  | **convergence** | $\mathbf{0.1}$ s | $\mathbf{44{,}024}$ s ($12.2$ h) |
-  | **total wall** | $\mathbf{572}$ s | $\mathbf{44{,}283}$ s — $77\times$ *slower* |
-  | posterior $z$ vs truth | $[.18,.32,.49,-.06]$ | $[.16,.30,.53,-.09]$ (same) |
+  | acquisition | $$413$$ s ($$3.0\times10^{6}$$ evals) | $$\mathbf{124}$$ s ($$1.5\times10^{5}$$ evals) — $$3.3\times$$ / $$20\times$$ fewer |
+  | GP fit | $$117$$ s | $$78$$ s |
+  | **convergence** | $$\mathbf{0.1}$$ s | $$\mathbf{44{,}024}$$ s ($$12.2$$ h) |
+  | **total wall** | $$\mathbf{572}$$ s | $$\mathbf{44{,}283}$$ s — $$77\times$$ *slower* |
+  | posterior $$z$$ vs truth | $$[.18,.32,.49,-.06]$$ | $$[.16,.30,.53,-.09]$$ (same) |
 
-  *So the gradient-multistart acquisition **works exactly as the $\mu$s/point analysis predicted**
-  ($3.3\times$ faster, $20\times$ fewer surrogate evals, identical posterior), but native
+  *So the gradient-multistart acquisition **works exactly as the $$\mu$$s/point analysis predicted**
+  ($$3.3\times$$ faster, $$20\times$$ fewer surrogate evals, identical posterior), but native
   `BatchOptimizer` is a **net trap at realistic dimension**: NORA reuses its own nested-sampling
   draw for the convergence criterion for free, whereas `BatchOptimizer` triggers a fresh `cobaya`
-  MCMC on **every** convergence check, which in 4-D at $N\!\sim\!300$ blows up to $12$ h (on the
-  2-D toy this was only $0.01\to10$ s, so the trap is invisible until realistic dimension — exactly
+  MCMC on **every** convergence check, which in 4-D at $$N\!\sim\!300$$ blows up to $$12$$ h (on the
+  2-D toy this was only $$0.01\to10$$ s, so the trap is invisible until realistic dimension — exactly
   why the design says measure first). **Revised Option 2: the lever is not "select `BatchOptimizer`"
   but "cheap acquisition *and* cheap convergence."** Concretely, pair the gradient-multistart
   acquisition with a convergence criterion that reuses a cheap MC sample (feed it the acquisition's
   own multistart optima, or GaussianKL over the GP without a fresh MCMC), or run `BatchOptimizer`
   with a large `n_points`/looser convergence cadence. That is real work, not a config flag; until
   then, keep NORA (or the JAX/BlackJAX NORA of Option 1) as the acquisition.*
-- **3 — Cut the eval count $N$ (multifidelity mean + tight bounds; Phase 2).** Fewer evals means
+- **3 — Cut the eval count $$N$$ (multifidelity mean + tight bounds; Phase 2).** Fewer evals means
   fewer acquisition iterations *and* a smaller GP, so it attacks **both** the acquisition total
-  and the $O(N^3)$ fit. The cheap-model mean gives the GP a head start; cheap-model-derived bounds
+  and the $$O(N^3)$$ fit. The cheap-model mean gives the GP a head start; cheap-model-derived bounds
   shrink the domain (already required for high-SNR multi-lobed surfaces). *Tradeoff:* multifidelity
-  gain is unproven (gate G2 $\ge 2\times$); bounds need a trustworthy cheap model.
-- **4 — Batch acquisition.** A larger NORA batch (propose $B$ points/iteration) means fewer
+  gain is unproven (gate G2 $$\ge 2\times$$); bounds need a trustworthy cheap model.
+- **4 — Batch acquisition.** A larger NORA batch (propose $$B$$ points/iteration) means fewer
   iterations → fewer GP refits and NS runs, amortizing the fixed per-iteration cost; GPry's NORA
-  batch $\leftrightarrow$ workers already supports it. *Tradeoff:* batch points are individually
-  less informative (may raise $N$ slightly); net win depends on the fixed/variable cost ratio.
+  batch $$\leftrightarrow$$ workers already supports it. *Tradeoff:* batch points are individually
+  less informative (may raise $$N$$ slightly); net win depends on the fixed/variable cost ratio.
   Cheapest to try.
 - **5 — Incremental GP (rank-1 Cholesky update) instead of full refit.** Caps the GP-fit growth
-  (the $26\%$ at $N\!\sim\!560$) by updating the factorization as points are added rather than an
-  $O(N^3)$ refit each iteration; fold into the multifidelity `GaussianProcessRegressor` subclass.
+  (the $$26\%$$ at $$N\!\sim\!560$$) by updating the factorization as points are added rather than an
+  $$O(N^3)$$ refit each iteration; fold into the multifidelity `GaussianProcessRegressor` subclass.
   *Tradeoff:* hyperparameters drift as data grows, so periodic full refits are still needed — only
-  matters once the fit dominates (high $N$ / high dimension).
+  matters once the fit dominates (high $$N$$ / high dimension).
 
 *Recommendation (ordered) — revised by the 2026-07 measurements.* The three cheap levers were
 measured; the picture changed. **(i) Option 0 (direct NS) is measured *not* to be the free win it
-looked like:** at M80 (4-D, cheap PhenomD) it is $1.4$–$2\times$ slower than Route B, being
+looked like:** at M80 (4-D, cheap PhenomD) it is $$1.4$$–$$2\times$$ slower than Route B, being
 NS-machinery-bound, not waveform-bound (§ this section). Keep it only as (a) an exactness
 cross-check on Route B and (b) the method of choice where the *waveform* genuinely dominates the
-per-eval cost (expensive EOB / higher-$N_{\rm direct}$ regimes) — not as the default for cheap-BBH.
+per-eval cost (expensive EOB / higher-$$N_{\rm direct}$$ regimes) — not as the default for cheap-BBH.
 **(ii) Option 1 (JAX/BlackJAX acquisition, Phase 2.5) is the one that landed:** built, posterior-
 correct, per-iteration recompile fixed, unit-tested, opt-in. On CPU its win is modest (the port is
 predictive-only-useless there); its clean win is the GPU path and removing the Python NS loop.
 **(iii) Option 2 (gradient-multistart acquisition) is measured to be a trap *as configured*:** the
-acquisition itself is $3.3\times$ faster / $20\times$ fewer evals (as predicted), but native
-`BatchOptimizer` triggers a `cobaya` MCMC on every convergence check that explodes to $12$ h in
-4-D — $77\times$ net slower. It becomes viable only paired with a cheap convergence criterion (feed
+acquisition itself is $$3.3\times$$ faster / $$20\times$$ fewer evals (as predicted), but native
+`BatchOptimizer` triggers a `cobaya` MCMC on every convergence check that explodes to $$12$$ h in
+4-D — $$77\times$$ net slower. It becomes viable only paired with a cheap convergence criterion (feed
 it a cheap MC sample instead of a fresh MCMC); that is the highest-value *next* build. **(iv)** In
-parallel, Option 3 (multifidelity + bounds, Phase 2) to cut $N$, which attacks both terms and is
+parallel, Option 3 (multifidelity + bounds, Phase 2) to cut $$N$$, which attacks both terms and is
 already on the roadmap; try Option 4 opportunistically (near-free). **(v)** Only if
-high-$N$/high-$D$ profiling shows the GP fit dominating, add Option 5; defer any
-fp64-Cholesky-on-GPU port per D4. Throughout, **correctness $>$ speed**: Options 1/2/5 change the
+high-$$N$$/high-$$D$$ profiling shows the GP fit dominating, add Option 5; defer any
+fp64-Cholesky-on-GPU port per D4. Throughout, **correctness $$>$$ speed**: Options 1/2/5 change the
 surrogate internals and can *silently* bias the posterior, so each is validated against the pinned
 GPry loop before it is trusted (all three measured variants above recovered the same posterior) —
 Option 0 is the safe baseline because it carries no surrogate at all.
@@ -1084,7 +1085,7 @@ Option 0 is the safe baseline because it carries no surrogate at all.
 
 | # | task | deliverable / test |
 |---|---|---|
-| 2.1 | `surrogate/multifidelity.py`: mean-function `GaussianProcessRegressor` subclass (fit residuals; `predict` adds $m$; `return_mean_grad` adds $\nabla m$) | unit tests incl. gradient paths; upstream-pin compatibility test |
+| 2.1 | `surrogate/multifidelity.py`: mean-function `GaussianProcessRegressor` subclass (fit residuals; `predict` adds $$m$$; `return_mean_grad` adds $$\nabla m$$) | unit tests incl. gradient paths; upstream-pin compatibility test |
 | 2.2 | δ-smoothness probe tool (~20-point scatter evaluation, §4 rule) | report template |
 | 2.3 | Pseudo-black-box multifidelity test: target = ESIGMA @ high `n_ode_grid`/PN, mean = cheap ESIGMA config (a *controlled* fidelity pair with known truth) | measured call-reduction factor vs Phase-1 baseline at matched accuracy |
 
@@ -1093,29 +1094,29 @@ controlled pair (else multifidelity stays opt-in/off and we proceed single-fidel
 
 ### Phase 2.5 — JAX acquisition nested sampler (conditional; D4 escape hatch, now triggered)
 
-*Rationale (measured, §9): the acquisition NS is $70$–$77\%$ of the GPry loop (dominant at both
-low and high eval count) while real aligned-spin EOB is $13$–$800$ ms/call across stellar-mass
+*Rationale (measured, §9): the acquisition NS is $$70$$–$$77\%$$ of the GPry loop (dominant at both
+low and high eval count) while real aligned-spin EOB is $$13$$–$$800$$ ms/call across stellar-mass
 BBH, so Route B is GPry-dominated for the whole BBH regime — the acquisition, not the waveform,
 is the wall-clock. This is the one partial port the §D4 checkpoint now warrants. Only the
 acquisition is ported; the GP regressor, SVM/robustness, convergence and checkpointing stay
-GPry (D4). The GP fit ($O(N^3)$ Cholesky) is $5\%$ at low $N$ but $\sim 26\%$ at $N\!\sim\!560$
+GPry (D4). The GP fit ($$O(N^3)$$ Cholesky) is $$5\%$$ at low $$N$$ but $$\sim 26\%$$ at $$N\!\sim\!560$$
 — revisit a fit port only if high-dimensional profiling shows it dominating (task 2.5.1).*
 
-**Scope correction (per-point measurement, §9).** The $70$–$77\%$ is **not** GP-predictive flops:
-at $\sim 90\,\mu$s/acquisition-point ($N$-independent) it is $\sim 85\%$ nested-sampler machinery
-and only $\sim 15\%$ predictive. So Phase 2.5 must port the **whole NS loop** (`lax.scan`/`vmap`,
+**Scope correction (per-point measurement, §9).** The $$70$$–$$77\%$$ is **not** GP-predictive flops:
+at $$\sim 90\,\mu$$s/acquisition-point ($$N$$-independent) it is $$\sim 85\%$$ nested-sampler machinery
+and only $$\sim 15\%$$ predictive. So Phase 2.5 must port the **whole NS loop** (`lax.scan`/`vmap`,
 removing the Python overhead), not just the predictive — GPry's `pure_callback`-per-point BlackJAX
 seam does **not** qualify (task 2.5.2 below is rewritten accordingly). On **CPU** this is worth
 doing only after Option 2 (gradient-multistart acquisition, which removes most of the eval count
 with no JAX at all); the `vmap`-friendly / fp64-moot framing above is a **GPU** argument that a CPU
-microbenchmark shows does not transfer (XLA-CPU is $0.3$–$3.2\times$ sklearn on the predictive).
+microbenchmark shows does not transfer (XLA-CPU is $$0.3$$–$$3.2\times$$ sklearn on the predictive).
 Sequence for this phase: **run Option 2 and the Option 0 direct-NS baseline first; a full jitted-NS
 port is justified mainly for the GPU path or once Option 2 is exhausted.***
 
 | # | task | deliverable / test |
 |---|---|---|
-| 2.5.1 | Split-timing + BBH$\to$BNS EOB timing landed (`examples/08 --eob-timing`, `gpry.progress` readout; eccentric SEOBNRv5EHM measured — $\sim$4.5–12$\times$ aligned, crossover $M\!\approx\!8$–$10$); remaining: the *compounded* minutes/call corner (eccentric + BNS-length + sub-20 Hz $f_{\rm low}$, + tidal EOB) | extend the §9 EOB table; confirms which targets stay waveform-dominated |
-| 2.5.2 | **End-to-end-jitted** acquisition NS (not a predictive-only wrap): a JAX-native GP predictive inlined into a `lax.scan`/`vmap` nested sampler (BlackJAX-NSS), fixed-size padding+masking for the growing training set; the current `gpry/ns_interfaces.py::InterfaceBlackJAX` `pure_callback`-per-point path is explicitly *not* the target (it escapes to numpy sequentially, likely slower than `vectorized=True` UltraNest). Precede with **task 2.5.0**: run Option 0 (direct-NS baseline) and Option 2 (gradient-multistart acquisition) — both no-JAX — and only proceed here if they leave a gap | matches GPry-native proposals within tolerance on a fixed GP; wall-clock speedup measured **on the target device** (CPU *and* GPU — the predictive-only path is $\approx$break-even on CPU, §9) |
+| 2.5.1 | Split-timing + BBH$$\to$$BNS EOB timing landed (`examples/08 --eob-timing`, `gpry.progress` readout; eccentric SEOBNRv5EHM measured — $$\sim$$4.5–12$$\times$$ aligned, crossover $$M\!\approx\!8$$–$$10$$); remaining: the *compounded* minutes/call corner (eccentric + BNS-length + sub-20 Hz $$f_{\rm low}$$, + tidal EOB) | extend the §9 EOB table; confirms which targets stay waveform-dominated |
+| 2.5.2 | **End-to-end-jitted** acquisition NS (not a predictive-only wrap): a JAX-native GP predictive inlined into a `lax.scan`/`vmap` nested sampler (BlackJAX-NSS), fixed-size padding+masking for the growing training set; the current `gpry/ns_interfaces.py::InterfaceBlackJAX` `pure_callback`-per-point path is explicitly *not* the target (it escapes to numpy sequentially, likely slower than `vectorized=True` UltraNest). Precede with **task 2.5.0**: run Option 0 (direct-NS baseline) and Option 2 (gradient-multistart acquisition) — both no-JAX — and only proceed here if they leave a gap | matches GPry-native proposals within tolerance on a fixed GP; wall-clock speedup measured **on the target device** (CPU *and* GPU — the predictive-only path is $$\approx$$break-even on CPU, §9) |
 | 2.5.3 | Wire behind the `SurrogateEngine` protocol as an optional backend; default stays GPry-native | opt-in flag; falls back cleanly; posterior unchanged vs native on the Phase-1 pseudo-black-box |
 
 **Progress (2026-07, implemented + tested — `jaxpe/surrogate/jax_acquisition.py`).**
@@ -1123,27 +1124,27 @@ port is justified mainly for the GPU path or once Option 2 is exhausted.***
   mean** into the jitted BlackJAX-NSS step (no `pure_callback`). The predictive-mean-only path
   is correct *by construction*: NORA's MC step samples the mean posterior
   (`surrogate.predict(return_std=False)`), σ enters only in the later numpy ranking — so the
-  JAX mean is the whole acquisition target. Unit-tested to match GPry's mean to $<10^{-6}$ (RBF
+  JAX mean is the whole acquisition target. Unit-tested to match GPry's mean to $$<10^{-6}$$ (RBF
   and Matern) against a real fitted `SurrogateModel`.
 - **Recompile trap fixed.** The GP-predictive state (training arrays, hyperparameters) is passed
-  to the jitted init/step as **arguments**, and the training set is **zero-$\alpha$ padded to a
+  to the jitted init/step as **arguments**, and the training set is **zero-$$\alpha$$ padded to a
   bucketed capacity** (`_bucket_size`, exact — padded rows drop out of the mean, unit-tested). A
   per-interface `_compiled_runtime_cache` keys the compiled step on shape/precision, not values,
   so one artifact is reused across iterations. Validated end-to-end on a 2-D Gaussian: distinct
-  compiles $=$ number of *(bucket, nlive, num\_delete)* combinations (a handful), **not** one per
-  iteration — the growth-driven blow-up (measured $5.7$ h at M10 on GPU with the old closure
-  path) is removed. Posterior matches native (means within $\sim0.1$ of truth; cov-diag
-  $[0.48,1.49]$ vs truth $[0.5,1.5]$).
+  compiles $$=$$ number of *(bucket, nlive, num\_delete)* combinations (a handful), **not** one per
+  iteration — the growth-driven blow-up (measured $$5.7$$ h at M10 on GPU with the old closure
+  path) is removed. Posterior matches native (means within $$\sim0.1$$ of truth; cov-diag
+  $$[0.48,1.49]$$ vs truth $$[0.5,1.5]$$).
 - **2.5.3 done:** opt-in only — `GPryEngine(jax_acquisition=…)` defaults to native NORA;
   `examples/08 --jax-acquisition` toggles it (routing unit-tested).
 - **Still open for Gate G2.5:** a *controlled* native-vs-JAX **speedup** measurement (same seed,
-  same convergence target, one device) — the earlier CPU numbers ($0.65$–$4.7\times$) were
+  same convergence target, one device) — the earlier CPU numbers ($$0.65$$–$$4.7\times$$) were
   confounded by stochastic convergence; and a GPU re-time now that the recompile is gone. Per §9
   the CPU ordering still puts Option 2 / Option 0 first; the JAX port's clean win is the GPU path.
 
 **Gate G2.5:** on a fixed training set the JAX acquisition reproduces GPry-native proposals
 (same next-point distribution within tolerance) **and** cuts acquisition wall-clock ≥ 2× at
-$N\sim$ few$\times10^2$ training points; else it stays off and we keep GPry-native (correctness
+$$N\sim$$ few$$\times10^2$$ training points; else it stays off and we keep GPry-native (correctness
 over speed — a wrong acquisition silently biases the posterior).
 
 ### Phase 3 — Production case (2) (~6–10 d + cluster time)
@@ -1165,7 +1166,7 @@ consistent.
 10D eccentric+precessing production runs (do after G3); ROM-from-cache amortization (D2
 optionality); gradient-enhanced kernels; **any JAX port of the GP regressor / SVM / convergence
 machinery** (the §D4 checkpoint triggered a port of the *acquisition NS only* — Phase 2.5 — and
-the GP fit measured $5$–$26\%$, $N$-dependent, deferred pending high-dimensional profiling);
+the GP fit measured $$5$$–$$26\%$$, $$N$$-dependent, deferred pending high-dimensional profiling);
 RIFT head-to-head paper comparison.
 
 ---

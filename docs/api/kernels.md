@@ -1,6 +1,6 @@
 ---
 title: kernels
-parent: jaxpe
+parent: API Reference
 layout: default
 nav_order: 3
 ---
@@ -11,49 +11,49 @@ nav_order: 3
 1. TOC
 {:toc}
 
-In high-dimensional parameter spaces typical of gravitational-wave inference ($D \approx 15$), standard random-walk Metropolis-Hastings proposals driven by isotropic Brownian motion suffer from severe diffusive inefficiency, yielding an exploration radius that scales as $R \propto \sqrt{N}$. To circumvent this, the transition kernels in `jaxpe` leverage the differential geometry of symplectic manifolds to generate coherent, directed trajectories across the posterior measure.
+In high-dimensional parameter spaces typical of gravitational-wave inference ($$D \approx 15$$), standard random-walk Metropolis-Hastings proposals driven by isotropic Brownian motion suffer from severe diffusive inefficiency, yielding an exploration radius that scales as $$R \propto \sqrt{N}$$. To circumvent this, the transition kernels in `jaxpe` leverage the differential geometry of symplectic manifolds to generate coherent, directed trajectories across the posterior measure.
 
 ## Hamiltonian Monte Carlo on Symplectic Manifolds
 
 ### The Classical Hamiltonian Formalism
-In classical mechanics, a Hamiltonian $H$ is a scalar function that represents the total energy of a physical system. The fundamental objective of Hamiltonian mechanics is to describe the deterministic time evolution of this system. Rather than working solely with spatial coordinates, the Hamiltonian framework operates on the phase space of the system, defined by generalized coordinates (positions) $\theta^\mu$ and their conjugate momenta $p_\mu$.
+In classical mechanics, a Hamiltonian $$H$$ is a scalar function that represents the total energy of a physical system. The fundamental objective of Hamiltonian mechanics is to describe the deterministic time evolution of this system. Rather than working solely with spatial coordinates, the Hamiltonian framework operates on the phase space of the system, defined by generalized coordinates (positions) $$\theta^\mu$$ and their conjugate momenta $$p_\mu$$.
 
-By evaluating the partial derivatives of the Hamiltonian scalar $H(\theta, p)$, Hamilton's equations of motion generate a vector field that perfectly dictates the trajectory of the particle over time, conserving total energy and preserving the volume of the phase space.
+By evaluating the partial derivatives of the Hamiltonian scalar $$H(\theta, p)$$, Hamilton's equations of motion generate a vector field that perfectly dictates the trajectory of the particle over time, conserving total energy and preserving the volume of the phase space.
 
 ### Mapping Statistics to Mechanics
 Hamiltonian Monte Carlo (HMC) [1, 2] achieves extraordinary sampling efficiency by establishing a strict isomorphism between the purely statistical problem of sampling a probability distribution and the mechanical problem of simulating a physical particle's trajectory.
 
-We elevate the $D$-dimensional parameter space of our gravitational-wave problem to act as the positional manifold $\mathcal{M}$. To construct the required phase space, we introduce a set of auxiliary variables $p_\mu$ that serve as the conjugate momenta. Geometrically, this combined space is the cotangent bundle $T^*\mathcal{M}$, which is naturally a symplectic manifold equipped with a closed, non-degenerate 2-form $\omega = d\theta^\mu \wedge dp_\mu$.
+We elevate the $$D$$-dimensional parameter space of our gravitational-wave problem to act as the positional manifold $$\mathcal{M}$$. To construct the required phase space, we introduce a set of auxiliary variables $$p_\mu$$ that serve as the conjugate momenta. Geometrically, this combined space is the cotangent bundle $$T^*\mathcal{M}$$, which is naturally a symplectic manifold equipped with a closed, non-degenerate 2-form $$\omega = d\theta^\mu \wedge dp_\mu$$.
 
 The mechanical terms map to the statistical problem as follows:
-1. **Position ($\theta^\mu$)**: The actual astrophysical parameters we wish to infer (e.g., chirp mass, spin).
-2. **Momentum ($p_\mu$)**: Auxiliary variables artificially introduced to grant the system "inertia," allowing it to glide coherently through the parameter space.
-3. **Potential Energy ($U(\theta)$)**: Defined strictly as the negative log-posterior, $U(\theta) = -\log \pi(\theta \mid d)$. The high-probability peaks of the posterior become deep gravitational wells that attract the particle.
-4. **Kinetic Energy ($K(p)$)**: A quadratic form defining the energy of the auxiliary momenta, parameterized by a positive-definite inverse mass matrix $g^{\mu\nu}$.
+1. **Position ($$\theta^\mu$$)**: The actual astrophysical parameters we wish to infer (e.g., chirp mass, spin).
+2. **Momentum ($$p_\mu$$)**: Auxiliary variables artificially introduced to grant the system "inertia," allowing it to glide coherently through the parameter space.
+3. **Potential Energy ($$U(\theta)$$)**: Defined strictly as the negative log-posterior, $$U(\theta) = -\log \pi(\theta \mid d)$$. The high-probability peaks of the posterior become deep gravitational wells that attract the particle.
+4. **Kinetic Energy ($$K(p)$$)**: A quadratic form defining the energy of the auxiliary momenta, parameterized by a positive-definite inverse mass matrix $$g^{\mu\nu}$$.
 
-We define the Hamiltonian scalar function $H: T^*\mathcal{M} \to \mathbb{R}$ as the sum of these energies:
+We define the Hamiltonian scalar function $$H: T^*\mathcal{M} \to \mathbb{R}$$ as the sum of these energies:
 
 $$
 H(\theta^\mu, p_\mu) = U(\theta^\mu) + K(p_\mu) = -\log \pi(\theta^\mu|d) + \frac{1}{2} g^{\mu\nu} p_\mu p_\nu
 $$
 
-where $g^{\mu\nu}$ is the inverse of the mass matrix (which can be interpreted as a flat Riemannian metric on $\mathcal{M}$). The evolution of any observable $F$ on phase space is governed by the Poisson bracket:
+where $$g^{\mu\nu}$$ is the inverse of the mass matrix (which can be interpreted as a flat Riemannian metric on $$\mathcal{M}$$). The evolution of any observable $$F$$ on phase space is governed by the Poisson bracket:
 
 $$
 \frac{dF}{dt} = \{F, H\} = \frac{\partial F}{\partial \theta^\mu} \frac{\partial H}{\partial p_\mu} - \frac{\partial F}{\partial p_\mu} \frac{\partial H}{\partial \theta^\mu}
 $$
 
-Setting $F = \theta^\mu$ and $F = p_\mu$ recovers Hamilton's equations of motion:
+Setting $$F = \theta^\mu$$ and $$F = p_\mu$$ recovers Hamilton's equations of motion:
 
 $$
 \frac{d\theta^\mu}{dt} = g^{\mu\nu} p_\nu \, , \quad \frac{dp_\mu}{dt} = -\partial_\mu U(\theta)
 $$
 
-Because Hamiltonian flow is a symplectomorphism, it preserves the phase space volume form $\Omega = \frac{(-1)^{n(n-1)/2}}{n!} \omega^n$ exactly (Liouville's Theorem).
+Because Hamiltonian flow is a symplectomorphism, it preserves the phase space volume form $$\Omega = \frac{(-1)^{n(n-1)/2}}{n!} \omega^n$$ exactly (Liouville's Theorem).
 
 ### Numerical Integration: The Leapfrog Symplectic Integrator
 
-In practice, we cannot integrate these continuous Hamiltonian differential equations exactly. We must discretize time into discrete steps $\Delta t$. However, standard integration schemes like Runge-Kutta do not preserve the symplectic volume form $\omega$, causing the simulated energy to systematically drift and destroying the detailed balance condition of the Markov chain.
+In practice, we cannot integrate these continuous Hamiltonian differential equations exactly. We must discretize time into discrete steps $$\Delta t$$. However, standard integration schemes like Runge-Kutta do not preserve the symplectic volume form $$\omega$$, causing the simulated energy to systematically drift and destroying the detailed balance condition of the Markov chain.
 
 Instead, we employ the Leapfrog (Verlet) integrator, which is explicitly symplectic and time-reversible. A single Leapfrog step consists of a half-step update for the momenta, a full-step update for the positions, and a final half-step update for the momenta:
 
@@ -69,7 +69,7 @@ $$
 p_\mu(t + \Delta t) = p_\mu(t + \Delta t/2) - \frac{\Delta t}{2} \partial_\mu U(\theta(t + \Delta t))
 $$
 
-Because this integrator preserves phase-space volume, the only source of error is the truncation error in the energy conservation $\mathcal{O}(\Delta t^2)$. We correct for this small discretization error by wrapping the trajectory in a final Metropolis-Hastings acceptance step.
+Because this integrator preserves phase-space volume, the only source of error is the truncation error in the energy conservation $$\mathcal{O}(\Delta t^2)$$. We correct for this small discretization error by wrapping the trajectory in a final Metropolis-Hastings acceptance step.
 
 The [`HMC`](#hmc) kernel in `jaxpe` encapsulates this deterministic trajectory integration:
 
@@ -83,19 +83,19 @@ kernel = HMC(step_size=1e-2, n_leapfrog=10)
 
 As an alternative to the deterministic integration of Hamilton's equations, the Metropolis-Adjusted Langevin Algorithm (MALA) [3] constructs proposals by simulating the overdamped limit of Langevin diffusion.
 
-The continuous-time stochastic differential equation (SDE) governing the parameter vector $\theta^\mu_t$ on a flat manifold is:
+The continuous-time stochastic differential equation (SDE) governing the parameter vector $$\theta^\mu_t$$ on a flat manifold is:
 
 $$
 d\theta^\mu_t = -\frac{1}{2} g^{\mu\nu} \partial_\nu U(\theta_t) dt + \sqrt{g^{\mu\nu}} dW_{\nu, t}
 $$
 
-where $dW_{\nu, t}$ is a multi-dimensional Wiener process. The macroscopic evolution of the probability density $\rho(\theta^\mu, t)$ is governed by the Fokker-Planck equation:
+where $$dW_{\nu, t}$$ is a multi-dimensional Wiener process. The macroscopic evolution of the probability density $$\rho(\theta^\mu, t)$$ is governed by the Fokker-Planck equation:
 
 $$
 \frac{\partial \rho}{\partial t} = \partial_\mu \left( \frac{1}{2} g^{\mu\nu} \partial_\nu \rho + \frac{1}{2} \rho g^{\mu\nu} \partial_\nu U \right)
 $$
 
-Imposing stationarity ($\partial_t \rho = 0$), we trivially recover that the equilibrium distribution is exactly the target posterior $\rho \propto \exp(-U(\theta)) = \pi(\theta \mid d)$.
+Imposing stationarity ($$\partial_t \rho = 0$$), we trivially recover that the equilibrium distribution is exactly the target posterior $$\rho \propto \exp(-U(\theta)) = \pi(\theta \mid d)$$.
 
 This overdamped continuous diffusion is provided natively by the [`MALA`](#mala) kernel:
 
@@ -107,17 +107,17 @@ kernel = MALA(step_size=1e-3)
 
 ### Manifold MALA (`mMALA`)
 
-In highly curved posteriors, using a globally constant metric $g^{\mu\nu}$ is severely sub-optimal. Manifold MALA (mMALA) promotes the mass matrix to a position-dependent Riemannian metric tensor $g_{\mu\nu}(\theta)$ (often the Fisher Information Matrix). The generalized Langevin SDE must now include corrections from the Levi-Civita connection (the Christoffel symbols $\Gamma^\mu_{\alpha\beta}$) to remain covariant:
+In highly curved posteriors, using a globally constant metric $$g^{\mu\nu}$$ is severely sub-optimal. Manifold MALA (mMALA) promotes the mass matrix to a position-dependent Riemannian metric tensor $$g_{\mu\nu}(\theta)$$ (often the Fisher Information Matrix). The generalized Langevin SDE must now include corrections from the Levi-Civita connection (the Christoffel symbols $$\Gamma^\mu_{\alpha\beta}$$) to remain covariant:
 
 $$
 d\theta^\mu_t = \frac{1}{2} g^{\mu\nu}(\theta_t) \partial_\nu \log \pi(\theta_t) dt + \frac{1}{2} \Gamma^\mu_{\alpha\beta} g^{\alpha\beta} dt + e^\mu_\alpha dW^\alpha_t
 $$
 
-where $e^\mu_\alpha$ is the vielbein (tetrad) defined by $g^{\mu\nu} = e^\mu_\alpha e^\nu_\beta \delta^{\alpha\beta}$. This allows the diffusion to adapt perfectly to the local curvature of the target density.
+where $$e^\mu_\alpha$$ is the vielbein (tetrad) defined by $$g^{\mu\nu} = e^\mu_\alpha e^\nu_\beta \delta^{\alpha\beta}$$. This allows the diffusion to adapt perfectly to the local curvature of the target density.
 
 ### Underdamped Langevin Dynamics (`ULD`)
 
-ULD restores the conjugate momenta to the diffusion process, adding a continuous friction tensor $\Gamma^\mu_\nu$ to Hamilton's equations. The momenta undergo an Ornstein-Uhlenbeck process while the positions drift:
+ULD restores the conjugate momenta to the diffusion process, adding a continuous friction tensor $$\Gamma^\mu_\nu$$ to Hamilton's equations. The momenta undergo an Ornstein-Uhlenbeck process while the positions drift:
 
 $$
 d\theta^\mu_t = g^{\mu\nu} p_{\nu, t} dt
@@ -149,7 +149,62 @@ Metropolis-Adjusted Langevin Algorithm. Simulates overdamped Langevin diffusion 
 
 ### `ULD`
 **`jaxpe.kernels.uld.ULD(step_size: float, friction: float, scale=None)`**
-Underdamped Langevin Dynamics. Simulates Langevin diffusion while preserving conjugate momenta, governed by a continuous friction coefficient.
+Underdamped Langevin Dynamics. Simulates Langevin diffusion while preserving conjugate momenta, governed by a continuous friction coefficient. **Unadjusted** — it has no Metropolis correction, so its stationary distribution carries an $$O(\varepsilon^2)$$ discretisation bias by construction and does not converge to the exact target at any run length for fixed $$\varepsilon$$. It also has no acceptance signal to adapt on, so `step_size` must be supplied rather than tuned; see the five-kernel comparison in the [BNS benchmark]({{ site.baseurl }}/docs/bns_ce_pe_benchmark.html) for what that costs in practice.
+
+### `MMALA`
+**`jaxpe.kernels.mmala.MMALA(step_size: float, metric_fn=None, cov=None)`**
+Manifold MALA: a position-dependent metric $$G(\theta)$$ replaces the identity preconditioner, so the proposal follows the natural gradient. In its documented constant-metric mode (supply `cov` rather than `metric_fn`) it is equivalent to dense-mass MALA, **not** the full Riemannian variant — the position-dependent curvature terms are not evaluated.
+
+### `RandomWalk`
+**`jaxpe.kernels.grw.RandomWalk(step_size: float, scale=None)`**
+Gaussian random-walk Metropolis. Requires no gradient (`needs_gradient = False`), which makes it the reference kernel for targets where the gradient is unavailable, unreliable, or dominated by numerical noise.
+
+> **Preconditioner shape matters.** `mala`, `uld` and `random_walk` use `scale`
+> **elementwise** — they receive per-dimension marginal standard deviations and therefore
+> cannot represent parameter correlations at all. `hmc` and `mmala` take a dense Cholesky
+> factor and can. On a posterior with a strong degeneracy (the ~97 % $$M_c$$–$$\eta$$
+> anti-correlation of a compact-binary inspiral, say) that distinction dominates
+> everything else about kernel choice.
+
+### Kernel protocol and state
+
+| object | role |
+|---|---|
+| `Kernel` | base class; class attributes `needs_gradient` and `has_accept_prob` tell `run_chains` whether to build a gradient graph and whether an acceptance diagnostic exists |
+| `KernelState` | per-chain state: `x`, `log_prob`, `grad`, `aux` |
+| `StepInfo` | per-step diagnostics: `accepted`, `log_accept_ratio` |
+| `mh_accept(key, state, proposal, log_accept_ratio)` | the shared Metropolis–Hastings accept/reject step |
+
+Writing a new kernel means implementing the transition and reusing `mh_accept`; the
+vmap/scan orchestration in `run_chains` is inherited unchanged.
+
+### Adaptation (`jaxpe.kernels.adaptation`)
+
+| function | purpose |
+|---|---|
+| `adapted_step_size(step_size, accept_rate, target, gamma=..., lo=..., hi=...)` | Robbins–Monro update of $$\ln \varepsilon$$ toward a target acceptance rate, clipped to `[lo, hi]` |
+| `ensemble_scale(xs, floor=...)` | per-dimension standard deviation across chains — the elementwise preconditioner |
+| `ensemble_cov(xs, jitter=...)` | dense sample covariance, jittered for Cholesky safety — the dense preconditioner |
+| `with_updates(kernel)` | return a copy of `kernel` with array fields replaced (kernels are immutable pytrees) |
+
+The Robbins–Monro recursion is the standard stochastic-approximation update
+
+$$
+\ln \varepsilon_{n+1} = \ln \varepsilon_n + \gamma_n\,(\bar a_n - a_\star),
+$$
+
+with $$\bar a_n$$ the measured acceptance over a block and $$a_\star$$ the target. Two
+cautions that the benchmarks paid for: $$\varepsilon$$ does **not** transfer across
+trajectory lengths (leapfrog energy error accumulates along the trajectory, so retuning is
+required whenever `n_leapfrog` changes), and an $$\varepsilon$$ adapted during warmup
+reflects the curvature where the chains *started*, not where they end up — re-tuning
+against equilibrated positions was worth more than any other single change in the
+[BNS benchmark]({{ site.baseurl }}/docs/bns_ce_pe_benchmark.html).
+
+Deriving the dense preconditioner from `ensemble_cov` is not automatically safe either: if
+the ensemble is over-dispersed in a direction that is orders of magnitude tighter than the
+others, the resulting metric sends every trajectory off the ridge and acceptance collapses
+to zero. A MAP + Laplace Hessian is the more robust source of a mass matrix.
 
 ### `run_chains`
 **`jaxpe.kernels.run_chains(key, kernel, logp_fn, x0, n_steps, thin=1)`**
@@ -160,7 +215,7 @@ Everything — including **chain initialisation** — happens inside that single
 Two practical consequences:
 
 - **Cost scales with `n_steps`, not with call count.** After the fix the fixed per-call term is ~0.03 s, so slicing a long run into many short `run_chains` calls (e.g. to check convergence diagnostics between blocks) is cheap.
-- **`n_steps` and `thin` are static arguments.** Changing either triggers a recompile, so when timing a block, warm up at the *exact* size you intend to measure — otherwise the first timed call silently includes compilation. [`bin/profile_sampler_scaling.py`](https://github.com/prayush/jaxpe/blob/master/bin/profile_sampler_scaling.py) fits the fixed and marginal terms for both this and the flow global block, and is the recommended first measurement on unfamiliar hardware.
+- **`n_steps` and `thin` are static arguments.** Changing either triggers a recompile, so when timing a block, warm up at the *exact* size you intend to measure — otherwise the first timed call silently includes compilation. [`bin/profile_sampler_scaling.py`](https://github.com/gwnrtools/jaxpe/blob/master/bin/profile_sampler_scaling.py) fits the fixed and marginal terms for both this and the flow global block, and is the recommended first measurement on unfamiliar hardware.
 
 ---
 

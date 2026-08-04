@@ -1,7 +1,8 @@
 ---
 layout: default
 title: Benchmark — BNS PE with FD relative binning + HMC (Cosmic Explorer)
-nav_order: 104
+nav_order: 4
+parent: Ongoing
 ---
 
 # BNS parameter estimation at Cosmic Explorer, in about three minutes
@@ -291,25 +292,45 @@ everywhere (a 40+40 M☉ signal is in band for ~5 s from 10 Hz); distance is sol
 comparable-but-not-identical network SNR (~18–23) via the exact 1/D scaling now exposed
 as `--target-snr` on `run_bns_ce_pe.py` itself.
 
-| M_tot (M☉) | SNR | duration | time to converge | R̂_max | min ESS |
-|---:|---:|---:|---:|---:|---:|
-| 2.80 (BNS) | 21.6 | 2048 s | 3.39 min | 1.0098 | 9,492 |
-| 5.47 | 19.6 | 512 s | 3.33 min | 1.0097 | 12,617 |
-| 10.70 | 22.2 | 256 s | 2.60 min | 1.0092 | 12,185 |
-| 20.93 | 21.2 | 64 s | 2.10 min | 1.0099 | 9,741 |
-| 40.92 | 17.6 | 32 s | 1.88 min | 1.0074 | 10,833 |
-| 80.00 (BBH) | 22.9 | 8 s | 1.80 min | 1.0096 | 14,623 |
+| M_tot (M☉) | SNR | duration | bins | blocks | s/block | time to converge | R̂_max | min ESS |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2.80 (BNS) | 21.6 | 2048 s | 125 | 28 | 3.66 | 3.39 min | 1.0098 | 9,492 |
+| 5.47 | 19.6 | 512 s | 125 | 32 | 3.68 | 3.33 min | 1.0097 | 12,617 |
+| 10.70 | 22.2 | 256 s | 125 | 20 | 3.66 | 2.60 min | 1.0092 | 12,185 |
+| 20.93 | 21.2 | 64 s | 125 | 12 | 3.76 | 2.10 min | 1.0099 | 9,741 |
+| 40.92 | 17.6 | 32 s | 125 | 9 | 4.06 | 1.88 min | 1.0074 | 10,833 |
+| 80.00 (BBH) | 22.9 | 8 s | 124 | 8 | 3.97 | 1.80 min | 1.0096 | 14,623 |
+
+Bin and block counts are read from each injection's `run.log`; unlike the stage timings
+they are not in the committed CSV.
 
 ![Wall-clock time to convergence versus total mass, log-x, for six injections from 2.8 to 80 solar masses, all converged](assets/mass_sweep_completion_time.png)
 
 All six converge on the same R̂/ESS gate as everywhere else on this page, and completion
 time falls **monotonically** with mass, 3.39 → 1.80 min, rather than growing or
-non-monotonically wandering. That is the expected direction — higher mass means a
-shorter segment and fewer relative-binning bins, so it is cheaper per gradient, not just
-per second of data — but it was an assumption in the "What is left" section below until
-this sweep measured it. It is not proof the sampler's *hyperparameters* (flow spline
-interval, equilibration rounds, ...) are optimal all the way to 80 M☉, only that the
-BNS-tuned defaults, left untouched, still reach the same convergence gate there.
+non-monotonically wandering. That direction was an assumption in the "What is left"
+section below until this sweep measured it.
+
+**The mechanism is not the one originally claimed here.** The obvious reading — higher
+mass, shorter segment, fewer relative-binning bins, therefore cheaper per gradient — is
+wrong on both halves, and the sweep's own artefacts say so. Bin count is set by
+`--epsilon`, not by mass: the logs record `3754394 band points -> 125 bins` at 2.8 M☉ and
+`14666 -> 124 bins` at 80 M☉, with every injection in between also at 125. Cost per
+gradient is flat too — warmup is a fixed 5 blocks, so its wall clock probes that cost
+directly, and it varies by **2 %** (13.76–14.03 s) across a 29× mass range. Per production
+block is flat to 11 % and, if anything, *rises* with mass.
+
+What falls is the **block count to convergence, 28 → 8**. This is a mixing result, not a
+cost result. The remainder of the decline is the CPU-side setup that genuinely does scale
+with segment duration (injection, SNR rescale, RB summary, RB validation: 29.0 s at
+2.8 M☉ → 12.2 s at 80 M☉), sitting on a ~38 s floor (MAP+Laplace, warmup, flow fit) that
+does not move at all. *Why* mixing improves with mass is not established here — the
+natural reading is that fewer in-band cycles leave a broader, less curved M_c–η ridge, but
+this sweep measures the block count, not the mechanism behind it.
+
+None of this is proof the sampler's *hyperparameters* (flow spline interval, equilibration
+rounds, ...) are optimal all the way to 80 M☉, only that the BNS-tuned defaults, left
+untouched, still reach the same convergence gate there.
 
 Raw sweep output: [`mass_sweep_summary.csv`](assets/mass_sweep_summary.csv); figure via
 `python bin/plot_mass_sweep_timing.py <sweep_summary.csv>`.
@@ -526,8 +547,47 @@ sampler was given an advantage, because none of them got a result.
 
 ![Grouped-bar comparison of wall clock per sampler for each binary, production-only and end-to-end, with hatched bars marking runs that exhausted the budget](assets/sampler_timing_comparison.png)
 
-The figure is grouped by binary rather than plotted against mass on purpose: cost here
-tracks bin count, and a line against a mass axis would draw a trend that does not exist.
+The figure is grouped by binary rather than plotted against mass on purpose. Along that
+axis mass co-varies with two quantities the six-injection sweep above held fixed, and both
+move cost more than mass does.
+
+**Bin count**, through the ε refinement. Warmup is a fixed 5 blocks, so its wall clock
+probes per-gradient cost directly: 53–84 s at 125 bins against 149–178 s at ~490 bins —
+**2.26× the cost for 4.0× the bins** (≈ bins^0.59, not the near-flat scaling that holds at
+125 bins on the GPU). The abandoned 12.4 M☉ case is a third point on the same curve and
+lands on the same exponent: 617 s of warmup at 6 375 bins is 8.7× the 125-bin cost for
+51× the bins, or bins^0.55. The three 490+ bin runs are exactly the three most expensive
+HMC runs; separation by bin count is perfect. And because the refinement is a hard-threshold
+quartering ladder, it is *discontinuous* in mass rather than trending with it: 4.1 M☉
+needs 499 bins under narrow NS spin priors, while 26.2 and 80.0 M☉ need 125 under ±0.9.
+
+**Spin prior width**, through the NS/BH classification at 3 M☉ per component. The
+chirp-mass prior is ±10 % of truth and η is always [0.2, 0.25], so spin is the only prior
+box that differs from the sweep: (0, 0.05) there against ±0.05 or ±0.9 here — 18× wider
+per dimension, stepping partway along the mass axis at M_tot ≈ 6 M☉.
+
+Control for both and HMC's mass scaling is the *same* as the sweep's. Every homogeneous
+subgroup declines:
+
+| subgroup | end-to-end minutes, in increasing mass |
+|---|---|
+| 125 bins, ±0.05 spin | 2.8 → **21.8**, 5.9 → **11.4** |
+| 125 bins, ±0.9 spin | 26.2 → **26.1**, 80.0 → **13.1** |
+| ~490 bins | 4.1 → **69.0**, 8.6 → **64.8**, 55.1 → **46.5** |
+
+The last row is not prior-homogeneous — 4.1 M☉ is ±0.05, the other two ±0.9 — so it mixes
+both effects; the first two rows are clean. The offset between those two rows is the
+prior-width cost made visible: at a common 125 bins, 26.2 M☉ costs *more* than 2.8 M☉,
+inverting the sweep's ordering entirely, which puts the ±0.9 penalty at roughly 3× (a
+displacement from the within-tier trend, not a fit). So the non-monotonicity here is
+produced by interleaving three cost tiers along one axis, and a line against a mass axis
+would draw neither the trend that exists nor the one it appears to show.
+
+Two limits on this decomposition: the per-kernel run logs are not retained, so it rests on
+the stage timings in the committed CSVs with no production block counts to check it
+against; and these runs shared a 12-core CPU two at a time, the likely source of the
+53–84 s scatter within the 125-bin warmups where the GPU sweep's equivalent scatter is
+2 %.
 
 ### Medians agree; the distributions differ at the boundary
 
@@ -675,9 +735,12 @@ four alongside it. Figures via
 
 Production is still ~55 % of the run, and the dominant term is the IMRPhenomD gradient
 itself: a long serial dependency chain (~3600 instructions, 5 fusions) whose cost is
-sublinear in chains and nearly flat in bin count. Trajectory length is at its measured
-knee, the flow is at its measured knee, and both halves of the preamble are load-bearing
-in both directions.
+sublinear in chains and — *at this benchmark's 125 bins on the T2000* — nearly flat in bin
+count. That flatness is a small-n, latency-bound regime rather than a general property: on
+CPU the same gradient costs 2.3× more at ~490 bins and 8.7× more at 6 375 bins, i.e.
+roughly bins^0.55–0.6 (see the five-kernel section). Trajectory length is at its
+measured knee, the flow is at its measured knee, and both halves of the preamble are
+load-bearing in both directions.
 
 - **Different hardware.** fp64 throughput is what matters here, and it is *not* a
   professional-versus-consumer distinction: the T2000 and the A40 both run fp64 at 1/32

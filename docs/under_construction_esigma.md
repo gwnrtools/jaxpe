@@ -1,7 +1,8 @@
 ---
 layout: default
 title: ESIGMA — ISCO & Inspiral Termination
-nav_order: 100
+nav_order: 7
+parent: Ongoing
 ---
 
 # ESIGMA Inspiral Termination: `x_final`, the ISCO, and Spin
