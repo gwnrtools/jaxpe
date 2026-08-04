@@ -19,6 +19,9 @@ dependencies = [
     "scipy",
 ]
 
+[project.scripts]
+jaxpe = "jaxpe.cli:main"
+
 [project.optional-dependencies]
 plot = ["matplotlib", "corner"]
 gw = ["ripplegw", "JaxNRSur"]
