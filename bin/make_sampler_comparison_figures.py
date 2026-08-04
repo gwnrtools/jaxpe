@@ -40,7 +40,6 @@ Run:
 """
 
 import argparse
-import sys
 from pathlib import Path
 
 import matplotlib
@@ -49,12 +48,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-# bin/ is a script directory, not an installed package, so the sibling module is
-# imported by path rather than by distribution -- the derived-parameter and
-# axis-scaling helpers must be the SAME code that draws the single-sampler corner
-# plots, or the two figure families would silently disagree on m1/m2/chi_eff.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from make_bns_ce_figures import _chirp_mass_offset_scale, _derived_m1_m2_chieff
+from jaxpe.diagnostics.plots import _chirp_mass_offset_scale, _derived_m1_m2_chieff
 
 INK, MUTED = "#0b0b0b", "#52514e"
 

@@ -119,45 +119,7 @@ def load_runs(rundir, csv):
     }, str(csv)
 
 
-def _derived_m1_m2_chieff(s, truth, i):
-    """(m1, m2, chi_eff) per sample and at the truth, from (chirp_mass, eta, spins).
-
-    m1, m2, chi_eff are not themselves sampled -- they are the standard invertible
-    map from (chirp_mass, eta) to component masses (m1 >= m2, same convention as
-    ``eta_to_q`` in run_bns_ce_pe.py) plus the mass-weighted spin combination
-    chi_eff = (m1 spin1z + m2 spin2z)/(m1+m2). Computed identically for every
-    sample and for the truth so the two are directly comparable.
-    """
-
-    def convert(mc, eta, s1, s2):
-        mtot = mc * eta ** (-0.6)
-        delta = np.sqrt(np.clip(1.0 - 4.0 * eta, 0.0, None))
-        m1 = mtot * (1.0 + delta) / 2.0
-        m2 = mtot * (1.0 - delta) / 2.0
-        chi_eff = (m1 * s1 + m2 * s2) / mtot
-        return m1, m2, chi_eff
-
-    m1, m2, chi_eff = convert(
-        s[:, i["chirp_mass"]], s[:, i["eta"]], s[:, i["spin1z"]], s[:, i["spin2z"]]
-    )
-    m1_t, m2_t, chieff_t = convert(
-        truth[i["chirp_mass"]], truth[i["eta"]], truth[i["spin1z"]], truth[i["spin2z"]]
-    )
-    return m1, m2, chi_eff, m1_t, m2_t, chieff_t
-
-
-def _chirp_mass_offset_scale(spread):
-    """Power-of-ten multiplier putting an O(spread)-wide offset into O(1-10) units.
-
-    The chirp-mass posterior is ~1e-6 Msun wide for a BNS but ~0.1-1 Msun wide for
-    an 80 Msun BBH (same relative SNR, very different absolute precision) -- a
-    fixed 1e6 multiplier that reads well for one is unreadable for the other, so
-    the scale is derived from the actual spread each time rather than hardcoded.
-    """
-    if spread <= 0:
-        return 1.0, 0
-    exp = int(np.floor(np.log10(spread)))
-    return 10.0**-exp, exp
+from jaxpe.diagnostics.plots import _derived_m1_m2_chieff, _chirp_mass_offset_scale
 
 
 def corner_figure(npz, out, *, title=None, info_lines=None):

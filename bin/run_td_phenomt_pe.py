@@ -100,6 +100,7 @@ import jax
 jax.config.update("jax_compilation_cache_dir", os.path.expanduser("~/.cache/jaxpe_xla"))
 jax.config.update("jax_persistent_cache_min_compile_time_secs", 1.0)
 import jax
+
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import numpy as np
@@ -108,11 +109,7 @@ from jaxpe.core.priors import JointPrior, Uniform
 from jaxpe.core.problem import InferenceProblem
 from jaxpe.diagnostics.stats import effective_sample_size, split_rhat
 from jaxpe.gw import IMRPhenomT, make_injection
-from jaxpe.gw.detectors import EARTH_OMEGA
 
-from jaxpe.gw.harmonics import spin_weighted_ylm
-from jaxpe.gw.detectors import gmst_from_gps
-from jaxpe.gw.likelihood.base import project_to_detector
 from jaxpe.kernels import (
     HMC,
     MALA,
@@ -150,7 +147,9 @@ def _make_kernel(name, step_size, *, n_leapfrog, friction, cov):
     """
     diag_scale = np.sqrt(np.diag(cov))
     if name == "hmc":
-        return HMC(step_size=step_size, n_leapfrog=n_leapfrog, scale=np.linalg.cholesky(cov))
+        return HMC(
+            step_size=step_size, n_leapfrog=n_leapfrog, scale=np.linalg.cholesky(cov)
+        )
     if name == "mala":
         return MALA(step_size=step_size, scale=diag_scale)
     if name == "mmala":
@@ -192,10 +191,9 @@ def eta_to_q(eta):
     return (1.0 - delta) / (1.0 + delta)
 
 
-
 def build_loglike(dense_like, fixed, f32: bool = False):
     import jax.numpy as jnp
-    
+
     base = {k: v for k, v in fixed.items()}
 
     def loglike(p):
@@ -208,16 +206,17 @@ def build_loglike(dense_like, fixed, f32: bool = False):
             full = {k: jnp.asarray(v, jnp.float32) for k, v in full.items()}
         else:
             full = {k: jnp.asarray(v) for k, v in full.items()}
-            
+
         return dense_like.log_likelihood(full)
 
     return loglike
 
+
 # ----------------------------------------------------------------------- validation
+
 
 def validate_rb(*args, **kwargs):
     pass
-
 
 
 # ------------------------------------------------------------------------- sampling
@@ -633,7 +632,12 @@ def run_pe(problem, y_map, cov0, args, timings):
     # flow-only, which loses the local moves that cover wherever the flow is wrong.
     # Fall back to the (conservative, too-narrow but valid) Laplace metric. HMC-only,
     # same reason as the swap above (rebuilds an HMC(...) with the Laplace scale).
-    if args.kernel == "hmc" and acc_rt is not None and acc_rt < 0.05 and args.ensemble_metric:
+    if (
+        args.kernel == "hmc"
+        and acc_rt is not None
+        and acc_rt < 0.05
+        and args.ensemble_metric
+    ):
         print(
             f"  local acceptance {acc_rt:.2f} after retune -> reverting to the "
             "Laplace metric"
@@ -845,7 +849,10 @@ def run_pe(problem, y_map, cov0, args, timings):
                 # reproducibility, and it keeps its guard.
                 key, k_fitw = jax.random.split(key)
                 flow_wide, _ = fit_flow(
-                    k_fitw, flow_wide, flow_train_set(k_fitw), n_epochs=15,
+                    k_fitw,
+                    flow_wide,
+                    flow_train_set(k_fitw),
+                    n_epochs=15,
                     batch_size=512,
                 )
     timings["production"] = time.perf_counter() - t0
@@ -886,10 +893,16 @@ def main():
         "--spin-max", type=float, default=0.05, help="upper edge of the spin priors"
     )
     ap.add_argument(
-        "--spin1z", type=float, default=0.0, help="injected aligned-spin truth, component 1"
+        "--spin1z",
+        type=float,
+        default=0.0,
+        help="injected aligned-spin truth, component 1",
     )
     ap.add_argument(
-        "--spin2z", type=float, default=0.0, help="injected aligned-spin truth, component 2"
+        "--spin2z",
+        type=float,
+        default=0.0,
+        help="injected aligned-spin truth, component 2",
     )
     ap.add_argument("--phase-per-bin", type=float, default=0.5)
     ap.add_argument("--epsilon", type=float, default=0.25, help="RB phase per bin")
@@ -1149,6 +1162,7 @@ def main():
         )
         x_init = np.clip(x_fid, lo + inset, hi - inset)
         import jax.numpy as jnp
+
         y_init = np.asarray(prior.to_unconstrained(jnp.asarray(x_init)))
         t0 = time.perf_counter()
         y_map, cov0, logp_map = map_laplace(problem, y_init)
@@ -1161,9 +1175,6 @@ def main():
 
         t0 = time.perf_counter()
         # physical-space posterior scale: sigma_y * |dx/dy| (bijections elementwise)
-        jac = np.asarray(jax.jacfwd(prior.to_physical)(jnp.asarray(y_map)))
-        sigma_phys = np.sqrt(np.diag(cov0)) * np.abs(np.diag(jac))
-        rng = np.random.default_rng(args.seed)
         # sampled-space truth (eta from the actual component masses, not assumed 1/4)
         # sampled-space truth (eta from the actual component masses, not assumed 1/4)
         x_true = np.array([mc_true, eta_true, truth["spin1z"], truth["spin2z"]])
@@ -1216,9 +1227,9 @@ def main():
         json.dump(
             {
                 **{k: float(v) for k, v in timings.items()},
+                "wall_min": total_min,
                 "converged": converged,
                 "backend": jax.default_backend(),
-                "n_bins": int(n_bins),
                 "n_chains": int(args.n_chains),
                 "network_snr": net_snr,
                 "step_size": float(kernel.step_size),
