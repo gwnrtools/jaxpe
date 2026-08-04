@@ -109,7 +109,7 @@ floor built by splitting one sampler's own chains in half and computing the same
 statistic; the comparison worth reporting is the ratio to that floor. A JS that looks
 alarming at $$5\times10^{-3}$$ may sit at or below the Monte-Carlo floor for the sample
 size in hand — this is worked through concretely in the
-[BNS benchmark]({{ site.baseurl }}/docs/bns_ce_pe_benchmark.html), where it reversed a
+[BNS benchmark]({{ site.baseurl }}/docs/ongoing/bns_ce_pe_benchmark.html), where it reversed a
 published conclusion. The estimator is histogram-based, so `bins` is a real analysis
 choice, not a formality.
 

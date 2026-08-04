@@ -33,7 +33,7 @@ expensive log-likelihood from a few hundred carefully chosen evaluations, sample
 surrogate cheaply, and correct the result back to the exact posterior by importance
 reweighting. The design rationale, the profiling that motivates it, and the measured
 cost breakdown live in
-[the GPry-fusion design note]({{ site.baseurl }}/docs/gpry_fusion_design.html); this page
+[the GPry-fusion design note]({{ site.baseurl }}/docs/ongoing/gpry_fusion_design.html); this page
 documents the interface and the mathematics.
 
 ---

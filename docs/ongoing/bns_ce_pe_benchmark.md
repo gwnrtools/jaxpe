@@ -7,7 +7,7 @@ parent: Ongoing
 
 # BNS parameter estimation at Cosmic Explorer, in about three minutes
 
-Driver: [`bin/run_bns_ce_pe.py`](../bin/run_bns_ce_pe.py)
+Driver: [`bin/run_bns_ce_pe.py`](../../bin/run_bns_ce_pe.py)
 
 End-to-end parameter estimation on a binary-neutron-star injection as a
 next-generation detector would see it: m1 = m2 = 1.4 M☉, zero spins, f_lower = 10 Hz,
@@ -37,7 +37,7 @@ All timings assume a warm persistent XLA cache (`~/.cache/jaxpe_xla`), which the
 invocation populates. Compilation is excluded deliberately; it is a one-off, and
 including it measures the compiler rather than the sampler.
 
-![Wall-clock breakdown by pipeline stage across the configurations tried, from the 15.4-minute reference down to the shipped configuration](assets/bns_ce_speed_stages.png)
+![Wall-clock breakdown by pipeline stage across the configurations tried, from the 15.4-minute reference down to the shipped configuration](../assets/bns_ce_speed_stages.png)
 
 Where the 209 s of the seed-42 run goes: setup 40 s (PSD, injection, relative-binning
 summary data, MAP + Laplace, validation), warmup 14 s, flow fit 7 s, equilibration
@@ -96,7 +96,7 @@ What found the bug was switching from *point* measurements to a *scaling* fit. A
 that balances at one configuration tells you nothing about what happens when the
 configuration changes; fitting `T = fixed + marginal × work` across several sizes
 exposed a 2.254 s intercept immediately. That profiler is now a committed tool,
-[`bin/profile_sampler_scaling.py`](../bin/profile_sampler_scaling.py) — worth running
+[`bin/profile_sampler_scaling.py`](../../bin/profile_sampler_scaling.py) — worth running
 first on any new hardware, since the interesting question there is *which* costs move.
 
 ---
@@ -217,7 +217,7 @@ single-seed runs on this problem are not resolved by the data.
 ## Correctness
 
 The fast configuration is compared to the 15.4-minute reference sample-set to
-sample-set with [`bin/compare_bns_posteriors.py`](../bin/compare_bns_posteriors.py):
+sample-set with [`bin/compare_bns_posteriors.py`](../../bin/compare_bns_posteriors.py):
 
 | comparison | worst JS | worst median shift |
 |---|---|---|
@@ -231,7 +231,7 @@ acceptance threshold. (The 1e-3 figure quoted in the relative-binning status pag
 belongs to a deterministic grid comparison with no Monte Carlo noise and does not
 transfer to sample-based comparisons at these sizes.)
 
-![Corner plot of the BNS/CE posterior over chirp mass, eta, spin1z, spin2z, and the derived m1, m2, chi_eff, with the injection marked in orange](assets/bns_ce_corner.png)
+![Corner plot of the BNS/CE posterior over chirp mass, eta, spin1z, spin2z, and the derived m1, m2, chi_eff, with the injection marked in orange](../assets/bns_ce_corner.png)
 
 Median chirp mass 1.2187730 M☉ against an injected 1.2187707 — a measurement to roughly
 one part in 10⁶, which is what SNR 607 over a ~1000 s inspiral buys. Chirp mass is drawn
@@ -282,7 +282,7 @@ needed 42. A cap that turns "needs slightly longer" into "failed" is measuring t
 ### Beyond BNS: a mass sweep to 80 M☉
 
 The 1.35 + 1.25 M☉ check above verifies the configuration survives a *slightly*
-unequal BNS. [`bin/run_mass_sweep_pe.py`](../bin/run_mass_sweep_pe.py) pushes the same
+unequal BNS. [`bin/run_mass_sweep_pe.py`](../../bin/run_mass_sweep_pe.py) pushes the same
 question much further: six equal-mass injections, log-spaced in total mass from 2.8 M☉
 (BNS) to 80 M☉ (BBH), each run unmodified through this page's exact HMC + flow pipeline
 via `run_bns_ce_pe.py` — same code, same defaults, only `--mass1/--mass2`, segment
@@ -304,7 +304,7 @@ as `--target-snr` on `run_bns_ce_pe.py` itself.
 Bin and block counts are read from each injection's `run.log`; unlike the stage timings
 they are not in the committed CSV.
 
-![Wall-clock time to convergence versus total mass, log-x, for six injections from 2.8 to 80 solar masses, all converged](assets/mass_sweep_completion_time.png)
+![Wall-clock time to convergence versus total mass, log-x, for six injections from 2.8 to 80 solar masses, all converged](../assets/mass_sweep_completion_time.png)
 
 All six converge on the same R̂/ESS gate as everywhere else on this page, and completion
 time falls **monotonically** with mass, 3.39 → 1.80 min, rather than growing or
@@ -332,7 +332,7 @@ None of this is proof the sampler's *hyperparameters* (flow spline interval, equ
 rounds, ...) are optimal all the way to 80 M☉, only that the BNS-tuned defaults, left
 untouched, still reach the same convergence gate there.
 
-Raw sweep output: [`mass_sweep_summary.csv`](assets/mass_sweep_summary.csv); figure via
+Raw sweep output: [`mass_sweep_summary.csv`](../assets/mass_sweep_summary.csv); figure via
 `python bin/plot_mass_sweep_timing.py <sweep_summary.csv>`.
 
 #### Posteriors across the sweep
@@ -363,17 +363,17 @@ directly in the corner plots below and are already discussed for the BNS case ea
 on this page; the table above is the same statement made quantitative at every mass in
 the sweep.
 
-![Posterior corner plot, m1 = m2 = 1.40 M☉ (BNS), SNR 22, converged in 3.4 min](assets/mass_sweep_corner_inj00_M2.8.png)
+![Posterior corner plot, m1 = m2 = 1.40 M☉ (BNS), SNR 22, converged in 3.4 min](../assets/mass_sweep_corner_inj00_M2.8.png)
 
-![Posterior corner plot, m1 = m2 = 2.74 M☉, SNR 20, converged in 3.3 min](assets/mass_sweep_corner_inj01_M5.5.png)
+![Posterior corner plot, m1 = m2 = 2.74 M☉, SNR 20, converged in 3.3 min](../assets/mass_sweep_corner_inj01_M5.5.png)
 
-![Posterior corner plot, m1 = m2 = 5.35 M☉, SNR 22, converged in 2.6 min](assets/mass_sweep_corner_inj02_M10.7.png)
+![Posterior corner plot, m1 = m2 = 5.35 M☉, SNR 22, converged in 2.6 min](../assets/mass_sweep_corner_inj02_M10.7.png)
 
-![Posterior corner plot, m1 = m2 = 10.46 M☉, SNR 21, converged in 2.1 min](assets/mass_sweep_corner_inj03_M20.9.png)
+![Posterior corner plot, m1 = m2 = 10.46 M☉, SNR 21, converged in 2.1 min](../assets/mass_sweep_corner_inj03_M20.9.png)
 
-![Posterior corner plot, m1 = m2 = 20.46 M☉, SNR 18, converged in 1.9 min](assets/mass_sweep_corner_inj04_M40.9.png)
+![Posterior corner plot, m1 = m2 = 20.46 M☉, SNR 18, converged in 1.9 min](../assets/mass_sweep_corner_inj04_M40.9.png)
 
-![Posterior corner plot, m1 = m2 = 40.00 M☉ (BBH), SNR 23, converged in 1.8 min](assets/mass_sweep_corner_inj05_M80.0.png)
+![Posterior corner plot, m1 = m2 = 40.00 M☉ (BBH), SNR 23, converged in 1.8 min](../assets/mass_sweep_corner_inj05_M80.0.png)
 
 A trend is visible across the set that has nothing to do with sampler performance and
 everything to do with the physics: **the spin1z/spin2z marginals flatten as mass
@@ -545,7 +545,7 @@ each run is hours, and the fifteen runs (three injections × five kernels) are t
 hours on this hardware. They were abandoned rather than reported as fast failures; no
 sampler was given an advantage, because none of them got a result.
 
-![Grouped-bar comparison of wall clock per sampler for each binary, production-only and end-to-end, with hatched bars marking runs that exhausted the budget](assets/sampler_timing_comparison.png)
+![Grouped-bar comparison of wall clock per sampler for each binary, production-only and end-to-end, with hatched bars marking runs that exhausted the budget](../assets/sampler_timing_comparison.png)
 
 The figure is grouped by binary rather than plotted against mass on purpose. Along that
 axis mass co-varies with two quantities the six-injection sweep above held fixed, and both
@@ -605,7 +605,7 @@ All four land in the right place to within half a σ. A median is one number fro
 four-dimensional distribution, and it is the number every kernel here gets right.
 
 Jensen–Shannon divergence against HMC (same estimator as
-[`compare_bns_posteriors.py`](../bin/compare_bns_posteriors.py)) is more discriminating.
+[`compare_bns_posteriors.py`](../../bin/compare_bns_posteriors.py)) is more discriminating.
 Referred to a null built by splitting HMC's *own* chains in half — the honest Monte-Carlo
 floor, since any two finite samples of the same distribution have JS > 0 — the median
 over all 28 (binary, parameter) pairs is:
@@ -696,19 +696,19 @@ and a count histogram would read a longer run as a taller posterior. Axis ranges
 union of each kernel's 0.5–99.5 percentile box, so a kernel that sampled somewhere else
 widens the frame rather than vanishing off the edge of its own comparison.
 
-![All five samplers overlaid, 2.8 solar mass BNS](assets/sampler_corner_inj00_M2.8.png)
+![All five samplers overlaid, 2.8 solar mass BNS](../assets/sampler_corner_inj00_M2.8.png)
 
-![All five samplers overlaid, 4.1 solar masses](assets/sampler_corner_inj01_M4.1.png)
+![All five samplers overlaid, 4.1 solar masses](../assets/sampler_corner_inj01_M4.1.png)
 
-![All five samplers overlaid, 5.9 solar masses](assets/sampler_corner_inj02_M5.9.png)
+![All five samplers overlaid, 5.9 solar masses](../assets/sampler_corner_inj02_M5.9.png)
 
-![All five samplers overlaid, 8.6 solar masses](assets/sampler_corner_inj03_M8.6.png)
+![All five samplers overlaid, 8.6 solar masses](../assets/sampler_corner_inj03_M8.6.png)
 
-![All five samplers overlaid, 26.2 solar masses](assets/sampler_corner_inj06_M26.2.png)
+![All five samplers overlaid, 26.2 solar masses](../assets/sampler_corner_inj06_M26.2.png)
 
-![All five samplers overlaid, 55.1 solar masses](assets/sampler_corner_inj08_M55.1.png)
+![All five samplers overlaid, 55.1 solar masses](../assets/sampler_corner_inj08_M55.1.png)
 
-![All five samplers overlaid, 80.0 solar masses](assets/sampler_corner_inj09_M80.0.png)
+![All five samplers overlaid, 80.0 solar masses](../assets/sampler_corner_inj09_M80.0.png)
 
 All five contour sets now sit on top of one another in most panels of most figures —
 including ULD's, which in the first pass of this suite sat somewhere else entirely. Where
@@ -725,7 +725,7 @@ are barely measured, and at 55.1 M☉ the injected +0.590/−0.622 pair (χ_eff 
 recovers as two broad marginals peaked near zero with the *combination* constrained —
 which is why χ_eff is carried as its own panel rather than left to be reconstructed.
 
-Raw per-kernel output: [`sampler_sweep_hmc.csv`](assets/sampler_sweep_hmc.csv) and the
+Raw per-kernel output: [`sampler_sweep_hmc.csv`](../assets/sampler_sweep_hmc.csv) and the
 four alongside it. Figures via
 `python bin/make_sampler_comparison_figures.py --root <sweep root>`.
 
@@ -798,16 +798,16 @@ CUDA_VISIBLE_DEVICES=0 python bin/run_mass_sweep_pe.py $COMMON \
     --kernel uld --outdir $ROOT/uld --step-size-from $ROOT/mala
 ```
 
-[`bin/make_bns_ce_figures.py`](../bin/make_bns_ce_figures.py) rebuilds all three figures
+[`bin/make_bns_ce_figures.py`](../../bin/make_bns_ce_figures.py) rebuilds all three figures
 from run artefacts, so every number on the axes traces back to a measurement rather than
 to this page. The convergence series and the per-configuration stage timings are cached
-to [`bns_ce_convergence.csv`](assets/bns_ce_convergence.csv) and
-[`bns_ce_speed_stages.csv`](assets/bns_ce_speed_stages.csv) — raw run logs fall under the
+to [`bns_ce_convergence.csv`](../assets/bns_ce_convergence.csv) and
+[`bns_ce_speed_stages.csv`](../assets/bns_ce_speed_stages.csv) — raw run logs fall under the
 repository's `*.log` ignore, so those CSVs are the committed evidence and the figures
 regenerate from a clean checkout. The corner plot needs `samples.npz` (~1–2M × 4
 float64, deliberately untracked); rerun the PE to regenerate it.
 
-![Convergence against wall clock for the original three GPU runs: rank-normalized split-Rhat and Geyer min ESS versus total elapsed minutes](assets/bns_ce_convergence.png)
+![Convergence against wall clock for the original three GPU runs: rank-normalized split-Rhat and Geyer min ESS versus total elapsed minutes](../assets/bns_ce_convergence.png)
 
 This figure is from the original 20-minute-budget round and is kept for the failure mode
 it captures: the run that froze its flow (middle series) kept accumulating ESS at a

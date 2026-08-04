@@ -69,8 +69,8 @@ jaxpe must support PE with two classes of waveform models:
 
 1. **Case (1) — JAX-implemented models** (frequency- and time-domain): `IMRPhenomD` (ripple),
    `ESIGMA`, `NRSur7dq4` (JaxNRSur) — cheap (ms-scale), differentiable, GPU-batched. Sampled
-   directly with jaxpe's gradient/NF samplers ([`jaxpe/sampler/global_local.py`](../jaxpe/sampler/global_local.py),
-   [`jaxpe/kernels/`](../jaxpe/kernels/)).
+   directly with jaxpe's gradient/NF samplers ([`jaxpe/sampler/global_local.py`](https://github.com/gwnrtools/jaxpe/blob/master/jaxpe/sampler/global_local.py),
+   [`jaxpe/kernels/`](https://github.com/gwnrtools/jaxpe/blob/master/jaxpe/kernels/)).
 2. **Case (2) — non-JAX models**, mostly time-domain, carrying leading-edge physics:
    **TEOBResumS** and **SEOBNRv6EHM**. Per-call cost **0.5–10 minutes**. Non-differentiable
    black boxes. **Precession is in scope from day one.**
@@ -294,7 +294,7 @@ two of them — φ_c and the sky angles — turned out to need methods stronger 
 naive quadrature, a Phase-0 discovery flagged inline below.*
 
 New module `jaxpe/gw/marginalized.py`, sibling of
-[`jaxpe/gw/likelihood.py`](../jaxpe/gw/likelihood.py) and reusing its detector projection
+[`jaxpe/gw/likelihood.py`](https://github.com/gwnrtools/jaxpe/blob/master/jaxpe/gw/likelihood/) and reusing its detector projection
 (`project_to_detector`), PSD, and Whittle inner products:
 
 ```
@@ -304,7 +304,7 @@ New module `jaxpe/gw/marginalized.py`, sibling of
 Structure of the marginalization (all in float64):
 
 - **modes → detector**: condition (taper/resample to uniform Δt — reuse
-  [`jaxpe/gw/conditioning.py`](../jaxpe/gw/conditioning.py)), FFT once per mode; polarizations
+  [`jaxpe/gw/conditioning.py`](https://github.com/gwnrtools/jaxpe/blob/master/jaxpe/gw/conditioning.py)), FFT once per mode; polarizations
   from $$\sum_{\ell m} h_{\ell m}\, {}_{-2}Y_{\ell m}(\iota, \phi_c)$$.
 - **$$D_L$$**: Gaussian in $$u = d_{\rm ref}/D_L$$ given $$\langle d\mid h\rangle, \langle h\mid h\rangle$$;
   power-law prior via **adaptive Gauss-Legendre on a peak-tracking window** (fixed nodes
@@ -422,7 +422,7 @@ bin/
 - `pyproject.toml`: new optional group `surrogate = ["gpry"]` (pin the version; TEOBResumS /
   SEOBNRv6EHM bindings documented per-model, not hard dependencies).
 - `ExternalModeModel` is deliberately **not** a
-  [`WaveformModel`](../jaxpe/gw/cbc_models/base.py) subclass — that ABC promises JAX
+  [`WaveformModel`](https://github.com/gwnrtools/jaxpe/blob/master/jaxpe/gw/cbc_models/base.py) subclass — that ABC promises JAX
   traceability; these wrappers must not.
 
 ---
@@ -561,7 +561,7 @@ heavy math into `_hlms_window`/`_hlms_with_adjoint`; ESIGMA regression suite 4/4
 unchanged, including gradient-vs-FD). The full-marginal (adaptive-IS) end-to-end run
 converged in 58 truth evaluations with f0/span recovered within 1σ, consistent with
 the fixed-sky run — at ~12 s per ℒ(θᵢ) call the non-truth share was 0.16
-(posterior overlay: [`examples/output/gpry_full_vs_fixed_corner.png`](../examples/output/gpry_full_vs_fixed_corner.png)).
+(posterior overlay: [`examples/output/gpry_full_vs_fixed_corner.png`](../../examples/output/gpry_full_vs_fixed_corner.png)).
 The ESIGMA pseudo-black-box test passes with the D3 IS-reweighting exactness check
 (ESS/N ≈ 0.25 on its multi-lobed surface; catastrophic-failure line at 0.05).
 
@@ -681,8 +681,8 @@ case-(2) models. Four findings from getting both routes to converge:
 2. **The T2000 GPU was 2.6× *slower* than CPU for full ESIGMA gradient PE** (6924 s GPU
    vs 2632 s CPU, matched config). This is **not** a data-movement artifact: the MCMC is
    fully device-resident — `run_chains` compiles the whole step loop into one
-   `jit(vmap(chains) × lax.scan(steps))` block ([`jaxpe/kernels/base.py:126`](../jaxpe/kernels/base.py#L126)),
-   and the global block likewise ([`jaxpe/sampler/global_local.py:227`](../jaxpe/sampler/global_local.py#L227));
+   `jit(vmap(chains) × lax.scan(steps))` block ([`jaxpe/kernels/base.py:126`](https://github.com/gwnrtools/jaxpe/blob/master/jaxpe/kernels/base.py#L126)),
+   and the global block likewise ([`jaxpe/sampler/global_local.py:227`](https://github.com/gwnrtools/jaxpe/blob/master/jaxpe/sampler/global_local.py#L227));
    the only host↔device traffic is a few per-*loop* scalar `float(mean(acc))` syncs and
    checkpoints, negligible in bandwidth. The slowdown is architectural fit: the per-step
    cost is dominated by the ESIGMA diffrax ODE solve + forward-sensitivity gradient,
@@ -692,7 +692,7 @@ case-(2) models. Four findings from getting both routes to converge:
    consumer Turing T2000 runs at ~1/32 of fp32. Sequential × tiny-batch × throttled-fp64
    means the GPU pays all three weaknesses and collects none of its throughput strength;
    the CPU wins on serial fp64 latency. (Contrast: the wide vmapped `best_of_prior_init`
-   batch eval, [`jaxpe/sampler/global_local.py:200`](../jaxpe/sampler/global_local.py#L200),
+   batch eval, [`jaxpe/sampler/global_local.py:200`](https://github.com/gwnrtools/jaxpe/blob/master/jaxpe/sampler/global_local.py#L200),
    *is* GPU-favorable — width, not depth, is the lever.)
 3. **`n_ode_grid=512` biases the log-likelihood by ≈ −1.2 (~1.5 σ) at the peak;**
    `n_ode_grid=1024` converged. See §"ODE grid" analysis: the effective resolution is
@@ -773,7 +773,7 @@ $$(\mathcal{M},q,\chi_{1z},\chi_{2z})$$):
 hardware limit, not a code issue, and two A-GPU cells hit the same OOM; the Route-B point
 hit the *documented* UltraNest MLFriends fragility on its sharp posterior — both are
 known-issue limits, not new failures.) Scaling figure:
-[`examples/output/phenomd_duration_scaling.png`](../examples/output/phenomd_duration_scaling.png).
+[`examples/output/phenomd_duration_scaling.png`](../../examples/output/phenomd_duration_scaling.png).
 
 *D4 assessment (measured).* **Route B is $$\sim 99\%$$ GPry across the whole sweep:** waveform
 generation is $$0.5$$–$$1.1\%$$ of wall-clock ($$2.6$$–$$9.1$$ s) while GP fit + NORA/UltraNest
@@ -897,7 +897,7 @@ this. **Measured** (median ms/call; fs in Hz set per point):
 
 (fs rises $$2048\to 4096\to 8192\to 16384\to 32768$$ Hz as $$M$$ drops, from the $$(4,4)$$-mode
 Nyquist; SEOBNRv5HM's native mode set already tops at $$(4,4)$$. Data:
-[`examples/output/phenomd_eob_call_timing.json`](../examples/output/phenomd_eob_call_timing.json).)
+[`examples/output/phenomd_eob_call_timing.json`](../../examples/output/phenomd_eob_call_timing.json).)
 
 **The $$0.5$$–$$10$$ min/call premise is false for standard aligned-spin EOB.** Across the whole
 **stellar-mass BBH** range ($$M\gtrsim 10$$) every production model is $$13$$–$$800$$ ms/call —

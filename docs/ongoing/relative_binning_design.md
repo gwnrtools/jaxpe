@@ -9,11 +9,11 @@ parent: Ongoing
 
 **Status:** design drafted 2026-07; decisions D-RB1..4 accepted. **Implemented:**
 RB-1 (FD, dominant mode) in
-[`relative_binning_fd.py`](../jaxpe/gw/likelihood/relative_binning_fd.py); RB-3
+[`relative_binning_fd.py`](https://github.com/gwnrtools/jaxpe/blob/master/jaxpe/gw/likelihood/relative_binning_fd.py); RB-3
 (Toeplitz/Gohberg–Semencul infrastructure) in
-[`toeplitz.py`](../jaxpe/gw/likelihood/toeplitz.py); RB-4 (TD heterodyned
+[`toeplitz.py`](https://github.com/gwnrtools/jaxpe/blob/master/jaxpe/gw/likelihood/toeplitz.py); RB-4 (TD heterodyned
 likelihood, dominant mode **and higher modes**) in
-[`relative_binning_td.py`](../jaxpe/gw/likelihood/relative_binning_td.py)
+[`relative_binning_td.py`](https://github.com/gwnrtools/jaxpe/blob/master/jaxpe/gw/likelihood/relative_binning_td.py)
 (`RelativeBinningTDLikelihood` and `RelativeBinningTDLikelihoodHM`). All exact
 at the fiducial and validated against the exact reference to the Zackay
 `beta*(1+|lnL|)` error model, with measured speedups (FD ~12x, TD ~370x / HM ~74x vs
@@ -52,7 +52,7 @@ mode-based marginalization — shares the `ModesData` machinery this note reuses
   windows) where the FD-diagonal approximation and windowing bite. It heterodynes
   **per spherical-harmonic mode** `h_lm(t)`.
 - **`NetworkLikelihood`** — jaxpe's abstract Whittle likelihood base
-  ([`jaxpe/gw/likelihood/base.py`](../jaxpe/gw/likelihood/base.py)); concrete
+  ([`jaxpe/gw/likelihood/base.py`](https://github.com/gwnrtools/jaxpe/blob/master/jaxpe/gw/likelihood/base.py)); concrete
   members `TDNetworkLikelihood`, `FDNetworkLikelihood`, `ModesNetworkLikelihood`.
 - **`ModesData`** — jaxpe's container of `h_lm(t)` modes on a uniform time grid
   (`d_ref_mpc`, `t_ref`), produced by external mode models and consumed by
@@ -70,11 +70,11 @@ this repo — treat the paper as authoritative on any conflict.
 
 ## 1. Problem statement
 
-jaxpe's inner product ([`base.py`](../jaxpe/gw/likelihood/base.py)
+jaxpe's inner product ([`base.py`](https://github.com/gwnrtools/jaxpe/blob/master/jaxpe/gw/likelihood/base.py)
 `NetworkLikelihood.log_likelihood`) is the full-resolution, frequency-**diagonal**
 Whittle sum
 
-$$\ln\mathcal L = (d|h) - \tfrac12(h|h),\qquad (a|b) = 4\,\mathrm{Re}\sum_{f}\frac{\tilde a(f)\,\tilde b^*(f)}{S_n(f)}\,\Delta f,$$
+$$\ln\mathcal L = (d\mid h) - \tfrac12(h\mid h),\qquad (a\mid b) = 4\,\mathrm{Re}\sum_{f}\frac{\tilde a(f)\,\tilde b^*(f)}{S_n(f)}\,\Delta f,$$
 
 an `O(N_f)` sum requiring the waveform at every frequency bin. For a cheap JAX model
 (`IMRPhenomD`) at 8 s this is fine; for long segments (128 s BNS, `N_f ~ 10⁵–10⁶`) or
@@ -207,7 +207,7 @@ across bins at a probe offset and warn if the linear approximation is violated
 
 ### 5.1 Likelihood and covariance
 
-$$\ln\mathcal L(d|\theta) = -\tfrac12\sum_{i,j}(d_i - s_i)\,(C^{-1})_{ij}\,(d_j - s_j) + \text{const},\qquad C_{ij} = \rho(|i-j|),$$
+$$\ln\mathcal L(d\mid\theta) = -\tfrac12\sum_{i,j}(d_i - s_i)\,(C^{-1})_{ij}\,(d_j - s_j) + \text{const},\qquad C_{ij} = \rho(\lvert i-j\rvert),$$
 
 with `ρ(τ)` the noise autocorrelation (`ρ = IFFT` of the two-sided PSD; new helper in
 `psd.py`). `C` is symmetric positive-definite Toeplitz.

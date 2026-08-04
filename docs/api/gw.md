@@ -233,7 +233,7 @@ The dominant cost of a long-inspiral likelihood is evaluating the waveform at ev
 frequency bin. Relative binning evaluates it at $$O(10^2)$$ bin edges instead, exploiting
 that the *ratio* of a trial waveform to a fiducial one is smooth even when both are wildly
 oscillatory. Design and validation: [the relative-binning design
-note]({{ site.baseurl }}/docs/relative_binning_design.html).
+note]({{ site.baseurl }}/docs/ongoing/relative_binning_design.html).
 
 | object | role |
 |---|---|

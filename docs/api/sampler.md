@@ -133,7 +133,7 @@ Every knob of the run, as a dataclass. The loop structure is three-phase:
 Two defaults deserve scrutiny rather than acceptance. `flow_layers = 8` is generous for a
 low-dimensional posterior — the global block runs *two* flow passes per proposal
 (`sample` and `log_prob`), so layer count is close to linear in global-block cost, and
-halving it was a pure win in the [BNS benchmark]({{ site.baseurl }}/docs/bns_ce_pe_benchmark.html).
+halving it was a pure win in the [BNS benchmark]({{ site.baseurl }}/docs/ongoing/bns_ce_pe_benchmark.html).
 And `interval` sets the RQ-spline's active range: **outside it the spline is the
 identity**, so widening it to reach far tails buys reach at a steep cost in acceptance.
 

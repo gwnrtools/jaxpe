@@ -29,16 +29,16 @@ The inference pipeline utilized a zero-noise realization with advanced LIGO Zero
 ### Posterior Corner Plots
 
 #### GW150914 (Raw)
-![GW150914 (Raw) Posterior Corner Plot](assets/GW150914_corner.png)
+![GW150914 (Raw) Posterior Corner Plot](../assets/GW150914_corner.png)
 
 #### GW170729 (Thinned)
-![GW170729 (Thinned) Posterior Corner Plot](assets/GW170729_corner_thinned.png)
+![GW170729 (Thinned) Posterior Corner Plot](../assets/GW170729_corner_thinned.png)
 
 #### GW170104 (Thinned)
-![GW170104 (Thinned) Posterior Corner Plot](assets/GW170104_corner_thinned.png)
+![GW170104 (Thinned) Posterior Corner Plot](../assets/GW170104_corner_thinned.png)
 
 #### GW190412 (Thinned)
-![GW190412 (Thinned) Posterior Corner Plot](assets/GW190412_corner_thinned.png)
+![GW190412 (Thinned) Posterior Corner Plot](../assets/GW190412_corner_thinned.png)
 
 #### GW190521 (Thinned)
-![GW190521 (Thinned) Posterior Corner Plot](assets/GW190521_corner_thinned.png)
+![GW190521 (Thinned) Posterior Corner Plot](../assets/GW190521_corner_thinned.png)

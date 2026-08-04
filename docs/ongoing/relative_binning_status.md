@@ -11,7 +11,7 @@ Companion to the [design note](relative_binning_design.md). This page tracks wha
 been **implemented, tested, committed, and pushed** for the Fourier- and time-domain
 relative-binning (heterodyned) likelihoods, and what remains.
 
-All code lives in [`jaxpe/gw/likelihood/`](../jaxpe/gw/likelihood/); every stage was
+All code lives in [`jaxpe/gw/likelihood/`](https://github.com/gwnrtools/jaxpe/blob/master/jaxpe/gw/likelihood/); every stage was
 committed only after its unit tests **and** its performance-comparison test passed, and
 pushed to `origin/master`.
 
@@ -68,9 +68,9 @@ References: FD — Zackay, Dai & Venumadhav 2018 (arXiv:1806.08792), bilby
 - **Covariance:** `toeplitz.autocorrelation_from_psd`, `toeplitz.toeplitz_matvec`,
   `toeplitz.inverse_generator`, `toeplitz.inverse_matvec`.
 
-Tests: [`test_relative_binning_fd.py`](../tests/test_relative_binning_fd.py),
-[`test_toeplitz.py`](../tests/test_toeplitz.py),
-[`test_relative_binning_td.py`](../tests/test_relative_binning_td.py) — 44 tests.
+Tests: [`test_relative_binning_fd.py`](../../tests/test_relative_binning_fd.py),
+[`test_toeplitz.py`](../../tests/test_toeplitz.py),
+[`test_relative_binning_td.py`](../../tests/test_relative_binning_td.py) — 44 tests.
 
 ---
 

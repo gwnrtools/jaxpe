@@ -149,7 +149,7 @@ Metropolis-Adjusted Langevin Algorithm. Simulates overdamped Langevin diffusion 
 
 ### `ULD`
 **`jaxpe.kernels.uld.ULD(step_size: float, friction: float, scale=None)`**
-Underdamped Langevin Dynamics. Simulates Langevin diffusion while preserving conjugate momenta, governed by a continuous friction coefficient. **Unadjusted** — it has no Metropolis correction, so its stationary distribution carries an $$O(\varepsilon^2)$$ discretisation bias by construction and does not converge to the exact target at any run length for fixed $$\varepsilon$$. It also has no acceptance signal to adapt on, so `step_size` must be supplied rather than tuned; see the five-kernel comparison in the [BNS benchmark]({{ site.baseurl }}/docs/bns_ce_pe_benchmark.html) for what that costs in practice.
+Underdamped Langevin Dynamics. Simulates Langevin diffusion while preserving conjugate momenta, governed by a continuous friction coefficient. **Unadjusted** — it has no Metropolis correction, so its stationary distribution carries an $$O(\varepsilon^2)$$ discretisation bias by construction and does not converge to the exact target at any run length for fixed $$\varepsilon$$. It also has no acceptance signal to adapt on, so `step_size` must be supplied rather than tuned; see the five-kernel comparison in the [BNS benchmark]({{ site.baseurl }}/docs/ongoing/bns_ce_pe_benchmark.html) for what that costs in practice.
 
 ### `MMALA`
 **`jaxpe.kernels.mmala.MMALA(step_size: float, metric_fn=None, cov=None)`**
@@ -199,7 +199,7 @@ trajectory lengths (leapfrog energy error accumulates along the trajectory, so r
 required whenever `n_leapfrog` changes), and an $$\varepsilon$$ adapted during warmup
 reflects the curvature where the chains *started*, not where they end up — re-tuning
 against equilibrated positions was worth more than any other single change in the
-[BNS benchmark]({{ site.baseurl }}/docs/bns_ce_pe_benchmark.html).
+[BNS benchmark]({{ site.baseurl }}/docs/ongoing/bns_ce_pe_benchmark.html).
 
 Deriving the dense preconditioner from `ensemble_cov` is not automatically safe either: if
 the ensemble is over-dispersed in a direction that is orders of magnitude tighter than the

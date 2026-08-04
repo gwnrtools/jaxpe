@@ -16,7 +16,7 @@ parent: Ongoing
 
 **`x_final` is not the ISCO — it is a fixed `r = 4M` inspiral-termination radius.**
 `ESIGMAInspiral` sets `self.x_final = 1.0 / inspiral_end_radius` with `inspiral_end_radius = 4.0`
-([esigma.py:90](../jaxpe/gw/esigma.py#L90)), i.e. `x_final = 0.25`. In the PN variable
+([esigma.py:90](https://github.com/gwnrtools/jaxpe/blob/master/jaxpe/gw/cbc_models/esigma.py#L90)), i.e. `x_final = 0.25`. In the PN variable
 `x = (M\omega_{\rm orb})^{2/3}` (leading order `x ≈ M/r`), that is `r = 4M`. The Schwarzschild
 test-particle ISCO is `r = 6M`, i.e. `x_ISCO = 1/6 ≈ 0.167` — so the code terminates the inspiral
 at `x = 0.25 > 1/6`, **deeper than (inside) the ISCO**. It is a heuristic end-of-inspiral radius,
