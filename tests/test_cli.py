@@ -16,7 +16,7 @@ def test_cli_td_hmc(tmp_path):
     outdir = tmp_path / "out"
 
     # 1. Generate injection
-    cmd_gen = f"{sys.executable} -m jaxpe.cli generate-injections --network H1,L1 --noise zero --psd aligo --n-injections 1 --outdir {outdir}"
+    cmd_gen = f"{sys.executable} -m jaxpe.cli generate-injections --fiducial --network H1,L1 --noise zero --psd aligo --n-injections 1 --outdir {outdir}"
     run_command(cmd_gen)
 
     # 2. Run PE
@@ -35,7 +35,7 @@ def test_cli_fd_ns(tmp_path):
     outdir = tmp_path / "out"
 
     # 1. Generate injection
-    cmd_gen = f"{sys.executable} -m jaxpe.cli generate-injections --network H1,L1 --noise zero --psd aligo --n-injections 1 --outdir {outdir}"
+    cmd_gen = f"{sys.executable} -m jaxpe.cli generate-injections --fiducial --network H1,L1 --noise zero --psd aligo --n-injections 1 --outdir {outdir}"
     run_command(cmd_gen)
 
     # 2. Run PE
@@ -53,7 +53,7 @@ def test_cli_fd_gpry(tmp_path):
     outdir = tmp_path / "out"
 
     # 1. Generate injection
-    cmd_gen = f"{sys.executable} -m jaxpe.cli generate-injections --network H1,L1 --noise zero --psd aligo --n-injections 1 --outdir {outdir}"
+    cmd_gen = f"{sys.executable} -m jaxpe.cli generate-injections --fiducial --network H1,L1 --noise zero --psd aligo --n-injections 1 --outdir {outdir}"
     run_command(cmd_gen)
 
     # 2. Run PE (Expect crash due to tiny n_initial but test plumbing works if it passes or exits gracefully.
