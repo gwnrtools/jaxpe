@@ -20,6 +20,8 @@ This module provides tools to:
 3. Fetch real open data from GWOSC and construct likelihoods.
 """
 
+import hashlib
+
 import numpy as np
 
 from .conditioning import rfft_freqs
@@ -27,6 +29,75 @@ from .detectors import DETECTORS, gmst_from_gps
 from .likelihood import FDNetworkLikelihood, TDNetworkLikelihood
 from .psd import aligo_zdhp_psd, welch_psd
 from .waveform import WaveformModel
+
+# fold_in takes a uint32; blake2b gives a stable 4-byte digest, masked to stay in
+# range. Deliberately NOT Python's hash(), which is salted per process by
+# PYTHONHASHSEED and would make a "seeded" noise realisation irreproducible between
+# runs of the same script.
+_LABEL_MASK = (1 << 31) - 1
+
+
+def _label_int(label: str) -> int:
+    """Stable, process-independent integer for a string label."""
+    return (
+        int.from_bytes(hashlib.blake2b(label.encode(), digest_size=4).digest(), "big")
+        & _LABEL_MASK
+    )
+
+
+def derive_noise_seed(seed: int, index: int) -> int:
+    """Noise seed for injection ``index`` of a campaign seeded by ``seed``.
+
+    Returned as an integer so it can be recorded in the injection artifact: the
+    realisation then survives even if this derivation is ever changed. Keyed by
+    *which* injection it is, not by draw order, so re-analysing injection 7 on its
+    own reproduces what the full campaign gave it.
+    """
+    payload = f"{int(seed)}:{int(index)}".encode()
+    return int.from_bytes(hashlib.blake2b(payload, digest_size=4).digest(), "big")
+
+
+def noise_key(seed: int, detector: str = ""):
+    """PRNG key for one detector's noise stream under ``seed``.
+
+    Folding the detector *label* rather than its position is what makes the
+    realisation independent of the order ``detector_names`` happens to be given in.
+    """
+    import jax
+
+    key = jax.random.PRNGKey(int(seed) & _LABEL_MASK)
+    if detector:
+        key = jax.random.fold_in(key, _label_int(detector))
+    return key
+
+
+def simulate_noise_fd_jax(key, psd, duration: float):
+    r"""Stationary Gaussian coloured noise in the frequency domain, in JAX.
+
+    The JAX twin of :func:`simulate_noise_fd`, with the same convention
+    $\sigma = \sqrt{S(f)\,T}/2$ and the same zeroing of non-finite bins (the PSD is
+    ``inf`` out of band, so those bins carry exactly zero). Being traceable, it
+    ``vmap``s over a batch of injections and runs on the accelerator alongside the
+    signal, with no host round-trip.
+
+    Reproducibility differs from the numpy version in one respect worth knowing.
+    JAX's underlying random stream is bitwise identical across CPU and GPU, but the
+    Gaussian transform is not: ``jax.random.normal`` was measured to differ by up to
+    3e-15 between backends, because XLA compiles ``erf_inv`` differently for each.
+    Realisations are therefore bitwise reproducible *on a given platform* and equal
+    to ~1e-15 across platforms. Use :func:`simulate_noise_fd` where bitwise
+    cross-platform equality is required.
+    """
+    import jax
+    import jax.numpy as jnp
+
+    psd = jnp.asarray(psd, dtype=float)
+    sigma = jnp.sqrt(psd * duration) / 2.0
+    sigma = jnp.where(jnp.isfinite(sigma), sigma, 0.0)
+    kr, ki = jax.random.split(key)
+    return sigma * (
+        jax.random.normal(kr, psd.shape) + 1j * jax.random.normal(ki, psd.shape)
+    )
 
 
 def simulate_noise_fd(rng: np.random.Generator, psd, duration: float):
@@ -154,12 +225,21 @@ def make_injection(
     params_j = {k: jnp.asarray(v) for k, v in injection_params.items()}
     signal_fd = jax.jit(like.detector_strains_fd)(params_j)
 
-    rng = None if noise_seed is None else np.random.default_rng(noise_seed)
+    # One independent stream per detector, keyed by the detector's *name*. A single
+    # generator advanced through this loop -- which is what this used to do -- makes
+    # every detector's realisation depend on the order detector_names was given in.
     data_fd = {}
     for name in detector_names:
         d = np.asarray(signal_fd[name])
-        if rng is not None:
-            d = d + simulate_noise_fd(rng, psds[name], duration)
+        if noise_seed is not None:
+            noise = simulate_noise_fd_jax(
+                noise_key(noise_seed, name), psds[name], duration
+            )
+            # Back to numpy at the boundary: data_fd is a numpy field of a frozen
+            # dataclass whose jnp constants are materialized once, eagerly, in
+            # _static(). Storing a device array here would put a live buffer in a
+            # place the cache contract assumes is host memory.
+            d = d + np.asarray(noise)
         data_fd[name] = d
     like.data_fd.update(data_fd)
     like._cache.clear()

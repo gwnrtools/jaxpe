@@ -2,6 +2,54 @@
 
 Versions are derived from git tags by `setuptools-scm`.
 
+## Unreleased
+
+### Fixed
+
+- **Every injection in a campaign received the same noise realisation.** The CLI
+  passed `seeds.noise` through verbatim, so `generate-injections --noise gaussian
+  --n-injections N` followed by `run-pe` analysed N copies of one realisation. This
+  silently invalidates a PP-plot campaign, which is the main thing such a campaign
+  exists to run. `generate-injections` now resolves a per-injection seed with
+  `derive_noise_seed(seeds.noise, index)` and records it as `metadata.noise_seed`, so
+  the realisation is pinned by the artifact; `run-pe` reads it back, falling back to
+  deriving from `metadata.index` for sets already on disk.
+
+- **A detector's noise depended on its position in `detector_names`.**
+  `make_injection` advanced a single numpy `Generator` through the detector loop, so
+  `("H1","L1")` and `("L1","H1")` gave H1 different data at the same seed — measured
+  at a 130% relative change. Streams are now keyed by the detector's *name*.
+
+### Changed
+
+- **Noise generation moved to JAX** (`simulate_noise_fd_jax`), unifying the RNG with
+  parameter drawing, which already used PRNGKeys. `simulate_noise_fd` (numpy) remains
+  exported and unchanged.
+
+  **This changes which noise realisation a given seed produces.** Nothing in the test
+  suite pins noise sample values, but the cached artifacts under `examples/output/`
+  were computed against the old realisation and have been regenerated.
+
+  One reproducibility property is worth knowing: JAX's underlying random stream is
+  bitwise identical across CPU and GPU, but `jax.random.normal` is not — measured at
+  up to 3e-15 between backends, because XLA compiles `erf_inv` differently for each.
+  Realisations are therefore bitwise reproducible on a given platform and equal to
+  ~1e-15 across platforms. Use `simulate_noise_fd` where bitwise cross-platform
+  equality is required.
+
+- `examples/09_validate_injection_vs_dynesty.py` fingerprints the injection data into
+  its bilby label. bilby resumes from a checkpoint keyed only by `label`, so a
+  checkpoint computed against different data would previously have been resumed
+  silently under the new likelihood.
+
+### Performance
+
+- **Post-processing no longer rebuilds an injection to recover the prior.**
+  `PostProcessor` only uses `problem.prior`; obtaining it cost a waveform generation,
+  projection, FFT and jit compile per samples file — measured at 1.70 s and 1.83 s.
+  `InferenceProblem.log_likelihood` now defaults to a stub that raises, so a
+  prior-only problem is expressible without lying about the density.
+
 ## 0.1.0
 
 First tagged release. Cut to mark a significant performance fix in the sampling

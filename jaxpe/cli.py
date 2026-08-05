@@ -24,7 +24,7 @@ jax.config.update("jax_enable_x64", True)
 from jaxpe import config as runconfig
 from jaxpe.config import ConfigError
 from jaxpe.core import InferenceProblem
-from jaxpe.gw import IMRPhenomD, IMRPhenomT, make_injection
+from jaxpe.gw import IMRPhenomD, IMRPhenomT, derive_noise_seed, make_injection
 from jaxpe.gw.likelihood import PhaseDistanceMarginalLikelihood
 from jaxpe.sampler import GlobalLocalConfig, Sampler, best_of_prior_init, PostProcessor
 from jaxpe.kernels import MALA, HMC
@@ -131,12 +131,18 @@ def generate_injections(args):
         )
         # Recorded so run-pe can default to the network/noise/PSD this set was
         # generated for. Popped before the dict is handed to the waveform model.
+        #
+        # noise_seed is resolved per injection here rather than at analysis time, and
+        # recorded, so the realisation is pinned by the artifact and survives any
+        # later change to the derivation. Written even for --noise zero, so switching
+        # to gaussian at run-pe time still gets a distinct stream per injection.
         injection_params["metadata"] = {
             "network": args.network,
             "noise": args.noise,
             "psd": args.psd,
             "seed": None if args.fiducial else seed,
             "index": i,
+            "noise_seed": derive_noise_seed(cfg["seeds"]["noise"], i),
             "fiducial": bool(args.fiducial),
         }
         ipath = outdir / f"inj_{i}.json"
@@ -180,6 +186,17 @@ def run_pe(args):
     psd_spec = args.psd if args.psd is not None else meta.get("psd", "aligo")
     psd_fn = resolve_psd(psd_spec)
 
+    # Prefer the seed the set was generated with; derive it from the injection's
+    # index for sets written before it was recorded. Using seeds.noise directly --
+    # which is what this did -- gives every injection in a campaign the *same*
+    # noise realisation, which silently invalidates a PP test.
+    if noise == "zero":
+        noise_seed = None
+    elif meta.get("noise_seed") is not None:
+        noise_seed = int(meta["noise_seed"])
+    else:
+        noise_seed = derive_noise_seed(cfg["seeds"]["noise"], meta.get("index", 0))
+
     data_cfg = cfg["data"]
     # Trigger-relative priors are anchored on *this* injection's time, so a set
     # generated at another epoch still analyses correctly.
@@ -212,7 +229,7 @@ def run_pe(args):
         f_min=data_cfg["f_min"],
         f_max=data_cfg["f_max"],
         psd_fn=psd_fn,
-        noise_seed=None if noise == "zero" else cfg["seeds"]["noise"],
+        noise_seed=noise_seed,
         post_trigger=data_cfg["post_trigger"],
         tukey_alpha=data_cfg["tukey_alpha"],
     )

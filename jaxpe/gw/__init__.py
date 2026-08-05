@@ -1,9 +1,12 @@
 from .conditioning import rfft_freqs, td_to_fd, time_shift, tukey_window
 from .data import (
+    derive_noise_seed,
     fetch_open_strain,
     likelihood_from_strain,
     make_injection,
+    noise_key,
     simulate_noise_fd,
+    simulate_noise_fd_jax,
 )
 from .detectors import (
     DETECTORS,
@@ -69,6 +72,9 @@ __all__ = [
     "project_to_detector",
     "make_injection",
     "simulate_noise_fd",
+    "simulate_noise_fd_jax",
+    "derive_noise_seed",
+    "noise_key",
     "likelihood_from_strain",
     "fetch_open_strain",
     "bbh_priors",

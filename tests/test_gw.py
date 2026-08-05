@@ -5,6 +5,8 @@ checked against an independent numpy reimplementation and against the analytic
 zero-noise property lnL(true params) = 0.
 """
 
+import os
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -290,3 +292,125 @@ def test_lalsim_psd_rejects_bad_input():
     # the series API is defined by (df, n); an irregular grid cannot be honoured
     with pytest.raises(ValueError, match="uniform frequency grid"):
         lalsim_psd("CE", np.array([0.0, 1.0, 3.0, 7.0]))
+
+
+# ---------------------------------------------------------------------------
+# Noise seeding
+#
+# Two defects these pin down. (1) make_injection advanced a single numpy Generator
+# through the detector loop, so a detector's realisation depended on the position
+# it happened to occupy in detector_names. (2) The CLI handed every injection in a
+# campaign the same seeds.noise, so a --noise gaussian PP campaign analysed N
+# copies of one noise realisation -- which invalidates the test it exists to run.
+# ---------------------------------------------------------------------------
+
+
+def _differ(a, b, frac=1e-3):
+    """True if a and b differ appreciably *relative to their own scale*.
+
+    Strain arrays are O(1e-23), so ``np.allclose``'s default ``atol=1e-8`` calls any
+    two of them equal and would make these assertions vacuous.
+    """
+    scale = np.max(np.abs(a))
+    return bool(np.max(np.abs(np.asarray(a) - np.asarray(b))) > frac * scale)
+
+
+def test_noise_is_invariant_to_detector_order():
+    """A detector's noise must depend on which detector it is, not on list order."""
+    a = make_injection(
+        ToyChirp(f_start=20.0), INJ, detector_names=("H1", "L1"), noise_seed=11
+    )
+    b = make_injection(
+        ToyChirp(f_start=20.0), INJ, detector_names=("L1", "H1"), noise_seed=11
+    )
+    for det in ("H1", "L1"):
+        np.testing.assert_array_equal(
+            np.asarray(a.data_fd[det]),
+            np.asarray(b.data_fd[det]),
+            err_msg=f"{det} noise changed when detector_names was reordered",
+        )
+
+
+def test_noise_streams_are_independent_per_detector():
+    like = make_injection(
+        ToyChirp(f_start=20.0), INJ, detector_names=("H1", "L1"), noise_seed=11
+    )
+    clean = make_injection(
+        ToyChirp(f_start=20.0), INJ, detector_names=("H1", "L1"), noise_seed=None
+    )
+    n_h1 = np.asarray(like.data_fd["H1"]) - np.asarray(clean.data_fd["H1"])
+    n_l1 = np.asarray(like.data_fd["L1"]) - np.asarray(clean.data_fd["L1"])
+    # Strain is O(1e-23), so np.allclose's default atol=1e-8 would call any two of
+    # these arrays equal. Compare against the array's own scale instead.
+    assert _differ(n_h1, n_l1), "detectors share a noise realisation"
+
+    # The residuals must also be *statistically* right, not merely different. With
+    # sigma = sqrt(S*T)/2 and n = sigma*(N(0,1) + i N(0,1)), <|n|^2> = 2 sigma^2 =
+    # S(f) * T / 2. make_injection's default duration is 8 s.
+    band = (like.freqs >= like.f_min) & (like.freqs <= like.f_max)
+    for name, n in (("H1", n_h1), ("L1", n_l1)):
+        expected = like.psds[name][band] * 8.0 / 2.0
+        ratio = float(np.mean(np.abs(n[band]) ** 2 / expected))
+        assert 0.9 < ratio < 1.1, f"{name} noise power off by {ratio:.3f}x"
+
+
+def test_distinct_injections_get_distinct_noise():
+    """derive_noise_seed must separate injections drawn from one campaign seed."""
+    from jaxpe.gw import derive_noise_seed
+
+    seeds = [derive_noise_seed(42, i) for i in range(8)]
+    assert len(set(seeds)) == len(seeds), "campaign seeds collide across injections"
+    assert all(isinstance(s, int) for s in seeds), "must be JSON-serialisable ints"
+
+    a = make_injection(
+        ToyChirp(f_start=20.0), INJ, detector_names=("H1",), noise_seed=seeds[0]
+    )
+    b = make_injection(
+        ToyChirp(f_start=20.0), INJ, detector_names=("H1",), noise_seed=seeds[1]
+    )
+    assert _differ(
+        np.asarray(a.data_fd["H1"]), np.asarray(b.data_fd["H1"])
+    ), "two injections of one campaign share a noise realisation"
+
+
+def test_derive_noise_seed_is_stable_across_processes():
+    """Must not depend on PYTHONHASHSEED: Python's hash() is salted per process."""
+    import subprocess
+    import sys
+
+    code = "from jaxpe.gw import derive_noise_seed; print(derive_noise_seed(42, 3))"
+    out = []
+    for salt in ("0", "12345"):
+        env = {**os.environ, "PYTHONHASHSEED": salt, "JAX_PLATFORMS": "cpu"}
+        r = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, env=env
+        )
+        assert r.returncode == 0, r.stderr
+        out.append(r.stdout.strip())
+    assert out[0] == out[1], f"seed depends on PYTHONHASHSEED: {out}"
+
+
+def test_jax_noise_matches_the_numpy_convention():
+    """The JAX generator must reproduce the numpy one's *distribution*.
+
+    Not its samples -- different PRNGs -- so this checks the sigma convention that
+    would silently shift if sqrt(S*T)/2 were ever mis-transcribed.
+    """
+    from jaxpe.gw import simulate_noise_fd, simulate_noise_fd_jax
+
+    duration = 8.0
+    freqs = np.linspace(20.0, 512.0, 4096)
+    psd = 1e-46 * (1.0 + (freqs / 100.0) ** 4)
+
+    n_np = simulate_noise_fd(np.random.default_rng(0), psd, duration)
+    n_jx = np.asarray(simulate_noise_fd_jax(jax.random.PRNGKey(0), psd, duration))
+
+    var_np = np.mean(np.abs(n_np) ** 2 / psd)
+    var_jx = np.mean(np.abs(n_jx) ** 2 / psd)
+    np.testing.assert_allclose(var_jx, var_np, rtol=0.05)
+    np.testing.assert_allclose(var_jx, duration / 2.0, rtol=0.05)
+
+    # Non-finite PSD bins (out of band) must carry exactly zero in both.
+    psd_inf = np.where(freqs < 30.0, np.inf, psd)
+    z = np.asarray(simulate_noise_fd_jax(jax.random.PRNGKey(1), psd_inf, duration))
+    assert np.all(z[freqs < 30.0] == 0.0)

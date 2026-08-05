@@ -10,6 +10,7 @@ corner plot. JS < ~0.02 bits per parameter is the usual "same posterior" thresho
 used in GW sampler reviews.
 """
 
+import hashlib
 import sys
 from pathlib import Path
 
@@ -84,6 +85,17 @@ def main(nlive=400):
         raise SystemExit(f"run 03_gw_injection.py first ({jaxpe_file} missing)")
     jaxpe_samples = np.load(jaxpe_file)
 
+    # bilby resumes from a checkpoint keyed only by `label`, so a checkpoint computed
+    # against a *different* noise realisation would be silently continued under the
+    # new likelihood -- and the resulting comparison would be meaningless without
+    # anything erroring. Fingerprinting the data into the label means a stale
+    # checkpoint simply never matches, instead of being resumed.
+    fingerprint = hashlib.blake2b(
+        b"".join(np.asarray(like.data_fd[d.name]).tobytes() for d in like.detectors),
+        digest_size=4,
+    ).hexdigest()
+    label = f"toychirp_seed{NOISE_SEED}_{fingerprint}"
+
     result = bilby.run_sampler(
         likelihood=WrappedLikelihood(like, names),
         priors=bilby_priors(inj_mod.T_C),
@@ -91,7 +103,7 @@ def main(nlive=400):
         nlive=nlive,
         sample="rwalk",
         outdir=str(OUT / "dynesty"),
-        label=f"toychirp_seed{NOISE_SEED}",
+        label=label,
         resume=True,
         npool=1,
     )

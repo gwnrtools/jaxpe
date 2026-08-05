@@ -116,6 +116,48 @@ def test_cli_narrow_prior_does_not_require_moving_the_fiducial(tmp_path):
     assert "--fiducial cannot be used" in refused.stderr
 
 
+def test_cli_gives_each_injection_its_own_noise_seed(tmp_path):
+    """A campaign must not analyse N copies of one noise realisation.
+
+    seeds.noise was previously passed through verbatim, so every injection in a
+    --noise gaussian campaign got byte-identical noise -- which silently
+    invalidates the PP test such a campaign exists to run.
+    """
+    outdir = tmp_path / "inj"
+    run_command(
+        f"{sys.executable} -m jaxpe.cli generate-injections --noise gaussian "
+        f"--n-injections 3 --outdir {outdir}"
+    )
+    seeds, indices = [], []
+    for i in range(3):
+        meta = json.loads((outdir / f"inj_{i}.json").read_text())["metadata"]
+        assert meta["noise_seed"] is not None, "noise seed not recorded in the artifact"
+        seeds.append(meta["noise_seed"])
+        indices.append(meta["index"])
+    assert indices == [0, 1, 2]
+    assert len(set(seeds)) == 3, f"injections share a noise seed: {seeds}"
+
+
+def test_cli_noise_seeds_are_reproducible(tmp_path):
+    """The same campaign seed must reproduce the same per-injection seeds."""
+    seeds = []
+    for run in ("a", "b"):
+        outdir = tmp_path / run
+        run_command(
+            f"{sys.executable} -m jaxpe.cli generate-injections --noise gaussian "
+            f"--n-injections 2 --outdir {outdir}"
+        )
+        seeds.append(
+            [
+                json.loads((outdir / f"inj_{i}.json").read_text())["metadata"][
+                    "noise_seed"
+                ]
+                for i in range(2)
+            ]
+        )
+    assert seeds[0] == seeds[1], f"campaign is not reproducible: {seeds}"
+
+
 def test_cli_rejects_a_broken_config(tmp_path):
     """A typo must stop the run, not silently leave a default in place."""
     cfg_path = tmp_path / "bad.json"
