@@ -112,7 +112,13 @@ import numpy as np
 from jaxpe.core.priors import JointPrior, Uniform
 from jaxpe.core.problem import InferenceProblem
 from jaxpe.diagnostics.stats import effective_sample_size, split_rhat
-from jaxpe.gw import IMRPhenomD, lalsim_psd, make_injection
+from jaxpe.gw import (
+    IMRPhenomD,
+    distance_for_target_snr,
+    lalsim_psd,
+    make_injection,
+    network_snr,
+)
 from jaxpe.gw.detectors import EARTH_OMEGA
 from jaxpe.gw.likelihood import RelativeBinningFDLikelihood
 from jaxpe.gw.likelihood.base import project_to_detector
@@ -1260,10 +1266,9 @@ def main():
             args.distance = float(cached["distance"])
             truth["luminosity_distance"] = args.distance
 
-        t0 = time.perf_counter()
-        dense_like = make_injection(
-            IMRPhenomD(f_ref=args.f_min),
-            truth,
+        # Hoisted so the rescale rebuild below is conditioned identically to this one
+        # by construction rather than by the two argument lists agreeing.
+        inj_kwargs = dict(
             detector_names=("H1",),  # H1 site geometry as the single-CE stand-in
             duration=args.duration,
             sampling_rate=args.sampling_rate,
@@ -1272,8 +1277,11 @@ def main():
             psd_fn=lambda f: np.interp(f, freqs, psd),
             noise_seed=None,  # zero-noise injection: lnL peaks at exactly 0 at truth
         )
+
+        t0 = time.perf_counter()
+        dense_like = make_injection(IMRPhenomD(f_ref=args.f_min), truth, **inj_kwargs)
         snr = dense_like.optimal_snr(truth)
-        net_snr = float(np.sqrt(sum(v**2 for v in snr.values())))
+        net_snr = network_snr(dense_like, truth)
         timings["injection"] = time.perf_counter() - t0
         print(
             f"injection: Mc={mc_true:.5f} Msun, D={args.distance:.0f} Mpc, "
@@ -1286,21 +1294,13 @@ def main():
             # does too -- this rescale is EXACT, not an iterative or approximate
             # search, and one rebuild at the solved distance suffices.
             t0 = time.perf_counter()
-            args.distance *= net_snr / args.target_snr
+            args.distance = distance_for_target_snr(dense_like, truth, args.target_snr)
             truth["luminosity_distance"] = args.distance
             dense_like = make_injection(
-                IMRPhenomD(f_ref=args.f_min),
-                truth,
-                detector_names=("H1",),
-                duration=args.duration,
-                sampling_rate=args.sampling_rate,
-                f_min=args.f_min,
-                f_max=args.f_max,
-                psd_fn=lambda f: np.interp(f, freqs, psd),
-                noise_seed=None,
+                IMRPhenomD(f_ref=args.f_min), truth, **inj_kwargs
             )
             snr = dense_like.optimal_snr(truth)
-            net_snr = float(np.sqrt(sum(v**2 for v in snr.values())))
+            net_snr = network_snr(dense_like, truth)
             timings["snr_rescale"] = time.perf_counter() - t0
             print(
                 f"rescaled to target SNR {args.target_snr:.1f}: distance -> "

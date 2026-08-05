@@ -401,7 +401,7 @@ def make_mass_sweep(
     """Build a matched-SNR total-mass sweep (fixed q and spins), tuning distance per
     injection to `target_snr`. Lower total mass => longer signal => the duration lever.
     """
-    from jaxpe.gw import make_injection
+    from jaxpe.gw import distance_for_target_snr, make_injection
 
     injections = []
     for total in total_masses:
@@ -426,17 +426,9 @@ def make_mass_sweep(
             f_min=f_low,
             noise_seed=None,
         )
-        snr_ref = float(
-            np.sqrt(
-                sum(
-                    s**2
-                    for s in like.optimal_snr(
-                        {k: jnp.asarray(v) for k, v in base.items()}
-                    ).values()
-                )
-            )
+        base["luminosity_distance"] = distance_for_target_snr(
+            like, {k: jnp.asarray(v) for k, v in base.items()}, target_snr
         )
-        base["luminosity_distance"] = REFERENCE_DISTANCE_MPC * snr_ref / target_snr
         params = base
         injections.append(
             Injection(

@@ -8,9 +8,11 @@ from .conditioning import (
 )
 from .data import (
     derive_noise_seed,
+    distance_for_target_snr,
     fetch_open_strain,
     likelihood_from_strain,
     make_injection,
+    network_snr,
     noise_key,
     simulate_noise_fd,
     simulate_noise_fd_jax,
@@ -84,6 +86,8 @@ __all__ = [
     "simulate_noise_fd_jax",
     "derive_noise_seed",
     "noise_key",
+    "network_snr",
+    "distance_for_target_snr",
     "likelihood_from_strain",
     "fetch_open_strain",
     "bbh_priors",

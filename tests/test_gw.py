@@ -447,3 +447,42 @@ def test_analysis_grid_matches_make_injection():
     assert resolve_f_max(None, sampling_rate) == pytest.approx(0.9 * sampling_rate / 2)
     assert resolve_f_max(512.0, sampling_rate) == 512.0
     assert like.f_max == pytest.approx(resolve_f_max(None, sampling_rate))
+
+
+def test_snr_targeting_is_exact_in_one_measurement():
+    """h ~ 1/D exactly, so the target is hit without iteration."""
+    from jaxpe.gw import distance_for_target_snr, network_snr
+
+    like = make_injection(
+        ToyChirp(f_start=20.0), INJ, detector_names=("H1", "L1"), noise_seed=None
+    )
+    # network_snr is the quadrature sum the three call sites used to open-code.
+    snrs = like.optimal_snr(INJ)
+    expected = float(np.sqrt(sum(float(v) ** 2 for v in snrs.values())))
+    assert network_snr(like, INJ) == expected
+
+    for target in (12.0, 25.0, 60.0):
+        d = distance_for_target_snr(like, INJ, target)
+        params = {**INJ, "luminosity_distance": d}
+        rebuilt = make_injection(
+            ToyChirp(f_start=20.0), params, detector_names=("H1", "L1"), noise_seed=None
+        )
+        assert network_snr(rebuilt, params) == pytest.approx(target, rel=1e-9)
+
+
+def test_snr_targeting_ignores_the_noise_seed():
+    """Optimal SNR is a property of the template, not of the data.
+
+    Solving the distance against a noisy build would fit it to one noise draw.
+    """
+    from jaxpe.gw import distance_for_target_snr
+
+    clean = make_injection(
+        ToyChirp(f_start=20.0), INJ, detector_names=("H1",), noise_seed=None
+    )
+    noisy = make_injection(
+        ToyChirp(f_start=20.0), INJ, detector_names=("H1",), noise_seed=3
+    )
+    assert distance_for_target_snr(clean, INJ, 20.0) == pytest.approx(
+        distance_for_target_snr(noisy, INJ, 20.0), rel=1e-12
+    )

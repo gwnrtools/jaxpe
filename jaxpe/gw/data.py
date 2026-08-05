@@ -243,6 +243,32 @@ def make_injection(
     return like
 
 
+def network_snr(like, params: dict) -> float:
+    """Quadrature sum of the per-detector optimal SNRs at ``params``."""
+    snrs = like.optimal_snr(params)
+    return float(np.sqrt(sum(float(v) ** 2 for v in snrs.values())))
+
+
+def distance_for_target_snr(like, params: dict, target_snr: float) -> float:
+    r"""Distance at which ``params`` would have network optimal SNR ``target_snr``.
+
+    ``luminosity_distance`` enters the detector response only as an overall $1/D$
+    amplitude, so $\rho = \sqrt{\langle h|h\rangle} \propto 1/D$ and the target is hit
+    in a single measurement:
+
+    $$ D_{\rm new} = D_{\rm old} \, \rho_{\rm old} / \rho_{\rm target}. $$
+
+    No iteration and no search. ``like`` must be a zero-noise injection: optimal SNR
+    is a property of the template, and solving against noise-contaminated data would
+    not give the distance the caller asked for.
+    """
+    return (
+        float(params["luminosity_distance"])
+        * network_snr(like, params)
+        / float(target_snr)
+    )
+
+
 def fetch_open_strain(detector: str, gps_start: float, gps_end: float):
     """Download open strain via gwpy (requires the ``jaxpe[gwdata]`` extra).
 
