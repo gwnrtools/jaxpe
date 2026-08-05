@@ -486,3 +486,139 @@ def test_snr_targeting_ignores_the_noise_seed():
     assert distance_for_target_snr(clean, INJ, 20.0) == pytest.approx(
         distance_for_target_snr(noisy, INJ, 20.0), rel=1e-12
     )
+
+
+# ---------------------------------------------------------------------------
+# Batched injection creation
+# ---------------------------------------------------------------------------
+
+
+def _psd_weighted_mismatch(like, a, b, det="H1"):
+    """1 - normalised overlap in the analysed band: the measure that matters.
+
+    A max-relative amplitude comparison is misleading here. XLA fuses the waveform
+    differently between jit graphs, so make_injections and make_injection can differ
+    at the 1e-5 level in raw amplitude while being indistinguishable to any inference
+    -- the mismatch is ~1e-9 and lnL(truth) stays at ~1e-7.
+    """
+    band = (like.freqs >= like.f_min) & (like.freqs <= like.f_max)
+    df = like.freqs[1] - like.freqs[0]
+    psd = like.psds[det][band]
+
+    def inner(u, v):
+        return float(4.0 * df * np.sum((u[band] * np.conj(v[band]) / psd).real))
+
+    return 1.0 - inner(a, b) / np.sqrt(inner(a, a) * inner(b, b))
+
+
+@pytest.mark.parametrize("model", ["fd", "td"])
+def test_batched_matches_serial(model):
+    from jaxpe.gw import IMRPhenomD, IMRPhenomT, make_injections
+
+    wf = IMRPhenomD(f_ref=20.0) if model == "fd" else IMRPhenomT(f_ref=20.0)
+    kw = dict(
+        detector_names=("H1", "L1"), duration=4.0, sampling_rate=1024.0, f_min=30.0
+    )
+    rng = np.random.default_rng(0)
+    n = 4
+    batch = {
+        "chirp_mass": rng.uniform(25.0, 35.0, n),
+        "mass_ratio": rng.uniform(0.5, 1.0, n),
+        "spin1z": rng.uniform(-0.3, 0.3, n),
+        "spin2z": rng.uniform(-0.3, 0.3, n),
+        "luminosity_distance": rng.uniform(500.0, 900.0, n),
+        "inclination": rng.uniform(0.0, np.pi, n),
+        "phase": rng.uniform(0.0, 2 * np.pi, n),
+        "ra": rng.uniform(0.0, 2 * np.pi, n),
+        "dec": rng.uniform(-1.4, 1.4, n),
+        "psi": rng.uniform(0.0, np.pi, n),
+        "geocent_time": T_C,
+    }
+    out = make_injections(wf, batch, key=jax.random.PRNGKey(0), add_noise=False, **kw)
+    assert set(out) == {"H1", "L1"}
+    assert out["H1"].shape[0] == n
+
+    for i in range(n):
+        params = {k: (v if np.isscalar(v) else float(v[i])) for k, v in batch.items()}
+        serial = make_injection(wf, params, noise_seed=None, **kw)
+        for det in ("H1", "L1"):
+            mm = _psd_weighted_mismatch(
+                serial, np.asarray(serial.data_fd[det]), np.asarray(out[det][i]), det
+            )
+            assert mm < 1e-6, f"{model} {det} injection {i}: mismatch {mm:.3e}"
+
+
+def test_batched_noise_is_per_injection_and_per_detector():
+    from jaxpe.gw import IMRPhenomD, make_injections
+
+    n = 4
+    batch = {
+        "chirp_mass": np.full(n, 30.0),
+        "mass_ratio": np.full(n, 0.8),
+        "spin1z": np.zeros(n),
+        "spin2z": np.zeros(n),
+        "luminosity_distance": np.full(n, 700.0),
+        "inclination": np.zeros(n),
+        "phase": np.zeros(n),
+        "ra": np.zeros(n),
+        "dec": np.zeros(n),
+        "psi": np.zeros(n),
+        "geocent_time": T_C,
+    }
+    kw = dict(
+        detector_names=("H1", "L1"), duration=4.0, sampling_rate=1024.0, f_min=30.0
+    )
+    wf = IMRPhenomD(f_ref=20.0)
+    clean = make_injections(wf, batch, key=jax.random.PRNGKey(0), add_noise=False, **kw)
+    noisy = make_injections(wf, batch, key=jax.random.PRNGKey(0), add_noise=True, **kw)
+
+    # Identical parameters, so any difference between rows is the noise alone.
+    for det in ("H1", "L1"):
+        resid = np.asarray(noisy[det]) - np.asarray(clean[det])
+        for i in range(1, n):
+            assert _differ(resid[0], resid[i]), f"{det}: injections share noise"
+    assert _differ(
+        np.asarray(noisy["H1"])[0] - np.asarray(clean["H1"])[0],
+        np.asarray(noisy["L1"])[0] - np.asarray(clean["L1"])[0],
+    ), "detectors share noise"
+
+
+def test_batched_rejects_what_it_cannot_do():
+    from jaxpe.gw import IMRPhenomD, make_injections
+
+    n = 4
+    base = {
+        "chirp_mass": np.full(n, 30.0),
+        "mass_ratio": np.full(n, 0.8),
+        "spin1z": np.zeros(n),
+        "spin2z": np.zeros(n),
+        "luminosity_distance": np.full(n, 700.0),
+        "inclination": np.zeros(n),
+        "phase": np.zeros(n),
+        "ra": np.zeros(n),
+        "dec": np.zeros(n),
+        "psi": np.zeros(n),
+        "geocent_time": T_C,
+    }
+    kw = dict(detector_names=("H1",), duration=4.0, sampling_rate=1024.0, f_min=30.0)
+    wf = IMRPhenomD(f_ref=20.0)
+    key = jax.random.PRNGKey(0)
+
+    # vmap needs one grid, so the trigger time cannot vary across the batch.
+    with pytest.raises(ValueError, match="one analysis grid"):
+        make_injections(wf, {**base, "geocent_time": T_C + np.arange(n)}, key=key, **kw)
+    # ragged batch
+    with pytest.raises(ValueError, match="leading axis"):
+        make_injections(wf, {**base, "chirp_mass": np.full(2, 30.0)}, key=key, **kw)
+    # a long segment must fail with an estimate, not inside XLA
+    with pytest.raises(ValueError, match="GiB"):
+        make_injections(
+            wf,
+            base,
+            key=key,
+            detector_names=("H1",),
+            duration=2048.0,
+            sampling_rate=4096.0,
+            f_min=10.0,
+            max_bytes=1 << 28,
+        )
