@@ -16,3 +16,4 @@ This section provides the API documentation for the various components of `jaxpe
 - [flows]({{ site.baseurl }}/docs/api/flows.html): Normalizing-flow wrapper and trainer.
 - [diagnostics]({{ site.baseurl }}/docs/api/diagnostics.html): R-hat, ESS, corner/trace plots.
 - [surrogate]({{ site.baseurl }}/docs/api/surrogate.html): Active-learning GP surrogates for expensive, non-differentiable likelihoods.
+- [config]({{ site.baseurl }}/docs/api/config.html): The declarative run configuration — prior and injection distributions, conditioning, budgets, seeds.

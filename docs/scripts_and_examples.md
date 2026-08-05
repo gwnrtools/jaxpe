@@ -39,13 +39,24 @@ End-to-end demonstrations of Bayesian inference on Gravitational Wave signals:
 
 ## 4. The Universal CLI (`jaxpe`)
 
-A three-command CLI that runs the whole stack without writing Python, available as
-`jaxpe <command>` or equivalently `python -m jaxpe.cli <command>`. It is a
-**fixed-configuration demo driver**: the physics settings (duration, sampling rate,
-$$f_{\rm min}$$, prior ranges, step sizes, seeds) are hardcoded. For real analyses use the
-`bin/` drivers below.
+A CLI that runs the whole stack without writing Python, available as `jaxpe <command>` or
+equivalently `python -m jaxpe.cli <command>`. Every physics setting — duration, sampling
+rate, $$f_{\rm min}$$, the prior *distributions*, the injected population, step sizes,
+budgets and seeds — is read from a **run configuration JSON**, so a run is defined by an
+artifact you can commit and replay rather than by a source edit:
 
-**[➡️ Full CLI tutorial: every flag, worked examples, and what is hardcoded](cli_tutorial.md)**
+```bash
+jaxpe write-config my_run.json     # emit a fully-populated file to edit
+jaxpe generate-injections --config my_run.json --n-injections 100 --outdir inj/
+jaxpe run-pe --config my_run.json --injection inj/inj_0.json --outdir pe/0
+```
+
+With no `--config` it falls back to smoke-test-scale defaults, which is the fastest way to
+confirm an installation works. `examples/configs/` ships production and PP-campaign
+configurations. The `bin/` drivers below remain the reference for relative binning,
+convergence gating and the `ESIGMA`/`NRSur` waveforms, which the CLI does not expose.
+
+**[➡️ Full CLI tutorial: the configuration format, every flag, worked examples](cli_tutorial.md)**
 
 ### `jaxpe generate-injections`
 Draws `N` distinct BBH injections as JSON, seeded by `--seed` for reproducibility, with

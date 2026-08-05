@@ -14,25 +14,31 @@ nav_order: 6
 
 ## What this CLI is, and what it is not
 
-`jaxpe` ships a three-command CLI that takes you from a synthetic injection to a corner
-plot without writing Python:
+`jaxpe` ships a CLI that takes you from a synthetic injection to a corner plot without
+writing Python:
 
 ```
 jaxpe generate-injections   →   jaxpe run-pe   →   jaxpe process-samples
 ```
 
-It is best understood as a **fixed-configuration demo driver**. It exercises the whole
-stack end to end and is the fastest way to confirm an installation works or to compare
-samplers on a common problem. But almost every physical choice — segment duration,
-sampling rate, $$f_{\rm min}$$, the prior ranges, the sampler step sizes, the random seed —
-is **hardcoded in `jaxpe/cli.py`** and cannot be set from the command line. See
-[What the CLI hardcodes](#what-the-cli-hardcodes) for the full list.
+plus `jaxpe write-config`, which emits a fully-populated configuration file to edit.
 
-For real analyses — a specific source, a tuned sampler, relative binning, a convergence
-gate — use the drivers in [`bin/`]({{ site.baseurl }}/docs/scripts_and_examples.html)
-instead. `bin/run_bns_ce_pe.py` is the reference: it exposes masses, spins, PSD, duration,
-budget and convergence criteria as real arguments, and is what every benchmark on this
-site actually runs.
+Run with no arguments beyond the essentials, it is a fast end-to-end smoke test of an
+installation. Point it at a **run configuration file** and it is a production PE driver:
+every physical and numerical choice — segment duration, sampling rate, $$f_{\rm min}$$,
+the prior *distributions*, the population injected truths are drawn from, kernel step
+sizes, sampler budgets and every RNG seed — is read from that file rather than compiled
+into `jaxpe/cli.py`. See [The run configuration](#the-run-configuration).
+
+That split matters for reproducibility. A run is defined by an artifact you can commit,
+diff, attach to a paper and replay, not by a source edit that leaves no trace. `run-pe`
+writes the fully-resolved configuration it actually used into `run_config.json`, so a
+result directory always records the physics that produced it.
+
+The drivers in [`bin/`]({{ site.baseurl }}/docs/scripts_and_examples.html) remain the
+reference for the benchmarks on this site and for features the CLI does not expose —
+relative binning, convergence gating, `ESIGMA`/`NRSur` waveforms. `bin/run_bns_ce_pe.py`
+is the one every benchmark here runs.
 
 > **Everything below was executed against the current `jaxpe/cli.py`.** Flag lists,
 > defaults, output shapes and error messages are transcribed from real runs, not from the
@@ -114,32 +120,210 @@ with a warning if it is missing.
 
 ---
 
+## The run configuration
+
+Everything physical the CLI does is read from a JSON configuration. Start from a
+fully-populated one:
+
+```bash
+python -m jaxpe.cli write-config my_run.json
+```
+
+Edit it, then pass it to both commands that consume physics:
+
+```bash
+python -m jaxpe.cli generate-injections --config my_run.json --n-injections 100 --outdir inj
+python -m jaxpe.cli run-pe --config my_run.json --injection inj/inj_0.json --outdir pe/0
+```
+
+You rarely need `--config` twice. `generate-injections` writes the resolved configuration
+to `config.json` beside the injection set, and `run-pe` picks that up automatically, so
+the prior a set was generated under is the prior it is analysed under:
+
+```console
+Loaded configuration from inj/config.json
+```
+
+**Precedence**, highest first: a command-line flag → `--config FILE` → `config.json` next
+to the injection → the built-in defaults. Omitted keys fall back to the defaults, so a
+file containing only
+
+```json
+{ "data": { "duration": 128.0, "sampling_rate": 4096.0, "f_min": 20.0 } }
+```
+
+changes the conditioning and leaves every prior, seed and budget alone. Keys beginning
+with `_` are comments and are ignored — JSON has none of its own.
+
+### Sections
+
+| section | controls |
+|---|---|
+| `data` | `duration`, `sampling_rate`, `f_min`, `f_max`, `f_ref`, `post_trigger`, `tukey_alpha` |
+| `prior` | the distribution sampled for each of the 11 parameters |
+| `injection` | `geocent_time` (the trigger), `parameters` (the injected population), `fiducial` (the fixed reference binary) |
+| `seeds` | `injection`, `noise`, `sampler`, `ns`, `gpry` — separately, so you can vary one and hold the rest |
+| `kernel` | `hmc.step_size`, `hmc.n_leapfrog`, `mala.step_size` |
+| `sampler` | any field of `GlobalLocalConfig` — chains, loops, flow architecture, adaptation |
+| `ns` | `nlive`, `num_repeats`, `precision_criterion`, `nprior`, `max_ncalls`, `verbosity` |
+| `gpry` | `n_initial`, `max_total`, `max_initial`, `acquisition`, reference-bounds width |
+
+### Distributions
+
+`prior` and `injection.parameters` speak the same language, so the box you sample and the
+population you inject are specified the same way and built by the same code. Each entry is
+either the shorthand `[low, high]` (meaning uniform) or an object with a `dist` key:
+
+| `dist` | parameters | density |
+|---|---|---|
+| `uniform` | `low`, `high` | constant |
+| `loguniform` | `low`, `high` (both $$> 0$$) | $$p(x) \propto 1/x$$ |
+| `powerlaw` | `alpha`, `low`, `high` | $$p(x) \propto x^{\alpha}$$ |
+| `sine` | `low`, `high` (default $$0, \pi$$) | $$p(x) \propto \sin x$$ |
+| `cosine` | `low`, `high` (default $$\pm\pi/2$$) | $$p(x) \propto \cos x$$ |
+| `gaussian` | `mu`, `sigma` | $$\mathcal{N}(\mu, \sigma^2)$$ |
+| `fixed` | `value` | pins the parameter, keeping its slot in the vector |
+
+Any entry may carry `"relative_to_trigger": true`, which offsets `low`, `high`, `mu` or
+`value` by `injection.geocent_time`. That is how the coalescence-time prior says "the
+trigger $$\pm 0.1$$ s" without hardcoding an epoch:
+
+```json
+"geocent_time": { "dist": "uniform", "low": -0.1, "high": 0.1, "relative_to_trigger": true }
+```
+
+Isotropy is expressed here rather than assumed in the code. An isotropically oriented,
+Euclidean-volumetric population is
+
+```json
+"inclination":         { "dist": "sine" },
+"dec":                 { "dist": "cosine" },
+"luminosity_distance": { "dist": "powerlaw", "alpha": 2.0, "low": 100.0, "high": 2000.0 }
+```
+
+and changing any of those three changes the population, with no code edit. To hold a
+parameter constant, pin it — omitting it does **not** remove it, because the file is merged
+over the defaults:
+
+```json
+"spin1z": { "dist": "fixed", "value": 0.0 }
+```
+
+### Injections and the prior
+
+By default `injection.parameters` is **narrower** than `prior` in the intrinsic parameters
+and distance, so no injected truth lands on a prior edge and rails the posterior. A
+PP-plot campaign needs the opposite — there the injected population must *be* the prior, or
+the test is meaningless. Say so directly:
+
+```json
+"injection": { "parameters": "prior" }
+```
+
+The string `"prior"` binds the two together, so they cannot drift apart when the prior is
+later edited. When they differ, the loader says which parameters differ and why it matters:
+
+```console
+WARNING: injection.parameters differs from prior for: chirp_mass, mass_ratio, spin1z,
+spin2z, luminosity_distance, geocent_time. That is the right choice for a demonstration
+run (it keeps truths away from prior edges), but a PP-plot campaign requires the injection
+distribution to *be* the prior.
+```
+
+### The configuration is checked, not merely parsed
+
+A silently ignored typo is a wrong run, so unrecognised keys are rejected and every problem
+is reported at once rather than one per attempt:
+
+```console
+$ python -m jaxpe.cli run-pe --config broken.json ...
+ERROR: 3 problems in the run configuration:
+  - unknown key data.'sample_rate'; expected one of duration, f_max, f_min, f_ref,
+    post_trigger, sampling_rate, tukey_alpha
+  - data.tukey_alpha must lie in [0, 1], got 5.0
+  - prior.mass_ratio is empty or inverted: low=2.0 must be < high=0.5
+```
+
+Beyond shape, the checks enforce the physics:
+
+- $$f_{\rm min}$$ below Nyquist, and $$f_{\rm min} < f_{\rm max} \le$$ Nyquist when
+  `f_max` is set;
+- $$q = m_2/m_1 \in (0, 1]$$, dimensionless spins in $$[-1, 1]$$, positive masses and
+  distances;
+- `sine` support inside $$[0, \pi]$$ and `cosine` inside $$[-\pi/2, \pi/2]$$;
+- `post_trigger` shorter than `duration`, `tukey_alpha` in $$[0, 1]$$;
+- **every injection distribution contained in the corresponding prior**.
+
+That last one used to be a comment in `cli.py` asserting the boxes were nested. It is now
+enforced:
+
+```console
+ERROR: 1 problem in the run configuration:
+  - injection.parameters.chirp_mass has support [5.0, 60.0], which is not contained in
+    prior.chirp_mass=[10.0, 50.0]; injected truths would fall outside the prior and the
+    posterior could not recover them
+```
+
+`injection.fiducial` is the one exception: it only matters to `--fiducial` runs, so a
+prior that excludes it is a warning rather than an error. Narrowing to a BNS prior does
+**not** force you to move the demo reference binary — but asking for it is refused:
+
+```console
+$ jaxpe generate-injections --config bns.json --fiducial --outdir inj
+ERROR: --fiducial cannot be used with this configuration:
+  - injection.fiducial.chirp_mass=30.0 lies outside prior.chirp_mass=[1.0, 2.0]
+Edit injection.fiducial to sit inside the prior, or drop --fiducial to draw from
+injection.parameters instead.
+```
+
+### Shipped examples
+
+| file | purpose |
+|---|---|
+| [`examples/configs/production_bbh.json`](https://github.com/prayush/jaxpe/blob/master/examples/configs/production_bbh.json) | 8 s at 4096 Hz from 20 Hz, stellar-mass BBH prior, `nlive=1000`, 256 chains |
+| [`examples/configs/pp_campaign.json`](https://github.com/prayush/jaxpe/blob/master/examples/configs/pp_campaign.json) | the same, with `"parameters": "prior"` for a PP test |
+
+Both are validated by the test suite, so they cannot rot into invalid files. Their settings
+are a defensible starting point, **not a benchmarked optimum**: `duration × sampling_rate`
+sets the number of frequency bins and therefore the per-likelihood cost, and
+`n_chains × loops` sets how many evaluations you pay for. Re-tune both against your own
+waveform, network and hardware.
+
+---
+
 ## `generate-injections`
 
 ```bash
-python -m jaxpe.cli generate-injections --outdir DIR [--n-injections N] [--seed S]
-                                        [--fiducial] [--network H1,L1]
-                                        [--noise {zero,gaussian}] [--psd aligo|PATH]
+python -m jaxpe.cli generate-injections --outdir DIR [--config FILE] [--n-injections N]
+                                        [--seed S] [--fiducial] [--network H1,L1]
+                                        [--noise {zero,gaussian}] [--psd aligo|NAME|PATH]
 ```
 
 Draws `N` **distinct** injections and writes them as `inj_0.json … inj_{N-1}.json` into
-`--outdir` (created if needed). `--outdir` is required; `--n-injections` defaults to 1 and
-`--seed` to 42.
+`--outdir` (created if needed), plus the resolved `config.json`. `--outdir` is required;
+`--n-injections` defaults to 1.
 
 | flag | default | effect |
 |---|---|---|
+| `--config` | built-in defaults | run configuration; sets the population drawn from |
 | `--n-injections` | 1 | how many injections to draw |
-| `--seed` | 42 | RNG seed — the same seed reproduces the same set exactly |
-| `--fiducial` | off | emit the fixed reference binary instead of drawing |
+| `--seed` | `seeds.injection` (42) | RNG seed — the same seed reproduces the same set exactly |
+| `--fiducial` | off | emit `injection.fiducial` instead of drawing |
 | `--network` | `H1,L1` | recorded in the file; `run-pe` uses it unless overridden |
 | `--noise` | `zero` | recorded in the file; `run-pe` uses it unless overridden |
-| `--psd` | `aligo` | recorded in the file; `aligo` is the built-in analytic aLIGO ZDHP curve, anything else must be a path to a two-column ASCII PSD |
+| `--psd` | `aligo` | recorded in the file; a name or a two-column ASCII PSD path |
 
-Parameters are drawn uniformly in chirp mass $$(15, 45)\,M_\odot$$, mass ratio
-$$(0.3, 1.0)$$, aligned spins $$(-0.5, 0.5)$$ and distance $$(300, 1500)$$ Mpc, with
-isotropic orientation and sky position. Those boxes sit **strictly inside** the recovery
-priors, so no injected truth ever lands on a prior edge. Coalescence time is fixed at the
-GW150914 GPS epoch.
+Truths are drawn from `injection.parameters` in the configuration. With the defaults that
+is uniform in chirp mass $$(15, 45)\,M_\odot$$, mass ratio $$(0.3, 1.0)$$, aligned spins
+$$(-0.5, 0.5)$$ and distance $$(300, 1500)$$ Mpc, with isotropic orientation and sky
+position ($$p \propto \sin\iota$$, $$p \propto \cos\delta$$) and coalescence time fixed at
+the trigger. Those boxes sit **strictly inside** the recovery priors, so no injected truth
+lands on a prior edge — an invariant the configuration loader now enforces rather than
+merely documents.
+
+The draws use the same distribution objects the prior is built from, so setting
+`"parameters": "prior"` draws from exactly the prior. See
+[Injections and the prior](#injections-and-the-prior).
 
 ```console
 $ python -m jaxpe.cli generate-injections --n-injections 3 --outdir demo/inj
@@ -231,40 +415,52 @@ p.write_text(json.dumps(d, indent=2))
 PY
 ```
 
-Keep edited values **inside the prior ranges** below, or the injected truth will sit
-outside the prior and the posterior will rail against a boundary.
+Keep edited values **inside the prior**, or the injected truth will sit outside it and the
+posterior will rail against a boundary. Editing the JSON is the right tool for a one-off
+source; to change the *population* every draw comes from, edit `injection.parameters` in
+the configuration instead, where the containment is checked for you.
 
 ---
 
 ## `run-pe`
 
 ```bash
-python -m jaxpe.cli run-pe --injection FILE --outdir DIR
+python -m jaxpe.cli run-pe --injection FILE --outdir DIR [--config FILE]
                            [--sampler {hmc,mala,ns,gpry}]
                            [--likelihood {full,marginalized_phase_distance}]
                            [--domain {td,fd}] [--network ...] [--noise {zero,gaussian}]
-                           [--psd aligo|PATH] [--n-chains 100] [--n-prelim-loops 1]
-                           [--n-training-loops 5] [--n-production-loops 50]
+                           [--psd aligo|NAME|PATH] [--n-chains N] [--n-prelim-loops N]
+                           [--n-training-loops N] [--n-production-loops N]
 ```
+
+Flags override the configuration file; the configuration overrides the built-in defaults.
+Where a flag is left off, the value in the "default" column below is the configuration key
+it falls back to.
 
 | flag | default | effect |
 |---|---|---|
 | `--injection` | *required* | path to the injection JSON |
 | `--outdir` | *required* | output directory, created if absent |
+| `--config` | sibling `config.json`, else built-in | run configuration |
 | `--sampler` | `hmc` | `hmc`, `mala`, `ns` (BlackJAX nested sampling), `gpry` (GP surrogate) |
 | `--likelihood` | `full` | `full`, or `marginalized_phase_distance` (analytic $$\phi_c$$ + $$D_L$$ marginal) |
-| `--domain` | `fd` | `fd` → `IMRPhenomD`, `td` → `IMRPhenomT` (both at $$f_{\rm ref} = 20$$ Hz) |
+| `--domain` | `fd` | `fd` → `IMRPhenomD`, `td` → `IMRPhenomT` (both at `data.f_ref`) |
 | `--network` | *from injection* | comma-separated detectors; overrides the recorded value |
-| `--noise` | *from injection* | `zero` or `gaussian` (fixed seed 42); overrides the recorded value |
-| `--psd` | *from injection* | `aligo` or a path; overrides the recorded value |
-| `--n-chains` | 100 | `hmc`/`mala` only |
-| `--n-prelim-loops` | 1 | discarded warmup loops; `hmc`/`mala` only |
-| `--n-training-loops` | 5 | local steps → flow fit → global block; `hmc`/`mala` only |
-| `--n-production-loops` | 50 | flow frozen; `hmc`/`mala` only |
-| `--gpry-acquisition` | GPry's NORA | `gpry` only; `BatchOptimizer` swaps nested sampling for multi-start L-BFGS |
-| `--gpry-n-initial` | GPry's $$3d$$ | `gpry` only; truth evaluations before active learning starts |
-| `--gpry-max-total` | 500 | `gpry` only; total truth-evaluation budget |
-| `--gpry-max-initial` | 200 | `gpry` only; draws attempted while collecting the initial finite points |
+| `--noise` | *from injection* | `zero` or `gaussian` (seeded by `seeds.noise`) |
+| `--psd` | *from injection* | a name or a path; overrides the recorded value |
+| `--n-chains` | `sampler.n_chains` (100) | `hmc`/`mala` only |
+| `--n-prelim-loops` | `sampler.n_prelim_loops` (1) | discarded warmup loops; `hmc`/`mala` only |
+| `--n-training-loops` | `sampler.n_training_loops` (5) | local steps → flow fit → global block |
+| `--n-production-loops` | `sampler.n_production_loops` (50) | flow frozen; `hmc`/`mala` only |
+| `--gpry-acquisition` | `gpry.acquisition` (GPry's NORA) | `BatchOptimizer` swaps nested sampling for multi-start L-BFGS |
+| `--gpry-n-initial` | `gpry.n_initial` (GPry's $$3d$$) | truth evaluations before active learning starts |
+| `--gpry-max-total` | `gpry.max_total` (500) | total truth-evaluation budget |
+| `--gpry-max-initial` | `gpry.max_initial` (200) | draws attempted while collecting the initial finite points |
+
+Settings with no flag — step sizes, flow architecture, `nlive`, seeds, the data
+conditioning, the priors — are reachable only through `--config`. The four chain/loop flags
+exist because they are the ones you sweep interactively; everything else belongs in a file
+you keep.
 
 `--network`, `--noise` and `--psd` default to whatever `generate-injections` recorded in
 the injection's `metadata` block, falling back to `H1,L1` / `zero` / `aligo` for files that
@@ -370,8 +566,18 @@ layouts uniformly. Two differences matter:
   statistics from those runs gives the wrong answer.
 
 `run_config.json` records exactly this (`sample_space`, `weighted`, `param_names`) along
-with the domain, network, PSD, conditioning settings and prior ranges the run used, so
-`process-samples` can rebuild the same problem instead of guessing.
+with the domain, network and PSD, so `process-samples` can rebuild the same problem
+instead of guessing.
+
+It also embeds the **fully-resolved run configuration** under a `config` key, with
+command-line overrides folded in — so it describes the run that happened, not the file it
+started from. If you pass `--n-chains 2`, `config.sampler.n_chains` reads 2. That makes a
+result directory self-describing and re-runnable:
+
+```bash
+python -c "import json; print(json.dumps(json.load(open('pe/run_config.json'))['config'], indent=2))" > rerun.json
+python -m jaxpe.cli run-pe --config rerun.json --injection pe/injection.json --outdir pe_again
+```
 
 ---
 
@@ -416,31 +622,70 @@ non-default-network run.
 
 ---
 
-## What the CLI hardcodes
+## `write-config`
 
-Not reachable from any flag. To change any of these, use a `bin/` driver or the Python API.
+```bash
+python -m jaxpe.cli write-config OUTPUT.json [--force]
+```
 
-| quantity | value |
-|---|---|
-| segment duration | 4.0 s |
-| sampling rate | 1024 Hz |
-| $$f_{\rm min}$$ / $$f_{\rm ref}$$ | 30 Hz / 20 Hz |
-| chirp-mass prior | $$(10, 50)\ M_\odot$$ |
-| mass-ratio prior | $$(0.1, 1.0)$$ |
-| aligned-spin priors | $$(-0.9, 0.9)$$ |
-| distance prior | $$(100, 2000)$$ Mpc |
-| coalescence-time prior | injected $$t_c \pm 0.1$$ s |
-| HMC | `step_size=0.01`, `n_leapfrog=10` |
-| MALA | `step_size=0.01` |
-| random seed | `PRNGKey(42)`; noise seed 42 when `--noise gaussian` |
-| nested sampling | `nlive=10`, `num_repeats=5`, `precision_criterion=0.1` |
-| GPry budget | `max_total=500`, `n_initial=5` |
+Writes a complete configuration — every section, every key, at its default value — with a
+`_about` and `_distributions` header explaining the format. It refuses to overwrite an
+existing file unless you pass `--force`, since that file is likely the definition of a run
+you care about.
 
-Two of these deserve emphasis. The **step sizes are fixed, not adapted to your source** —
-$$\varepsilon = 0.01$$ is a plausible scale for a few-tens-of-$$M_\odot$$ BBH under these
-priors and can be badly wrong for another source; check the acceptance rate before trusting
-a run. And the **nested-sampling `nlive=10` is a smoke-test setting**, far too small for a
-publishable posterior; it is chosen so the path runs quickly, not so it is accurate.
+```console
+$ python -m jaxpe.cli write-config my_run.json
+Wrote default run configuration to my_run.json
+Edit it and pass it with --config to generate-injections and run-pe.
+
+$ python -m jaxpe.cli write-config my_run.json
+ValueError: my_run.json already exists; pass --force to overwrite it.
+```
+
+There is no need to keep the whole file: delete every section you are not changing and the
+rest falls back to the defaults.
+
+---
+
+## The defaults are smoke-test scale
+
+With no `--config`, the CLI uses the values below. They are chosen so the whole pipeline
+runs in seconds, **not so that any of it is accurate**, and the loader says so on every
+run:
+
+```console
+WARNING: ns.nlive=10 is a smoke-test value: nested sampling at this resolution exercises
+the code path but its evidence and posterior are not measurements. Production runs use
+>= 100 (see examples/configs/production_bbh.json).
+```
+
+| quantity | default | config key |
+|---|---|---|
+| segment duration | 4.0 s | `data.duration` |
+| sampling rate | 1024 Hz | `data.sampling_rate` |
+| $$f_{\rm min}$$ / $$f_{\rm ref}$$ | 30 Hz / 20 Hz | `data.f_min`, `data.f_ref` |
+| chirp-mass prior | uniform $$(10, 50)\ M_\odot$$ | `prior.chirp_mass` |
+| mass-ratio prior | uniform $$(0.1, 1.0)$$ | `prior.mass_ratio` |
+| aligned-spin priors | uniform $$(-0.9, 0.9)$$ | `prior.spin1z`, `prior.spin2z` |
+| distance prior | $$p(d) \propto d^2$$ on $$(100, 2000)$$ Mpc | `prior.luminosity_distance` |
+| coalescence-time prior | injected $$t_c \pm 0.1$$ s | `prior.geocent_time` |
+| HMC | `step_size=0.01`, `n_leapfrog=10` | `kernel.hmc` |
+| MALA | `step_size=0.01` | `kernel.mala` |
+| random seeds | 42 throughout | `seeds.*` |
+| nested sampling | `nlive=10`, `num_repeats=5`, `precision_criterion=0.1` | `ns` |
+| GPry budget | `max_total=500`, `n_initial=` GPry's $$3d$$ | `gpry` |
+
+Three deserve emphasis:
+
+- **`nlive=10` is a smoke test.** Nested sampling at ten live points exercises the code
+  path; its evidence and posterior are not measurements. Production runs use $$\ge 100$$.
+- **`f_ref = 20` Hz sits below `f_min = 30` Hz**, so the frequency at which spins and phase
+  are defined lies outside the analysed band. That is legal but rarely intended, and the
+  loader warns about it. The shipped production configs set `f_ref = f_min = 20` Hz.
+- **The step sizes are starting points, not tuned values.** $$\varepsilon = 0.01$$ is a
+  plausible scale for a few-tens-of-$$M_\odot$$ BBH under these priors and can be badly
+  wrong for another source. `GlobalLocalConfig.adapt_step_size` is on by default, so they
+  are adapted during the training loops — check the acceptance rate before trusting a run.
 
 ---
 
