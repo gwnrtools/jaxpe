@@ -1,0 +1,98 @@
+{
+  "_about": "Probability-probability (PP) plot campaign. Draw many injections, run PE on each, and histogram the fraction of runs in which the true value falls below each posterior credible level. If the sampler and likelihood are correct, that fraction is uniform, and the cumulative curve is diagonal.",
+
+  "_why_parameters_is_prior": "A PP plot is only a valid test when the injected population IS the prior. If injections are drawn from anything narrower -- as the built-in defaults do, to keep truths off prior edges -- the curve is biased and the test means nothing. Writing \"prior\" here binds the two together so they cannot drift apart when the prior is edited.",
+
+  "_how_to_run": "for i in $(seq 0 99); do jaxpe run-pe --config examples/configs/pp_campaign.json --injection inj/inj_$i.json --outdir pe/$i; done, after jaxpe generate-injections --config examples/configs/pp_campaign.json --n-injections 100 --outdir inj. Use --noise gaussian: a PP test with zero noise measures only the sampler, not the likelihood's noise model.",
+
+  "data": {
+    "duration": 8.0,
+    "sampling_rate": 4096.0,
+    "f_min": 20.0,
+    "f_max": null,
+    "f_ref": 20.0,
+    "post_trigger": 2.0,
+    "tukey_alpha": 0.1
+  },
+
+  "prior": {
+    "chirp_mass": { "dist": "uniform", "low": 15.0, "high": 45.0 },
+    "mass_ratio": { "dist": "uniform", "low": 0.25, "high": 1.0 },
+    "spin1z": { "dist": "uniform", "low": -0.8, "high": 0.8 },
+    "spin2z": { "dist": "uniform", "low": -0.8, "high": 0.8 },
+    "luminosity_distance": {
+      "dist": "powerlaw",
+      "alpha": 2.0,
+      "low": 100.0,
+      "high": 2000.0
+    },
+    "inclination": { "dist": "sine", "low": 0.0, "high": 3.141592653589793 },
+    "phase": { "dist": "uniform", "low": 0.0, "high": 6.283185307179586 },
+    "ra": { "dist": "uniform", "low": 0.0, "high": 6.283185307179586 },
+    "dec": { "dist": "cosine", "low": -1.5707963267948966, "high": 1.5707963267948966 },
+    "psi": { "dist": "uniform", "low": 0.0, "high": 3.141592653589793 },
+    "geocent_time": {
+      "dist": "uniform",
+      "low": -0.1,
+      "high": 0.1,
+      "relative_to_trigger": true
+    }
+  },
+
+  "injection": {
+    "geocent_time": 1126259462.4,
+    "parameters": "prior",
+    "fiducial": {
+      "chirp_mass": 30.0,
+      "mass_ratio": 0.8,
+      "spin1z": 0.0,
+      "spin2z": 0.0,
+      "luminosity_distance": 700.0,
+      "inclination": 0.0,
+      "phase": 0.0,
+      "ra": 0.0,
+      "dec": 0.0,
+      "psi": 0.0
+    }
+  },
+
+  "seeds": {
+    "_note": "generate-injections splits seeds.injection across the set, so one seed reproduces the whole campaign. Change seeds.noise to repeat the same population under a different noise realisation.",
+    "injection": 20260805,
+    "noise": 20260805,
+    "sampler": 42,
+    "ns": 42,
+    "gpry": 42
+  },
+
+  "kernel": {
+    "hmc": { "step_size": 0.01, "n_leapfrog": 10 },
+    "mala": { "step_size": 0.01 }
+  },
+
+  "sampler": {
+    "_note": "Each of the N runs pays this cost, so a PP campaign is where sampler settings matter most. These must be converged: an under-converged sampler produces a PP curve that fails for reasons that have nothing to do with the likelihood.",
+    "n_chains": 256,
+    "n_prelim_loops": 2,
+    "n_training_loops": 12,
+    "n_production_loops": 100
+  },
+
+  "ns": {
+    "nlive": 1000,
+    "num_repeats": 5,
+    "precision_criterion": 0.01,
+    "nprior": null,
+    "max_ncalls": null,
+    "verbosity": 0
+  },
+
+  "gpry": {
+    "n_initial": null,
+    "max_total": 2000,
+    "max_initial": 500,
+    "acquisition": null,
+    "ref_bounds_rel": 0.01,
+    "ref_bounds_abs": 0.1
+  }
+}
