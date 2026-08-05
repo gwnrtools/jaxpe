@@ -63,22 +63,25 @@ TIME_WIDTH = 0.1
 def resolve_psd(spec):
     """Map a --psd specification to a psd_fn usable by ``make_injection``.
 
-    ``aligo`` (default) is the built-in analytic Advanced-LIGO ZDHP curve; anything
-    else is treated as a path to a two-column ASCII PSD file. Unknown *names* are
-    rejected rather than silently ignored -- there is no built-in Cosmic Explorer
-    curve in ``jaxpe.gw.psd``, so ``--psd CE`` must be given as a file.
+    Three forms, tried in order: ``aligo`` (the built-in analytic aLIGO ZDHP fit), a
+    named LALSimulation design curve (``CE``, ``ET``, ``aplus``, ...), or a path to a
+    two-column ASCII file. Anything else is rejected rather than silently ignored.
     """
-    from jaxpe.gw import aligo_zdhp_psd, psd_from_file
+    from jaxpe.gw import LALSIM_PSDS, aligo_zdhp_psd, lalsim_psd, psd_from_file
 
     if spec is None or spec.lower() in ("aligo", "zdhp", "aligo_zdhp"):
         return aligo_zdhp_psd
+    # Named curves win over a same-named file only by being checked first; the names
+    # are detector labels, so a file called "CE" in the cwd would be the surprise.
+    if spec in LALSIM_PSDS:
+        return lambda freqs: lalsim_psd(spec, freqs)
     path = Path(spec)
     if path.exists():
         return lambda freqs: psd_from_file(path, freqs)
     raise ValueError(
-        f"--psd {spec!r} is neither the built-in 'aligo' curve nor an existing file. "
-        "jaxpe.gw.psd ships only the analytic aLIGO ZDHP curve; supply any other "
-        "detector (CE, ET, ...) as a two-column ASCII file path."
+        f"--psd {spec!r} is not 'aligo', a known detector curve, or an existing file. "
+        f"Known curves: {', '.join(sorted(LALSIM_PSDS))}. Anything else must be a "
+        "two-column ASCII file path."
     )
 
 
@@ -355,17 +358,28 @@ def run_pe(args):
             else:
                 ref_bounds_arr.append(bounds_dict[n])
 
+        # n_initial defaults to GPry's own 3*d rather than a fixed number. The
+        # previous hardcoded 5 was *below* that for every problem here (4-D
+        # marginalized -> 12, 11-D full -> 33), which left the SVM infinities
+        # classifier under-trained and made runs fail intermittently on the
+        # geometry of the particular injection rather than on anything real.
+        gpry_opts = {
+            "max_total": args.gpry_max_total,
+            "n_initial": (
+                3 * len(bounds_dict)
+                if args.gpry_n_initial is None
+                else args.gpry_n_initial
+            ),
+            "max_initial": args.gpry_max_initial,
+        }
         engine = GPryEngine(
             timed_loglike,
             bounds=bounds_dict,
+            acquisition=args.gpry_acquisition,
             options={
                 "seed": 42,
                 "ref_bounds": np.array(ref_bounds_arr),
-                "options": {
-                    "max_total": 500,
-                    "n_initial": 5,
-                    "max_initial": 200,
-                },
+                "options": gpry_opts,
             },
         )
         engine.run()
@@ -633,6 +647,35 @@ def main():
     )
     parser_run.add_argument(
         "--n-production-loops", type=int, default=50, help="Number of production loops"
+    )
+    parser_run.add_argument(
+        "--gpry-n-initial",
+        type=int,
+        default=None,
+        help="gpry: truth evaluations before active learning starts (default: GPry's own 3*n_dim)",
+    )
+    parser_run.add_argument(
+        "--gpry-max-total",
+        type=int,
+        default=500,
+        help="gpry: maximum total truth evaluations",
+    )
+    parser_run.add_argument(
+        "--gpry-max-initial",
+        type=int,
+        default=200,
+        help="gpry: maximum draws attempted while collecting the initial finite points",
+    )
+    parser_run.add_argument(
+        "--gpry-acquisition",
+        type=str,
+        default=None,
+        help=(
+            "gpry: acquisition engine. Default leaves GPry on its native NORA "
+            "nested-sampling acquisition; 'BatchOptimizer' is multi-start L-BFGS on the "
+            "analytic acquisition gradient, which uses far fewer surrogate evaluations "
+            "per step but was measured slower end-to-end on this problem"
+        ),
     )
     parser_run.add_argument(
         "--outdir", type=str, required=True, help="Output directory for PE results"

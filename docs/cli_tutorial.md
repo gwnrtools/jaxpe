@@ -193,13 +193,28 @@ would write 3 identical files. Use --fiducial with --n-injections 1, or drop --f
 to draw a distinct set.
 ```
 
-**There is no built-in Cosmic Explorer or Einstein Telescope curve.** `jaxpe.gw.psd` ships
-only the analytic aLIGO ZDHP model, so any other detector must be supplied as a file.
-Passing an unknown name is rejected rather than silently ignored:
+`--psd` takes three forms: `aligo` (the built-in analytic ZDHP fit), a **named detector
+curve** resolved through LALSimulation, or a path to a two-column ASCII file.
+
+| name | curve |
+|---|---|
+| `aligo` | analytic aLIGO Zero-Detuning High-Power fit (no LALSimulation needed) |
+| `CE`, `CE-wideband`, `CE-pessimistic` | Cosmic Explorer P1600143 variants |
+| `ET` | Einstein Telescope P1600143 |
+| `aplus`, `aligo-design`, `advirgo-O4` | A+, aLIGO design, AdVirgo O4 |
+
+```bash
+python -m jaxpe.cli generate-injections --fiducial --psd CE --outdir demo/inj
+```
+
+Names are checked before the filesystem, so a detector label always means the detector.
+Anything unrecognised is rejected rather than silently ignored, and the message lists what
+is available:
 
 ```console
-$ python -m jaxpe.cli generate-injections --psd CE --outdir demo/inj
-ValueError: --psd 'CE' is neither the built-in 'aligo' curve nor an existing file.
+ValueError: --psd 'Nonsense' is not 'aligo', a known detector curve, or an existing file.
+Known curves: CE, CE-pessimistic, CE-wideband, ET, advirgo-O4, aligo-design, aplus.
+Anything else must be a two-column ASCII file path.
 ```
 
 **To analyse a specific source rather than a draw, edit the JSON.** `run-pe` reads it back
@@ -246,6 +261,10 @@ python -m jaxpe.cli run-pe --injection FILE --outdir DIR
 | `--n-prelim-loops` | 1 | discarded warmup loops; `hmc`/`mala` only |
 | `--n-training-loops` | 5 | local steps → flow fit → global block; `hmc`/`mala` only |
 | `--n-production-loops` | 50 | flow frozen; `hmc`/`mala` only |
+| `--gpry-acquisition` | GPry's NORA | `gpry` only; `BatchOptimizer` swaps nested sampling for multi-start L-BFGS |
+| `--gpry-n-initial` | GPry's $$3d$$ | `gpry` only; truth evaluations before active learning starts |
+| `--gpry-max-total` | 500 | `gpry` only; total truth-evaluation budget |
+| `--gpry-max-initial` | 200 | `gpry` only; draws attempted while collecting the initial finite points |
 
 `--network`, `--noise` and `--psd` default to whatever `generate-injections` recorded in
 the injection's `metadata` block, falling back to `H1,L1` / `zero` / `aligo` for files that
@@ -267,6 +286,20 @@ internal termination criteria.
 | a cheaper single-gradient step | `--sampler mala` | one gradient per proposal; less to tune, mixes more slowly |
 | an evidence estimate, no gradients | `--sampler ns` | BlackJAX nested sampling; returns per-sample `weights` and computes $$\ln Z$$ |
 | an expensive/non-differentiable likelihood | `--sampler gpry` | GP surrogate + active learning; see [`jaxpe.surrogate`]({{ site.baseurl }}/docs/api/surrogate.html) |
+
+> **`gpry` runs are not reproducible, and the seed does not make them so.** GPry warns
+> `Seeded runs are not supported for UltraNest` — the `seed` the CLI passes is honoured by
+> the GP and the initial draw, but *not* by the nested sampler underneath NORA acquisition
+> and the final surrogate sampling. Measured on this page's fiducial injection at the
+> default budget, four identical invocations gave **two clean runs (24–26 s) and two
+> failures inside UltraNest** (one in `mlfriends`, one "not enough live points to compute
+> variance"), with one run taking 4.5 minutes. Budget generously, expect to re-run, and do
+> not treat a single `gpry` timing or outcome as a measurement.
+>
+> `--gpry-n-initial` defaults to GPry's own $$3d$$ (12 for the 4-parameter marginalized
+> likelihood, 33 for the full 11-parameter one). Setting it below that under-trains the
+> SVM infinities classifier and produces failures that look like properties of the source
+> but are properties of the budget.
 
 ### Two combinations are rejected
 
