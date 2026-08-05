@@ -28,7 +28,7 @@ from .likelihood import (
     project_to_detector,
 )
 from .priors import bbh_priors, ebbh_priors
-from .psd import aligo_zdhp_psd, psd_from_file, welch_psd
+from .psd import LALSIM_PSDS, aligo_zdhp_psd, lalsim_psd, psd_from_file, welch_psd
 from .cbc_models import (
     IMRPhenomD,
     ESIGMAInspiral,
@@ -54,6 +54,8 @@ __all__ = [
     "time_shift",
     "rfft_freqs",
     "aligo_zdhp_psd",
+    "lalsim_psd",
+    "LALSIM_PSDS",
     "psd_from_file",
     "welch_psd",
     "NetworkLikelihood",

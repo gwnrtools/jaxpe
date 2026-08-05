@@ -276,6 +276,7 @@ $$\rho$$ from a one-sided PSD by inverse transform.
 | function | purpose |
 |---|---|
 | `aligo_zdhp_psd(freqs, f_low)` | analytic Advanced LIGO Zero-Detuning High-Power design curve |
+| `lalsim_psd(name, freqs, f_low)` | a LALSimulation design curve by name — `CE`, `ET`, `aplus`, … (see `LALSIM_PSDS`) |
 | `psd_from_file(path, freqs)` | two-column ASCII PSD, interpolated onto `freqs` (`inf` outside) |
 | `welch_psd(strain, sampling_rate, seg_duration, freqs)` | median-averaged Welch estimate from off-source strain |
 | `make_injection(...)` | inject a simulated signal into simulated coloured noise |
@@ -289,6 +290,23 @@ $$\rho$$ from a one-sided PSD by inverse transform.
 
 Using `inf` for out-of-band PSD values rather than masking is deliberate: it drives the
 corresponding Whittle terms to zero exactly, with no branch inside the traced code.
+
+Third-generation sensitivity curves have no closed-form fit of the `aligo_zdhp_psd` kind,
+so `lalsim_psd` reaches them through LALSimulation's series API. `LALSIM_PSDS` maps short
+names onto the underlying symbols:
+
+| name | curve |
+|---|---|
+| `CE`, `CE-wideband`, `CE-pessimistic` | Cosmic Explorer P1600143 variants |
+| `ET` | Einstein Telescope P1600143 |
+| `aplus` | A+ design sensitivity T1800042 |
+| `aligo-design` | Advanced LIGO design P1200087 |
+| `advirgo-O4` | Advanced Virgo O4 T1800545 |
+
+Any other `SimNoisePSD*` symbol can be passed through by its full name. The series API is
+specified by $$(\Delta f, n)$$ rather than by arbitrary sample points, so `lalsim_psd`
+requires a **uniform** grid and rejects anything else rather than silently resampling —
+use `psd_from_file` when you need interpolation onto an irregular grid.
 
 ### External (non-JAX) models
 

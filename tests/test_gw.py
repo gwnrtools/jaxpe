@@ -252,3 +252,41 @@ def test_unified_waveform_generator_interface():
     assert issubclass(NRSur7dq4, WaveformModel)
     assert issubclass(NRSur7dq4, TimeDomainModel)
     # We do not instantiate it here as it requires a data file path.
+
+
+def test_lalsim_psd_curves_are_ordered_and_finite():
+    """Named LALSimulation curves load, and their sensitivities order as expected.
+
+    CE and ET are third-generation designs, so their strain noise must sit below A+,
+    which in turn sits below the analytic aLIGO ZDHP fit. This pins the name -> symbol
+    mapping: a typo in LALSIM_PSDS would resolve to a different detector and break the
+    ordering rather than failing loudly.
+    """
+    from jaxpe.gw import LALSIM_PSDS, aligo_zdhp_psd, lalsim_psd
+
+    freqs = np.arange(0.0, 1024.0 + 0.25, 0.25)
+
+    def best_strain(psd):
+        finite = psd[np.isfinite(psd)]
+        assert finite.size > 0
+        return float(np.sqrt(finite.min()))
+
+    ce = best_strain(lalsim_psd("CE", freqs))
+    et = best_strain(lalsim_psd("ET", freqs))
+    aplus = best_strain(lalsim_psd("aplus", freqs))
+    zdhp = best_strain(aligo_zdhp_psd(freqs))
+
+    assert ce < et < aplus < zdhp
+    assert set(LALSIM_PSDS) >= {"CE", "ET", "aplus"}
+
+
+def test_lalsim_psd_rejects_bad_input():
+    """Unknown names and non-uniform grids raise instead of silently mis-modelling."""
+    from jaxpe.gw import lalsim_psd
+
+    freqs = np.arange(0.0, 64.0 + 0.5, 0.5)
+    with pytest.raises(ValueError, match="unknown LALSimulation PSD"):
+        lalsim_psd("NotADetector", freqs)
+    # the series API is defined by (df, n); an irregular grid cannot be honoured
+    with pytest.raises(ValueError, match="uniform frequency grid"):
+        lalsim_psd("CE", np.array([0.0, 1.0, 3.0, 7.0]))
