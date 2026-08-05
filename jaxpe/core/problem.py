@@ -16,6 +16,15 @@ import jax.numpy as jnp
 from .priors import JointPrior
 
 
+def _no_likelihood(params):
+    """Placeholder for a problem built only to carry the prior's coordinate maps."""
+    raise TypeError(
+        "this InferenceProblem was built prior-only (for coordinate transforms); "
+        "it has no likelihood to evaluate. Construct it with a log_likelihood, or "
+        "use `prior` directly if you only need to_physical/to_unconstrained."
+    )
+
+
 @dataclass(frozen=True)
 class InferenceProblem:
     """A prior plus a log-likelihood over named physical parameters.
@@ -27,10 +36,16 @@ class InferenceProblem:
     log_likelihood
         Maps ``{name: scalar}`` to a scalar log-likelihood. Must be JAX-traceable;
         differentiability is required only for gradient-based kernels.
+
+        Defaults to a stub that raises. Post-processing only ever needs the prior's
+        bijections (``PostProcessor`` touches ``problem.prior`` and nothing else), and
+        forcing those callers to build a likelihood cost them a full waveform
+        generation and FFT per samples file. Omitting it fails loudly at use rather
+        than silently returning a wrong density.
     """
 
     prior: JointPrior
-    log_likelihood: Callable[[dict], jnp.ndarray]
+    log_likelihood: Callable[[dict], jnp.ndarray] = _no_likelihood
 
     @property
     def n_dim(self) -> int:

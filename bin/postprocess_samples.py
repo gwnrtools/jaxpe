@@ -1,8 +1,9 @@
 import argparse
 import numpy as np
 from pathlib import Path
+from jaxpe.core import InferenceProblem
 from jaxpe.sampler import PostProcessor
-from jaxpe.gw import IMRPhenomD, bbh_priors, make_injection
+from jaxpe.gw import bbh_priors
 from jaxpe.diagnostics import corner_plot
 
 # Import event specifications to reconstruct the InferenceProblem
@@ -20,8 +21,6 @@ def main():
     )
     args = parser.parse_args()
 
-    waveform = IMRPhenomD(f_ref=20.0)
-
     for filepath in args.files:
         path = Path(filepath)
         if not path.exists():
@@ -38,20 +37,14 @@ def main():
         print("\n=============================================")
         print(f"Post-processing {event_name}")
 
-        # 1. Reconstruct the InferenceProblem
+        # 1. Reconstruct the prior. PostProcessor only maps unconstrained draws back
+        # through the bijections -- it never evaluates the likelihood -- so there is
+        # no injection to rebuild here. Doing so previously cost a waveform
+        # generation and FFT per file, and restated the conditioning
+        # (duration/sampling_rate/network) in a second place where it could drift
+        # from run_phenomd_events.py without anything noticing.
         spec = EVENTS[event_name]
         params = spec["params"]
-
-        # create a dummy zero-noise injection to get the problem
-        like = make_injection(
-            waveform,
-            params,
-            detector_names=("H1", "L1", "V1"),
-            duration=4.0,
-            sampling_rate=2048.0,
-            f_min=20.0,
-            noise_seed=None,
-        )
 
         prior = bbh_priors(
             chirp_mass=spec["mc_prior"],
@@ -61,7 +54,7 @@ def main():
             geocent_time=params["geocent_time"],
             time_width=0.1,
         )
-        problem = like.problem(prior)
+        problem = InferenceProblem(prior)
 
         # 2. Run the PostProcessor
         pp = PostProcessor(problem, raw_samples_file=path)

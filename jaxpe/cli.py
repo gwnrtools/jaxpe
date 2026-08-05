@@ -23,6 +23,7 @@ jax.config.update("jax_enable_x64", True)
 
 from jaxpe import config as runconfig
 from jaxpe.config import ConfigError
+from jaxpe.core import InferenceProblem
 from jaxpe.gw import IMRPhenomD, IMRPhenomT, make_injection
 from jaxpe.gw.likelihood import PhaseDistanceMarginalLikelihood
 from jaxpe.sampler import GlobalLocalConfig, Sampler, best_of_prior_init, PostProcessor
@@ -519,7 +520,6 @@ def _config_from_run_config(cfg):
 
 def process_samples(args):
     print("Processing samples...")
-    defaults = runconfig.DEFAULT_CONFIG
     for file_path in args.files:
         path = Path(file_path)
         out_dir = path.parent
@@ -543,17 +543,14 @@ def process_samples(args):
                 cfg = json.load(f)
         else:
             print(
-                f"WARNING: {cfg_file} not found; assuming an fd / H1,L1,V1 / "
-                f"{defaults['data']['duration']} s run. If the samples came from a td "
-                "or non-default-network run, the reconstructed parameter mapping may "
-                "be wrong. Re-run run-pe to regenerate the configuration."
+                f"WARNING: {cfg_file} not found; assuming the built-in default prior. "
+                "If the samples came from a run with different prior ranges, the "
+                "reconstructed physical parameters will be wrong. Re-run run-pe to "
+                "regenerate the configuration."
             )
             cfg = {}
 
         run_cfg = _config_from_run_config(cfg)
-        data_cfg = run_cfg["data"]
-        domain = cfg.get("domain", "fd")
-        network = cfg.get("network", "H1,L1,V1")
 
         data = np.load(path)
         raw = data["samples"]
@@ -578,30 +575,17 @@ def process_samples(args):
                 "physical units; skipping burn-in/thinning."
             )
         else:
-            waveform = (
-                IMRPhenomD(f_ref=data_cfg["f_ref"])
-                if domain == "fd"
-                else IMRPhenomT(f_ref=data_cfg["f_ref"])
-            )
-            like = make_injection(
-                waveform,
-                injection_params,
-                detector_names=tuple(network.split(",")),
-                duration=data_cfg["duration"],
-                sampling_rate=data_cfg["sampling_rate"],
-                f_min=data_cfg["f_min"],
-                f_max=data_cfg["f_max"],
-                psd_fn=resolve_psd(cfg.get("psd")),
-                noise_seed=None,
-                post_trigger=data_cfg["post_trigger"],
-                tukey_alpha=data_cfg["tukey_alpha"],
-            )
+            # Only the prior is needed here: PostProcessor maps unconstrained draws
+            # back through the bijections and never evaluates the likelihood. Building
+            # an injection to obtain it cost a full waveform generation, projection,
+            # FFT and jit compile per samples file, and forced the conditioning to be
+            # restated somewhere it could drift from the run that produced the samples.
             trigger = float(
                 injection_params.get(
                     "geocent_time", run_cfg["injection"]["geocent_time"]
                 )
             )
-            problem = like.problem(runconfig.build_prior(run_cfg, trigger=trigger))
+            problem = InferenceProblem(runconfig.build_prior(run_cfg, trigger=trigger))
 
             pp = PostProcessor(problem, raw_samples_file=path)
             phys_samples = pp.process()
