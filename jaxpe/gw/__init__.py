@@ -1,4 +1,11 @@
-from .conditioning import rfft_freqs, td_to_fd, time_shift, tukey_window
+from .conditioning import (
+    analysis_grid,
+    resolve_f_max,
+    rfft_freqs,
+    td_to_fd,
+    time_shift,
+    tukey_window,
+)
 from .data import (
     derive_noise_seed,
     fetch_open_strain,
@@ -56,6 +63,8 @@ __all__ = [
     "td_to_fd",
     "time_shift",
     "rfft_freqs",
+    "analysis_grid",
+    "resolve_f_max",
     "aligo_zdhp_psd",
     "lalsim_psd",
     "LALSIM_PSDS",

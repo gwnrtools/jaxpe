@@ -37,7 +37,7 @@ def build_demo_problem(
     """2D synthetic-chirp pseudo-black-box (same construction as tests/test_surrogate.py)."""
     import jax.numpy as jnp
 
-    from jaxpe.gw import make_injection, spin_weighted_ylm
+    from jaxpe.gw import analysis_grid, make_injection, spin_weighted_ylm
     from jaxpe.gw.external_models import ModesData, reflect_modes
     from jaxpe.gw.likelihood import (
         MarginalizedIntrinsicLikelihood,
@@ -56,8 +56,8 @@ def build_demo_problem(
         psi=0.82,
         geocent_time=t_c,
     )
-    n = int(duration * sr)
-    times = t_c + post_trigger - duration + np.arange(n) / sr
+    times = analysis_grid(t_c, duration, sr, post_trigger)[0]
+    n = times.size
 
     def chirp_modes(theta):
         t = times - t_c

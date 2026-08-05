@@ -22,7 +22,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from jaxpe.gw import make_injection, spin_weighted_ylm
+from jaxpe.gw import analysis_grid, make_injection, spin_weighted_ylm
 from jaxpe.gw.external_models import ModeCache, ModesData, reflect_modes
 from jaxpe.gw.likelihood import ModesNetworkLikelihood
 
@@ -34,10 +34,8 @@ D_REF = 500.0  # Mpc
 
 
 def _analysis_times():
-    """Replicate make_injection's grid so modes can be built on it."""
-    n = int(DURATION * SR)
-    t_start = T_C + POST_TRIGGER - DURATION
-    return t_start + np.arange(n) * (1.0 / SR)
+    """The grid make_injection builds on, so modes can be evaluated on exactly it."""
+    return analysis_grid(T_C, DURATION, SR, POST_TRIGGER)[0]
 
 
 def _synthetic_modes(times):

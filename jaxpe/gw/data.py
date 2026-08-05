@@ -24,7 +24,7 @@ import hashlib
 
 import numpy as np
 
-from .conditioning import rfft_freqs
+from .conditioning import analysis_grid, resolve_f_max
 from .detectors import DETECTORS, gmst_from_gps
 from .likelihood import FDNetworkLikelihood, TDNetworkLikelihood
 from .psd import aligo_zdhp_psd, welch_psd
@@ -191,12 +191,8 @@ def make_injection(
     import jax.numpy as jnp
 
     t_c = float(injection_params["geocent_time"])
-    n = int(duration * sampling_rate)
-    dt = 1.0 / sampling_rate
-    t_start = t_c + post_trigger - duration
-    times = t_start + np.arange(n) * dt
-    freqs = rfft_freqs(n, dt)
-    f_max = f_max if f_max is not None else 0.9 * (sampling_rate / 2.0)
+    times, freqs = analysis_grid(t_c, duration, sampling_rate, post_trigger)
+    f_max = resolve_f_max(f_max, sampling_rate)
 
     detectors = tuple(DETECTORS[name] for name in detector_names)
     psds = {name: np.asarray(psd_fn(freqs)) for name in detector_names}
@@ -281,12 +277,11 @@ def likelihood_from_strain(
     Welch-estimated from ``psd_strain`` (e.g. minutes of off-source data), defaulting
     to the full ``strain`` arrays themselves.
     """
-    n = int(duration * sampling_rate)
+    times, freqs = analysis_grid(trigger_time, duration, sampling_rate, post_trigger)
+    n = times.size
     dt = 1.0 / sampling_rate
-    t_start = trigger_time + post_trigger - duration
-    i0 = int(round((t_start - strain_start) * sampling_rate))
-    freqs = rfft_freqs(n, dt)
-    f_max = f_max if f_max is not None else 0.9 * (sampling_rate / 2.0)
+    i0 = int(round((times[0] - strain_start) * sampling_rate))
+    f_max = resolve_f_max(f_max, sampling_rate)
 
     from .conditioning import tukey_window
 
@@ -312,7 +307,7 @@ def likelihood_from_strain(
         data_fd=data_fd,
         psds=psds,
         freqs=freqs,
-        times=t_start + np.arange(n) * dt,
+        times=times,
         f_min=f_min,
         f_max=f_max,
         gmst_ref=gmst_from_gps(trigger_time),

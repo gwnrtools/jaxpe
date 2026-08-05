@@ -414,3 +414,36 @@ def test_jax_noise_matches_the_numpy_convention():
     psd_inf = np.where(freqs < 30.0, np.inf, psd)
     z = np.asarray(simulate_noise_fd_jax(jax.random.PRNGKey(1), psd_inf, duration))
     assert np.all(z[freqs < 30.0] == 0.0)
+
+
+def test_analysis_grid_matches_make_injection():
+    """The shared grid must be the one make_injection actually builds on.
+
+    Four call sites used to re-derive this by hand to stay in sync with
+    make_injection's internals; test_marginalized.py even asserted the copy had not
+    drifted. That assertion is now a real check of one definition.
+    """
+    from jaxpe.gw import analysis_grid, resolve_f_max
+
+    duration, sampling_rate, post_trigger = 8.0, 2048.0, 2.0
+    times, freqs = analysis_grid(T_C, duration, sampling_rate, post_trigger)
+
+    like = make_injection(
+        ToyChirp(f_start=20.0),
+        INJ,
+        detector_names=("H1",),
+        duration=duration,
+        sampling_rate=sampling_rate,
+        post_trigger=post_trigger,
+        noise_seed=None,
+    )
+    np.testing.assert_array_equal(like.times, times)
+    np.testing.assert_array_equal(like.freqs, freqs)
+
+    # The segment ends post_trigger after the trigger, and f_max defaults to 90% of
+    # Nyquist -- the convention that was written out separately in both constructors.
+    assert times[0] == pytest.approx(T_C + post_trigger - duration)
+    assert times.size == int(duration * sampling_rate)
+    assert resolve_f_max(None, sampling_rate) == pytest.approx(0.9 * sampling_rate / 2)
+    assert resolve_f_max(512.0, sampling_rate) == 512.0
+    assert like.f_max == pytest.approx(resolve_f_max(None, sampling_rate))

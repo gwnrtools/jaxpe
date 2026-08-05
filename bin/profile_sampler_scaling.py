@@ -63,7 +63,11 @@ SECTIONS = ("grad", "local", "global", "flow", "init")
 
 
 def _load_driver():
-    """Import the benchmark driver for its PSD / lean-likelihood builders."""
+    """Import the benchmark driver for its lean-likelihood builder.
+
+    The PSD now comes from ``jaxpe.gw.lalsim_psd``; only ``build_loglike`` is still
+    reached this way.
+    """
     spec = importlib.util.spec_from_file_location("_bns_driver", _DRIVER)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -94,7 +98,7 @@ def build_problem(args):
     """
     from jaxpe.core.priors import JointPrior, Uniform
     from jaxpe.core.problem import InferenceProblem
-    from jaxpe.gw import IMRPhenomD, make_injection
+    from jaxpe.gw import IMRPhenomD, lalsim_psd, make_injection
     from jaxpe.gw.likelihood import RelativeBinningFDLikelihood
 
     drv = _load_driver()
@@ -117,7 +121,7 @@ def build_problem(args):
     with jax.default_device(jax.devices("cpu")[0]):
         n = int(args.duration * args.sampling_rate)
         freqs = np.fft.rfftfreq(n, d=1.0 / args.sampling_rate)
-        psd = drv.cosmic_explorer_psd(freqs)
+        psd = lalsim_psd("CE", freqs)
         dense = make_injection(
             IMRPhenomD(f_ref=args.f_min),
             truth,

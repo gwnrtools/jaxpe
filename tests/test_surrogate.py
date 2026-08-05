@@ -17,7 +17,7 @@ pytest.importorskip("gpry")
 
 import jax.numpy as jnp
 
-from jaxpe.gw import make_injection, spin_weighted_ylm
+from jaxpe.gw import analysis_grid, make_injection, spin_weighted_ylm
 from jaxpe.gw.external_models import ModesData, reflect_modes
 from jaxpe.gw.likelihood import (
     MarginalizedIntrinsicLikelihood,
@@ -150,8 +150,7 @@ class _FixedModesWaveform:
 
 @pytest.fixture(scope="module")
 def pseudo_blackbox():
-    n = int(DURATION * SR)
-    times = T_C + POST_TRIGGER - DURATION + np.arange(n) / SR
+    times = analysis_grid(T_C, DURATION, SR, POST_TRIGGER)[0]
 
     def mode_model(theta):
         return ModesData(
@@ -324,8 +323,7 @@ def esigma_blackbox():
     # practical argument for the Phase-2 multifidelity/ref-bounds step.
     bounds = {"chirp_mass": (29.5, 30.5), "eccentricity": (0.05, 0.11)}
     fixed_intr = dict(mass_ratio=0.9, mean_anomaly=0.3, spin1z=0.0, spin2z=0.0)
-    n = int(DURATION * SR)
-    times = T_C + POST_TRIGGER - DURATION + np.arange(n) / SR
+    times = analysis_grid(T_C, DURATION, SR, POST_TRIGGER)[0]
 
     # jit once over the intrinsic vector: ESIGMA is case-(1), so the pseudo-black-box
     # can afford a compiled mode generator (a real case-(2) model is plain Python)

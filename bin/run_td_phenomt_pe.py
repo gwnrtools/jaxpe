@@ -108,7 +108,7 @@ import numpy as np
 from jaxpe.core.priors import JointPrior, Uniform
 from jaxpe.core.problem import InferenceProblem
 from jaxpe.diagnostics.stats import effective_sample_size, split_rhat
-from jaxpe.gw import IMRPhenomT, make_injection
+from jaxpe.gw import IMRPhenomT, lalsim_psd, make_injection
 
 from jaxpe.kernels import (
     HMC,
@@ -165,25 +165,6 @@ def _make_kernel(name, step_size, *, n_leapfrog, friction, cov):
 
 
 # --------------------------------------------------------------------------- setup
-def cosmic_explorer_psd(freqs, flow: float = 5.0):
-    """CE P1600143 PSD on the uniform grid ``freqs`` via lalsimulation (series API).
-
-    Zero/undefined entries (f < flow and f = 0) are mapped to inf so that the
-    likelihood's band mask ignores them.
-    """
-    import lal
-    import lalsimulation as ls
-
-    freqs = np.asarray(freqs, float)
-    df = float(freqs[1] - freqs[0])
-    ser = lal.CreateREAL8FrequencySeries(
-        "psd", lal.LIGOTimeGPS(0), 0.0, df, lal.SecondUnit, freqs.size
-    )
-    ls.SimNoisePSDCosmicExplorerP1600143(ser, flow)
-    psd = np.asarray(ser.data.data, float)
-    return np.where(psd > 0.0, psd, np.inf)
-
-
 def eta_to_q(eta):
     """q = m2/m1 <= 1 from symmetric mass ratio; safe-where keeps grads finite at eta=1/4."""
     d2 = jnp.maximum(1.0 - 4.0 * eta, 0.0)
@@ -1077,7 +1058,7 @@ def main():
         t0 = time.perf_counter()
         n = int(args.duration * args.sampling_rate)
         freqs = np.fft.rfftfreq(n, d=1.0 / args.sampling_rate)
-        psd = cosmic_explorer_psd(freqs)
+        psd = lalsim_psd("CE", freqs)
         timings["psd"] = time.perf_counter() - t0
 
         t0 = time.perf_counter()
