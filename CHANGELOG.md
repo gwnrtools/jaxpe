@@ -20,6 +20,32 @@ Versions are derived from git tags by `setuptools-scm`.
   `("H1","L1")` and `("L1","H1")` gave H1 different data at the same seed — measured
   at a 130% relative change. Streams are now keyed by the detector's *name*.
 
+### Added
+
+- **`make_injections`** builds a whole suite of injections in one `vmap`, keeping
+  signal, projection and noise on the accelerator. Measured on 4 s @ 1024 Hz H1+L1:
+  the vectorised arithmetic alone is ~4x on CPU and ~6x on GPU at `n=256`, and
+  end-to-end against a loop over `make_injection` it is 28x at `n=64` on GPU
+  (173.5 s → 6.2 s) — though most of that larger margin is amortising
+  `make_injection`'s per-call `jax.jit` compilation rather than parallelism.
+
+  Deliberately scoped: this is for suites that are the product (training sets, banks,
+  systematics studies), **not** a speedup for validation campaigns, where injection
+  creation is a fraction of a percent of wall time. A batch needs one analysis grid,
+  so it cannot mix trigger times or durations, and oversized requests are refused
+  with an estimate — a 2048 s BNS segment is 67 MB per injection per detector.
+
+  Compare batched against serial by *mismatch* (~1e-9), not elementwise amplitude:
+  raw amplitudes differ at ~5e-5 because XLA fuses `IMRPhenomD` differently between
+  jit graphs. That predates this work and is unrelated to batching.
+
+- **`network_snr` and `distance_for_target_snr`**, replacing the
+  build-measure-rescale recipe open-coded at three sites. `h ∝ 1/D` exactly, so the
+  target is hit in one measurement with no search.
+
+- **`analysis_grid` and `resolve_f_max`**, one definition of the segment grid and of
+  the 90%-of-Nyquist convention, replacing five copies.
+
 ### Changed
 
 - **Noise generation moved to JAX** (`simulate_noise_fd_jax`), unifying the RNG with
@@ -41,6 +67,16 @@ Versions are derived from git tags by `setuptools-scm`.
   its bilby label. bilby resumes from a checkpoint keyed only by `label`, so a
   checkpoint computed against different data would previously have been resumed
   silently under the new likelihood.
+
+- `bin/run_bns_ce_pe.py`, `bin/run_td_phenomt_pe.py` and
+  `bin/profile_sampler_scaling.py` use `jaxpe.gw.lalsim_psd("CE", ...)` instead of a
+  `cosmic_explorer_psd` helper duplicated in the first two and loaded by file path in
+  the third. Verified bitwise identical at 8 s @ 2048 Hz and 2048 s @ 4096 Hz.
+
+- **`bin/run_td_phenomt_pe.py`: `--target-snr` no longer changes the analysis
+  window.** Its rescale rebuild passed `tukey_alpha=0.0` while the first build used
+  the 0.1 default, so requesting a target SNR silently altered the Tukey taper as
+  well as the distance. Both builds now share one hoisted keyword dict.
 
 ### Performance
 
