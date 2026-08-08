@@ -18,12 +18,21 @@ Then generate the DAG:
 
 This writes three submit-file templates (one per PE variant, each job = 1 PE run),
 a `smoke.dag` with just injection 0 of each variant (for the required single-job
-debug pass), and the full `campaign.dag` with all 300 PE jobs -- mutually
-independent (no PARENT/CHILD among themselves, since each only reads a
-pre-generated injection file) -- plus one final `POSTPROCESS` node in each DAG that
-runs `bin/postprocess_campaign.py` (corner-plot gallery, PP plots, HTML report)
-as a child of every PE job in that DAG, so it only runs once every PE run has
-finished (or failed).
+debug pass), the full `campaign.dag` with all 300 PE jobs -- mutually independent
+(no PARENT/CHILD among themselves, since each only reads a pre-generated injection
+file) -- plus one final `POSTPROCESS` node that runs `bin/postprocess_campaign.py`
+(corner-plot gallery, PP plots, HTML report) across all 3 tracks combined as a
+child of every PE job, so it only runs once every PE run has finished (or failed).
+
+It also writes one `campaign_<variant>.dag` per track (e.g. `campaign_phenomd_gpry.dag`),
+letting a track be submitted and run to completion independently of the others --
+useful when one track (phenomd_hmc, the only variant that isn't self-terminating via
+GPry's own convergence check) is much slower than the rest. Each of these carries its
+own `POSTPROCESS_<variant>` node (`postprocess_campaign.py --variants <variant>`) as a
+child of that track's own PE jobs, so that track's corner plots + PP plot get produced
+automatically as soon as its own runs finish, without waiting on the other two tracks --
+the part of postprocessing that doesn't involve cross-track comparison, which is all of
+it: build_report() already computes every variant's plots independently.
 """
 
 import argparse
@@ -117,7 +126,7 @@ queue
 
 POSTPROCESS_SUBMIT_TEMPLATE = """universe = vanilla
 executable = {executable}
-arguments = "--results-dir {results_dir} --outdir {report_dir}"
+arguments = "{arguments}"
 accounting_group = {accounting_group}
 getenv = True
 request_cpus = {request_cpus}
@@ -125,9 +134,9 @@ request_memory = {request_memory}
 request_disk = {request_disk}
 should_transfer_files = IF_NEEDED
 when_to_transfer_output = ON_EXIT
-log = {logs_dir}/postprocess.log
-output = {logs_dir}/postprocess.out
-error = {logs_dir}/postprocess.err
+log = {logs_dir}/{log_name}.log
+output = {logs_dir}/{log_name}.out
+error = {logs_dir}/{log_name}.err
 queue
 """
 
@@ -163,15 +172,46 @@ def write_postprocess_submit(args, condor_dir: Path, repo_root: Path, results_di
     logs_dir.mkdir(parents=True, exist_ok=True)
     sub_text = POSTPROCESS_SUBMIT_TEMPLATE.format(
         executable=executable,
-        results_dir=results_dir,
-        report_dir=report_dir,
+        arguments=f"--results-dir {results_dir} --outdir {report_dir}",
         accounting_group=args.accounting_group,
         request_cpus=2,
         request_memory="4GB",
         request_disk=args.request_disk,
         logs_dir=logs_dir,
+        log_name="postprocess",
     )
     sub_path = condor_dir / "postprocess.sub"
+    sub_path.write_text(sub_text)
+    return sub_path
+
+
+def write_track_postprocess_submit(
+    args, condor_dir: Path, repo_root: Path, results_dir: Path, report_dir: Path, variant: str
+) -> Path:
+    """Same aggregation job as write_postprocess_submit, restricted to one variant via
+    postprocess_campaign.py's own --variants flag. build_report() already computes every
+    variant's corner plots / PP plot independently -- there is no cross-track comparison
+    logic anywhere in that script today -- so --variants <one> is exactly "the part of
+    postprocessing that doesn't involve comparing tracks", not a reduced/different code
+    path. Its own report_dir subfolder keeps this from colliding with (or needing to wait
+    for) the full cross-track report the top-level POSTPROCESS node writes."""
+    executable = repo_root / "bin" / "condor" / "postprocess_job.sh"
+    logs_dir = condor_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    track_report_dir = report_dir / variant
+    sub_text = POSTPROCESS_SUBMIT_TEMPLATE.format(
+        executable=executable,
+        arguments=(
+            f"--results-dir {results_dir} --outdir {track_report_dir} --variants {variant}"
+        ),
+        accounting_group=args.accounting_group,
+        request_cpus=2,
+        request_memory="4GB",
+        request_disk=args.request_disk,
+        logs_dir=logs_dir,
+        log_name=f"postprocess_{variant}",
+    )
+    sub_path = condor_dir / f"postprocess_{variant}.sub"
     sub_path.write_text(sub_text)
     return sub_path
 
@@ -222,22 +262,29 @@ def write_dag(
     path.write_text("\n".join(lines) + "\n")
 
 
-def write_variant_dag(path: Path, variant: str, sub_path: Path, injections_dir, results_dir, indices, maxjobs):
-    """A single-variant DAG with no POSTPROCESS node -- lets one track (e.g. phenomd_gpry)
-    be submitted and run to completion independently of the other two, instead of every
-    track being bundled into one campaign.dag where a single slow track (phenomd_hmc, the
-    one PE variant that isn't self-terminating via GPry's own convergence check) blocks
-    submission of the other two entirely. Postprocessing stays a separate, manually-invoked
-    step (bin/postprocess_campaign.py already auto-discovers whatever variants/runs exist
-    under --results-dir, partial or complete) rather than being wired per-track here, since
-    the point of splitting is exactly to decouple each track's completion time from the
-    others' -- a per-track POSTPROCESS node would still need the other tracks' results to
-    produce the combined report this campaign wants."""
+def write_variant_dag(
+    path: Path, variant: str, sub_path: Path, injections_dir, results_dir, indices, maxjobs,
+    postprocess_sub: Path,
+):
+    """A single-variant DAG -- lets one track (e.g. phenomd_gpry) be submitted and run to
+    completion independently of the other two, instead of every track being bundled into
+    one campaign.dag where a single slow track (phenomd_hmc, the one PE variant that isn't
+    self-terminating via GPry's own convergence check) blocks submission of the other two
+    entirely. Its own POSTPROCESS_<variant> node (postprocess_campaign.py --variants
+    <variant>) runs as soon as this track's own PE jobs finish -- corner plots + that
+    track's PP plot, exactly the part of postprocessing build_report() already computes
+    independently per variant, with no cross-track comparison logic anywhere in that
+    script today. The combined-report POSTPROCESS node in campaign.dag (all 3 tracks) is
+    unaffected -- it's a separate node with its own submit file and outdir, not something
+    this one needs to wait for or feed into."""
     lines = [f"# Auto-generated by {Path(__file__).name}; do not edit by hand."]
     if maxjobs:
         lines.append(f"CONFIG {_write_dagman_config(path, maxjobs)}")
-    pe_lines, _ = dag_lines({variant: sub_path}, injections_dir, results_dir, indices)
+    pe_lines, job_names = dag_lines({variant: sub_path}, injections_dir, results_dir, indices)
     lines += pe_lines
+    node = f"POSTPROCESS_{variant}"
+    lines.append(f"JOB {node} {postprocess_sub}")
+    lines.append("PARENT " + " ".join(job_names) + f" CHILD {node}")
     path.write_text("\n".join(lines) + "\n")
 
 
@@ -307,19 +354,23 @@ def main():
 
     track_paths = {}
     for variant, sub_path in sub_paths.items():
+        track_postprocess_sub = write_track_postprocess_submit(
+            args, condor_dir, repo_root, results_dir, report_dir, variant
+        )
         track_path = condor_dir / f"campaign_{variant}.dag"
         write_variant_dag(
             track_path, variant, sub_path, injections_dir, results_dir,
             range(args.n_injections), maxjobs=args.track_maxjobs,
+            postprocess_sub=track_postprocess_sub,
         )
         track_paths[variant] = track_path
-        print(f"Wrote {track_path} ({args.n_injections} PE jobs, no POSTPROCESS -- run "
-              f"bin/postprocess_campaign.py manually once you want a report)")
+        print(f"Wrote {track_path} ({args.n_injections} PE jobs + 1 POSTPROCESS_{variant} "
+              f"job -> {report_dir / variant})")
 
     print("\nSubmit files:")
     for variant, sub_path in sub_paths.items():
         print(f"  {variant}: {sub_path}")
-    print(f"  postprocess: {postprocess_sub}  (report -> {report_dir})")
+    print(f"  postprocess (all 3 tracks combined): {postprocess_sub}  (report -> {report_dir})")
     print(f"\nSmoke test:  condor_submit_dag {smoke_path}")
     print(f"Full campaign, all 3 tracks bundled (after smoke test succeeds): "
           f"condor_submit_dag {full_path}")
