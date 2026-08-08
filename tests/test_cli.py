@@ -313,3 +313,43 @@ def test_cli_fd_gpry(tmp_path):
             f"({', '.join(wiring_errors)}) rather than a GPry convergence failure:\n"
             f"{result.stderr[-2000:]}"
         )
+
+
+@pytest.mark.cli
+def test_cli_esigma_gpry_marginalized_intrinsic(tmp_path):
+    """Plumbing test for the ESIGMA + marginalized_intrinsic + GPry CLI path.
+
+    Same acceptance criterion as test_cli_fd_gpry: GPry/UltraNest's own numerical
+    flakiness (unseedable, see that test's comment) is not this test's concern --
+    only that jaxpe hands GPry a usable marginalized-intrinsic likelihood, bounds
+    and options for an ESIGMA injection. A clean exit or a GPry/UltraNest failure
+    both pass; a jaxpe wiring error fails loudly.
+    """
+    pytest.importorskip("esigmapy")
+    outdir = tmp_path / "out"
+
+    cmd_gen = (
+        f"{sys.executable} -m jaxpe.cli generate-injections --fiducial "
+        f"--network H1,L1 --noise zero --psd aligo --n-injections 1 --outdir {outdir}"
+    )
+    run_command(cmd_gen)
+
+    cmd_pe = (
+        f"JAX_PLATFORMS=cpu {sys.executable} -m jaxpe.cli run-pe "
+        f"--injection {outdir}/inj_0.json "
+        f"--sampler gpry --waveform esigma --likelihood marginalized_intrinsic "
+        f"--outdir {outdir}"
+    )
+    result = subprocess.run(cmd_pe, shell=True, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        wiring_errors = [
+            name
+            for name in ("AttributeError", "TypeError", "NameError", "ImportError", "KeyError")
+            if f"{name}:" in result.stderr
+        ]
+        assert not wiring_errors, (
+            f"esigma gpry exited {result.returncode} with a jaxpe wiring error "
+            f"({', '.join(wiring_errors)}) rather than a GPry convergence failure:\n"
+            f"{result.stderr[-2000:]}"
+        )

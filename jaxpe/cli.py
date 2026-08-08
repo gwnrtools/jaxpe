@@ -20,12 +20,34 @@ import jax
 import jax.numpy as jnp
 
 jax.config.update("jax_enable_x64", True)
+# Every `jaxpe run-pe` invocation is a fresh process (no in-memory JIT cache carries
+# over between CLI calls, whether run locally or as separate HTCondor jobs), so
+# without a persistent, on-disk compilation cache every run pays full XLA compile
+# cost from scratch. Across a campaign of many runs sharing the same static shapes
+# (duration, sampling_rate, n_chains, GPry's inner-marginalization node counts) --
+# even though the physical parameter *values* differ, since JAX caches by
+# shape/dtype, not value -- this lets run N reuse what run 1 already compiled.
+# Matches the precedent in examples/05_esigma_injection.py.
+jax.config.update("jax_compilation_cache_dir", str(Path.home() / ".jaxpe"))
 
 from jaxpe import config as runconfig
 from jaxpe.config import ConfigError
 from jaxpe.core import InferenceProblem
-from jaxpe.gw import IMRPhenomD, IMRPhenomT, derive_noise_seed, make_injection
-from jaxpe.gw.likelihood import PhaseDistanceMarginalLikelihood
+from jaxpe.gw import (
+    ESIGMAInspiral,
+    IMRPhenomD,
+    IMRPhenomT,
+    analysis_grid,
+    derive_noise_seed,
+    distance_for_target_snr,
+    make_injection,
+)
+from jaxpe.gw.external_models import ModesData
+from jaxpe.gw.likelihood import (
+    MarginalizedIntrinsicLikelihood,
+    ModesNetworkLikelihood,
+    PhaseDistanceMarginalLikelihood,
+)
 from jaxpe.sampler import GlobalLocalConfig, Sampler, best_of_prior_init, PostProcessor
 from jaxpe.kernels import MALA, HMC
 from jaxpe.diagnostics.plots import corner_plot
@@ -92,6 +114,14 @@ def generate_injections(args):
     # Fail fast on an unusable PSD rather than at run-pe time.
     resolve_psd(args.psd)
 
+    if args.target_snr_range is not None:
+        snr_lo, snr_hi = args.target_snr_range
+        if not (0 < snr_lo < snr_hi):
+            raise ValueError(
+                f"--target-snr-range {args.target_snr_range} must satisfy "
+                f"0 < LOW < HIGH; got LOW={snr_lo}, HIGH={snr_hi}."
+            )
+
     # --fiducial emits one fixed binary. Emitting N copies of it is exactly the
     # "N identical files" behaviour this command used to have by accident, so refuse
     # rather than silently reproduce it.
@@ -123,12 +153,64 @@ def generate_injections(args):
     # Draws come from the same distribution objects the prior is built from, so an
     # injection.parameters section equal to prior draws exactly from the prior.
     keys = jax.random.split(jax.random.PRNGKey(seed), max(args.n_injections, 1))
+
+    # --target-snr-range replaces the prior's own distance draw with one solved to
+    # hit a target network SNR, but every other parameter must come out bit-for-bit
+    # identical to a plain (no-flag) run under the same seed -- so its draws use a
+    # key stream folded in from, not spliced into, the one above: reusing `keys`
+    # directly would shift every parameter drawn after luminosity_distance in
+    # PARAMETERS order onto a different subkey than an unflagged run gets.
+    snr_waveform = None
+    snr_keys = None
+    if args.target_snr_range is not None:
+        data_cfg = cfg["data"]
+        if args.target_snr_waveform == "esigma":
+            esigma_cfg = dict(cfg["esigma"])
+            esigma_cfg["modes"] = [tuple(m) for m in esigma_cfg["modes"]]
+            snr_waveform = ESIGMAInspiral(f_lower=data_cfg["f_min"], **esigma_cfg)
+        else:
+            snr_waveform = IMRPhenomD(f_ref=data_cfg["f_ref"])
+        snr_keys = jax.random.split(
+            jax.random.fold_in(jax.random.PRNGKey(seed), 0x53_4E_52),  # b"SNR"
+            max(args.n_injections, 1),
+        )
+
     for i in range(args.n_injections):
         injection_params = (
             runconfig.fiducial_injection(cfg)
             if args.fiducial
             else runconfig.sample_parameters(cfg, keys[i])
         )
+
+        target_snr = None
+        if snr_waveform is not None:
+            data_cfg = cfg["data"]
+            snr_lo, snr_hi = args.target_snr_range
+            target_snr = float(
+                jax.random.uniform(snr_keys[i], (), minval=snr_lo, maxval=snr_hi)
+            )
+            # Distance enters only as an overall 1/D amplitude (see
+            # distance_for_target_snr), so the placeholder distance this injection
+            # happened to draw doesn't matter -- any value gives the same solved
+            # answer. Must be zero-noise: optimal SNR is a template property, not
+            # something a noise-contaminated likelihood should be solved against.
+            ref_like = make_injection(
+                snr_waveform,
+                injection_params,
+                detector_names=args.network.split(","),
+                duration=data_cfg["duration"],
+                sampling_rate=data_cfg["sampling_rate"],
+                f_min=data_cfg["f_min"],
+                f_max=data_cfg["f_max"],
+                noise_seed=None,
+                post_trigger=data_cfg["post_trigger"],
+                tukey_alpha=data_cfg["tukey_alpha"],
+            )
+            params_j = {k: jnp.asarray(v) for k, v in injection_params.items()}
+            injection_params["luminosity_distance"] = float(
+                distance_for_target_snr(ref_like, params_j, target_snr)
+            )
+
         # Recorded so run-pe can default to the network/noise/PSD this set was
         # generated for. Popped before the dict is handed to the waveform model.
         #
@@ -145,14 +227,18 @@ def generate_injections(args):
             "noise_seed": derive_noise_seed(cfg["seeds"]["noise"], i),
             "fiducial": bool(args.fiducial),
         }
+        if target_snr is not None:
+            injection_params["metadata"]["target_snr"] = target_snr
+            injection_params["metadata"]["target_snr_waveform"] = args.target_snr_waveform
         ipath = outdir / f"inj_{i}.json"
         with open(ipath, "w") as f:
             json.dump(injection_params, f, indent=2)
+        snr_note = f", target SNR={target_snr:.1f}" if target_snr is not None else ""
         print(
             f"Saved {'fiducial ' if args.fiducial else ''}injection {i} to {ipath} "
             f"(Mc={injection_params['chirp_mass']:.2f}, "
             f"q={injection_params['mass_ratio']:.2f}, "
-            f"D={injection_params['luminosity_distance']:.0f} Mpc)"
+            f"D={injection_params['luminosity_distance']:.0f} Mpc{snr_note})"
         )
 
     # Drop the resolved configuration beside the set. run-pe picks this up as its
@@ -213,10 +299,20 @@ def run_pe(args):
         f"f_min={data_cfg['f_min']} Hz, f_ref={data_cfg['f_ref']} Hz"
     )
 
-    if args.domain == "fd":
+    if args.waveform == "esigma":
+        # f_lower comes from data.f_min (not a separate esigma.f_lower), so the
+        # ODE start frequency and the analysed band can never drift apart.
+        esigma_cfg = dict(cfg["esigma"])
+        esigma_cfg["modes"] = [tuple(m) for m in esigma_cfg["modes"]]
+        waveform = ESIGMAInspiral(f_lower=data_cfg["f_min"], **esigma_cfg)
+    elif args.waveform in ("auto", "phenomd") and args.domain == "fd":
         waveform = IMRPhenomD(f_ref=data_cfg["f_ref"])
-    elif args.domain == "td":
+    elif args.waveform in ("auto", "phenomt") and args.domain == "td":
         waveform = IMRPhenomT(f_ref=data_cfg["f_ref"])
+    elif args.waveform == "phenomd":
+        raise ValueError("--waveform phenomd requires --domain fd")
+    elif args.waveform == "phenomt":
+        raise ValueError("--waveform phenomt requires --domain td")
     else:
         raise ValueError(f"Unknown domain: {args.domain}")
 
@@ -252,11 +348,120 @@ def run_pe(args):
             "psi": injection_params.get("psi", 0.0),
             "inclination": injection_params.get("inclination", 0.0),
         }
+        # dist_bounds must span the run's actual distance prior, not the class's
+        # generic default (1000-8000 Mpc) -- a closer injection (this campaign's
+        # prior reaches down to 200 Mpc) would otherwise get its distance
+        # marginalized over a quadrature grid that never covers its true distance,
+        # silently producing a wrong (and, empirically, not just noisier but
+        # actively misleading) marginal likelihood over the intrinsic parameters.
+        dist_lo, dist_hi = prior_box["luminosity_distance"]
         like_callable = PhaseDistanceMarginalLikelihood(
-            like, names=names, fixed_ext=fixed_ext, check_params=injection_params
+            like,
+            names=names,
+            fixed_ext=fixed_ext,
+            check_params=injection_params,
+            dist_bounds=(dist_lo, dist_hi),
         )
         bounds_dict = {n: prior_box[n] for n in names}
 
+        def log_prob_fn(x):
+            return like_callable(x)
+
+    elif args.likelihood == "marginalized_intrinsic":
+        if args.sampler in ["hmc", "mala"]:
+            raise ValueError(
+                "marginalized_intrinsic is host-side and incompatible with HMC/MALA."
+            )
+        if not hasattr(waveform, "mode_dict"):
+            raise ValueError(
+                "marginalized_intrinsic requires a waveform exposing mode_dict() "
+                f"(e.g. --waveform esigma); got {type(waveform).__name__}."
+            )
+
+        names = ["chirp_mass", "mass_ratio", "spin1z", "spin2z"]
+        # Everything the mode model needs beyond the four intrinsic sampled names:
+        # a circular (non-eccentric) BBH fixes eccentricity/mean_anomaly at the
+        # injection's values (0.0 unless the injection carries them), and the
+        # coalescence time is pinned at the trigger -- t_c is one of the extrinsic
+        # parameters this likelihood marginalizes over, not a free intrinsic one.
+        fixed_intr = {
+            "eccentricity": injection_params.get("eccentricity", 0.0),
+            "mean_anomaly": injection_params.get("mean_anomaly", 0.0),
+        }
+        times = analysis_grid(
+            trigger, data_cfg["duration"], data_cfg["sampling_rate"], data_cfg["post_trigger"]
+        )[0]
+        times_j = jnp.asarray(times)
+
+        # jit once over the 4-vector: the surrogate calls this hundreds of times,
+        # and an unjitted ESIGMAInspiral call costs seconds (ODE retracing) instead
+        # of milliseconds -- see jaxpe/gw/cbc_models/esigma.py and
+        # tests/test_surrogate.py's esigma_blackbox fixture, which jits the same way.
+        @jax.jit
+        def _modes_jit(theta_vec):
+            p = dict(
+                chirp_mass=theta_vec[0],
+                mass_ratio=theta_vec[1],
+                spin1z=theta_vec[2],
+                spin2z=theta_vec[3],
+                geocent_time=jnp.asarray(trigger),
+                **{k: jnp.asarray(v) for k, v in fixed_intr.items()},
+            )
+            return waveform.mode_dict(p, times_j)
+
+        def mode_model(theta):
+            theta_vec = jnp.asarray([theta[n] for n in names])
+            md = _modes_jit(theta_vec)
+            return ModesData(
+                modes={lm: np.asarray(h) for lm, h in md.items()},
+                times=times,
+                d_ref_mpc=1.0,
+                t_ref=trigger,
+            )
+
+        md_true = mode_model({n: injection_params[n] for n in names})
+        like_modes = ModesNetworkLikelihood.from_likelihood(like, md_true)
+
+        dist_lo, dist_hi = prior_box["luminosity_distance"]
+        # +-0.1 s (the default prior's geocent_time half-width) expressed in
+        # samples at this run's sampling_rate, not the marginal-likelihood
+        # method's own default (which assumes 2048 Hz).
+        tc_half = max(1, round(runconfig.time_width(cfg) * data_cfg["sampling_rate"]))
+        # The class defaults (n_pilot=n_final=4096, n_phi=512, n_dist=128) measured
+        # ~1 minute *per L(theta_int) call* on this campaign's data length -- with
+        # GPry needing O(10-100s) calls that is impractical across 300 jobs. These
+        # leaner settings measured ~20 s/call (benchmarked directly against this
+        # waveform/data length, not guessed); effective_sample_size_floor +
+        # max_extra_importance_sampling_rounds let a genuinely hard intrinsic point
+        # still escalate to a larger budget automatically (the self-healing
+        # mechanism jaxpe/gw/likelihood/marginalized_intrinsic.py is built for),
+        # rather than paying the escalated cost on every call.
+        like_callable = MarginalizedIntrinsicLikelihood(
+            mode_model,
+            like_modes,
+            names=names,
+            t_center=trigger,
+            marginalize_sky=True,
+            settings=dict(
+                dist_min=dist_lo,
+                dist_max=dist_hi,
+                tc_half_samples=tc_half,
+                n_pilot=256,
+                n_final=256,
+                n_phi=128,
+                n_dist=32,
+            ),
+            effective_sample_size_floor=50.0,
+            max_extra_importance_sampling_rounds=2,
+            on_low_effective_sample_size="accept",
+        )
+        bounds_dict = {n: prior_box[n] for n in names}
+
+        # No explicit prior term is added on top (matching the
+        # marginalized_phase_distance branch above): correct only because
+        # chirp_mass/mass_ratio/spin1z/spin2z are uniform in this run's prior, so
+        # GPry's implicit flat prior over its bounds box is exact, not an
+        # approximation. A non-uniform intrinsic prior would need it added here.
         def log_prob_fn(x):
             return like_callable(x)
 
@@ -283,6 +488,11 @@ def run_pe(args):
     # Settings actually used, folded into run_config.json below so the artifact
     # reflects the run rather than the file it started from.
     effective = {}
+    # GPry-only: whether the run actually satisfied its convergence criterion or
+    # merely exhausted its budget/stopped early is otherwise invisible after the
+    # fact -- engine.run()'s diagnostics were being discarded. Surfaced here so a
+    # "clean exit" in run_config.json can be told apart from a false convergence.
+    gpry_diagnostics = None
 
     if args.sampler in ["hmc", "mala"]:
         kernel_cfg = cfg["kernel"][args.sampler]
@@ -395,6 +605,8 @@ def run_pe(args):
             ("gpry_max_total", "max_total"),
             ("gpry_max_initial", "max_initial"),
             ("gpry_acquisition", "acquisition"),
+            ("gpry_ref_bounds_rel", "ref_bounds_rel"),
+            ("gpry_ref_bounds_abs", "ref_bounds_abs"),
         ):
             value = getattr(args, flag)
             if value is not None:
@@ -435,17 +647,40 @@ def run_pe(args):
             "max_initial": gpry_cfg["max_initial"],
         }
         effective["gpry"] = {**gpry_cfg, "n_initial": n_initial}
+        engine_options = {
+            "seed": cfg["seeds"]["gpry"],
+            "ref_bounds": np.array(ref_bounds_arr),
+            "options": gpry_opts,
+        }
+        if args.gpry_noise_level is not None:
+            engine_options.setdefault("surrogate", {})["regressor"] = {
+                "kernel": "RBF",
+                "noise_level": args.gpry_noise_level,
+            }
+            effective["gpry"]["noise_level"] = args.gpry_noise_level
+        if args.gpry_svm_threshold is not None or args.gpry_trust_region_threshold is not None:
+            classifier = {}
+            if args.gpry_svm_threshold is not None:
+                classifier["svm"] = {"threshold": args.gpry_svm_threshold}
+                effective["gpry"]["svm_threshold"] = args.gpry_svm_threshold
+            if args.gpry_trust_region_threshold is not None:
+                classifier["trust_region"] = {
+                    "threshold": args.gpry_trust_region_threshold
+                }
+                effective["gpry"]["trust_region_threshold"] = (
+                    args.gpry_trust_region_threshold
+                )
+            engine_options.setdefault("surrogate", {})[
+                "infinities_classifier"
+            ] = classifier
         engine = GPryEngine(
             timed_loglike,
             bounds=bounds_dict,
             acquisition=gpry_cfg["acquisition"],
-            options={
-                "seed": cfg["seeds"]["gpry"],
-                "ref_bounds": np.array(ref_bounds_arr),
-                "options": gpry_opts,
-            },
+            options=engine_options,
         )
-        engine.run()
+        gpry_diagnostics = engine.run()
+        print(f"GPry diagnostics: {gpry_diagnostics}")
         res_gpry = engine.sample()
 
         # As for nested sampling: GPry samples the physical bounds box.
@@ -484,6 +719,7 @@ def run_pe(args):
         "sampler": args.sampler,
         "likelihood": args.likelihood,
         "domain": args.domain,
+        "waveform": args.waveform,
         "network": network,
         "noise": noise,
         "psd": psd_spec,
@@ -498,6 +734,8 @@ def run_pe(args):
         "weighted": args.sampler in ("ns", "gpry"),
         "config": resolved,
     }
+    if gpry_diagnostics is not None:
+        run_config["gpry_diagnostics"] = gpry_diagnostics
     with open(outdir / "run_config.json", "w") as f:
         json.dump(run_config, f, indent=2)
     print(f"Saved run configuration to {outdir / 'run_config.json'}")
@@ -686,6 +924,29 @@ def main():
         help="Emit the fixed reference binary from injection.fiducial instead of drawing; requires --n-injections 1",
     )
     parser_gen.add_argument(
+        "--target-snr-range",
+        type=float,
+        nargs=2,
+        default=None,
+        metavar=("LOW", "HIGH"),
+        help="Draw each injection's network SNR ~ Uniform(LOW, HIGH) under "
+        "--target-snr-waveform and solve luminosity_distance to hit it, overriding "
+        "the distance injection.parameters would otherwise draw. Every other "
+        "parameter (chirp_mass, mass_ratio, spins, sky location, ...) is drawn "
+        "exactly as without this flag -- same seed, same values -- only distance "
+        "changes, and by how much depends solely on the target SNR draw.",
+    )
+    parser_gen.add_argument(
+        "--target-snr-waveform",
+        type=str,
+        choices=["phenomd", "esigma"],
+        default="phenomd",
+        help="Waveform whose network SNR --target-snr-range targets (only meaningful "
+        "with --target-snr-range). Distance is a per-waveform quantity: the same "
+        "distance gives a different SNR under a different template, so pick "
+        "whichever variant's SNR floor this injection set needs to guarantee.",
+    )
+    parser_gen.add_argument(
         "--outdir", type=str, required=True, help="Output directory for injection data"
     )
     parser_gen.set_defaults(func=generate_injections)
@@ -714,16 +975,33 @@ def main():
     parser_run.add_argument(
         "--likelihood",
         type=str,
-        choices=["full", "marginalized_phase_distance"],
+        choices=["full", "marginalized_phase_distance", "marginalized_intrinsic"],
         default="full",
-        help="Likelihood form",
+        help=(
+            "Likelihood form. marginalized_phase_distance: closed-form 4-D marginal "
+            "for FD dominant-mode models. marginalized_intrinsic: 4-D marginal via "
+            "extrinsic importance sampling, for any waveform exposing mode_dict() "
+            "(e.g. --waveform esigma)."
+        ),
+    )
+    parser_run.add_argument(
+        "--waveform",
+        type=str,
+        choices=["auto", "phenomd", "phenomt", "esigma"],
+        default="auto",
+        help=(
+            "Waveform model. 'auto' selects PhenomD for --domain fd and PhenomT for "
+            "--domain td (the historical behavior). 'esigma' selects ESIGMAInspiral "
+            "(aligned-spin inspiral, esigma.* config section) regardless of --domain, "
+            "since its likelihood is evaluated in frequency domain either way."
+        ),
     )
     parser_run.add_argument(
         "--domain",
         type=str,
         choices=["td", "fd"],
         default="fd",
-        help="Integration domain (time or frequency)",
+        help="Integration domain (time or frequency); ignored when --waveform esigma",
     )
     parser_run.add_argument(
         "--network",
@@ -796,6 +1074,52 @@ def main():
             "analytic acquisition gradient, which uses far fewer surrogate evaluations "
             "per step but was measured slower end-to-end on this problem"
         ),
+    )
+    parser_run.add_argument(
+        "--gpry-ref-bounds-rel",
+        type=float,
+        default=None,
+        help="gpry: relative half-width (as a fraction of |truth|) of the box the "
+        "initial training points are drawn from around the injected truth; overrides "
+        "gpry.ref_bounds_rel. A fixed value is mismatched across a population of "
+        "injections spanning a wide SNR range -- the true posterior width scales as "
+        "~1/SNR, so a high-SNR injection needs a tighter box than a low-SNR one.",
+    )
+    parser_run.add_argument(
+        "--gpry-ref-bounds-abs",
+        type=float,
+        default=None,
+        help="gpry: absolute half-width floor (used when ref_bounds_rel*|truth| would "
+        "be smaller, e.g. for a parameter whose truth is near 0); overrides "
+        "gpry.ref_bounds_abs.",
+    )
+    parser_run.add_argument(
+        "--gpry-noise-level",
+        type=float,
+        default=None,
+        help="gpry: the GP regressor's own noise floor (default 1e-2). At high SNR "
+        "the log-likelihood's dynamic range can be very large relative to this "
+        "default, and the regression literature (e.g. the GPry LISA paper's "
+        "high-SNR SMBHB case) reports needing to raise this to avoid the GP "
+        "overfitting to local structure instead of resolving the true peak.",
+    )
+    parser_run.add_argument(
+        "--gpry-svm-threshold",
+        type=str,
+        default=None,
+        help="gpry: SVM infinities-classifier cutoff, e.g. '20s' (20 std. devs "
+        "below the best point). Raising it (more permissive) keeps more of the "
+        "space classified as worth evaluating; the LISA GPry paper raised this "
+        "for its high-SNR SMBHB case.",
+    )
+    parser_run.add_argument(
+        "--gpry-trust-region-threshold",
+        type=str,
+        default=None,
+        help="gpry: enables a TrustRegion infinities classifier at this cutoff "
+        "(e.g. '20s'), restricting acquisition to stay near the accumulated "
+        "training set. Unset by default (matches upstream); the LISA GPry paper "
+        "enabled this for its high-SNR SMBHB case.",
     )
     parser_run.add_argument(
         "--outdir", type=str, required=True, help="Output directory for PE results"
