@@ -827,24 +827,45 @@ def _solve_22_amplitude_coefficients(
     insp_amp_c = jnp.linalg.solve(A_insp, b_insp)
 
     # --- Merger amplitude coefficients: 4x4 solve ---
-    omega_at_tcut = _inspiral_omega_ansatz22(
-        _theta_of_t(phase_c["tcut22"], eta), phase_c["pn"], phase_c["insp_c"]
+    # Boundary is tCUT_Amp (-150.0, fixed -- amplitude's own boundary, distinct from the
+    # (2,2) frequency/phase boundary tcut22, which is eta-dependent, e.g. ~-108 at eta=0.25
+    # but many thousands more negative at small eta) evaluated through the FULL omega22
+    # dispatch (not the inspiral-only formula): LALSuite's own amplitude-coefficient solve
+    # does the same (IMRPhenomTomega22(tCUT_Amp,...), not the raw inspiral ansatz) precisely
+    # because tCUT_Amp can fall outside the (2,2) mode's own inspiral region at small eta,
+    # where its dispatch would otherwise select the merger/ringdown branch instead.
+    def _omega22_at(t):
+        return _omega22(
+            t,
+            eta,
+            phase_c["tcut22"],
+            phase_c["dtM"],
+            phase_c["pn"],
+            phase_c["insp_c"],
+            phase_c["alpha1RD"],
+            phase_c["omega_peak"],
+            phase_c["omega_ring"],
+            phase_c["domega_peak"],
+            phase_c["merger_c"],
+            phase_c["rd_c"],
+        )
+
+    t_cut_amp = jnp.asarray(
+        _T_CUT_AMP, dtype=eta.dtype if hasattr(eta, "dtype") else jnp.float64
     )
+    omega_at_tcut = _omega22_at(t_cut_amp)
     x_at_tcut = jnp.power(0.5 * omega_at_tcut, 2.0 / 3.0)
     amp_insp_at_cut = _inspiral_amp_ansatz_hm(x_at_tcut, amp_pn, insp_amp_c)
     ampinsp = jnp.sign(jnp.real(amp_insp_at_cut)) * jnp.abs(amp_insp_at_cut)
 
-    tau_cut = phase_c["tcut22"] - tpeak
+    tau_cut = t_cut_amp - tpeak
     sech1_cut = 1.0 / jnp.cosh(alpha1RD * tau_cut)
     sech2_cut = 1.0 / jnp.cosh(2.0 * alpha1RD * tau_cut)
     tau_cp = _T_MERGER_CP_AMP - tpeak
     sech1_cp = 1.0 / jnp.cosh(alpha1RD * tau_cp)
     sech2_cp = 1.0 / jnp.cosh(2.0 * alpha1RD * tau_cp)
 
-    theta_at_tcut_m1 = _theta_of_t(phase_c["tcut22"] - _FINITE_DIFF_H, eta)
-    omega_at_tcut_m1 = _inspiral_omega_ansatz22(
-        theta_at_tcut_m1, phase_c["pn"], phase_c["insp_c"]
-    )
+    omega_at_tcut_m1 = _omega22_at(t_cut_amp - _FINITE_DIFF_H)
     x_at_tcut_m1 = jnp.power(0.5 * omega_at_tcut_m1, 2.0 / 3.0)
     amp_insp_at_cut_m1 = _inspiral_amp_ansatz_hm(x_at_tcut_m1, amp_pn, insp_amp_c)
     amp_insp_signed_m1 = jnp.sign(jnp.real(amp_insp_at_cut_m1)) * jnp.abs(
