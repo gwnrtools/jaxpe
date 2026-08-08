@@ -19,6 +19,7 @@ from jaxpe.gw import (
     bbh_priors,
     gmst_from_gps,
     make_injection,
+    mismatch as _mismatch,
     mismatch_f32_f64,
     time_delay_from_geocenter,
     tukey_window,
@@ -494,7 +495,7 @@ def test_snr_targeting_ignores_the_noise_seed():
 
 
 def _psd_weighted_mismatch(like, a, b, det="H1"):
-    """1 - normalised overlap in the analysed band: the measure that matters.
+    """Thin wrapper around ``jaxpe.gw.mismatch`` for a jaxpe likelihood object.
 
     A max-relative amplitude comparison is misleading here. XLA fuses the waveform
     differently between jit graphs, so make_injections and make_injection can differ
@@ -502,13 +503,8 @@ def _psd_weighted_mismatch(like, a, b, det="H1"):
     -- the mismatch is ~1e-9 and lnL(truth) stays at ~1e-7.
     """
     band = (like.freqs >= like.f_min) & (like.freqs <= like.f_max)
-    df = like.freqs[1] - like.freqs[0]
-    psd = like.psds[det][band]
-
-    def inner(u, v):
-        return float(4.0 * df * np.sum((u[band] * np.conj(v[band]) / psd).real))
-
-    return 1.0 - inner(a, b) / np.sqrt(inner(a, a) * inner(b, b))
+    df = float(like.freqs[1] - like.freqs[0])
+    return float(_mismatch(a, b, like.psds[det], df, band=band))
 
 
 @pytest.mark.parametrize("model", ["fd", "td"])

@@ -27,6 +27,7 @@ from .detectors import (
 )
 from .external_models import ExternalModeModel, ModeCache, ModesData, reflect_modes
 from .harmonics import spin_weighted_ylm
+from .match import inner_product, match, mismatch
 from .likelihood import (
     BalanceHeuristicAccumulator,
     FDNetworkLikelihood,
@@ -57,6 +58,9 @@ __all__ = [
     "ToyChirpFDHM",
     "WaveformModel",
     "mismatch_f32_f64",
+    "inner_product",
+    "match",
+    "mismatch",
     "Detector",
     "DETECTORS",
     "antenna_pattern",
