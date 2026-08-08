@@ -261,23 +261,21 @@ def main():
     p.add_argument(
         "--maxjobs",
         type=int,
-        default=24,
+        default=0,
         help="DAGMAN_MAX_JOBS_SUBMITTED throttle for campaign.dag (all 3 tracks bundled). "
-        "Default 24: condor_status on this pool showed ~25-26 total nodes, almost all "
-        "static whole-node slots (one job = one whole node regardless of request_cpus), so "
-        "the real concurrency ceiling is the node count, not a cores/request_cpus ratio; 24 "
-        "leaves 1-2 nodes free for other users.",
+        "Default 0: no self-imposed cap -- the condor negotiator already does fair-share "
+        "scheduling across users on this shared pool, so an additional DAGMan-side throttle "
+        "just leaves nodes idle rather than protecting anything. Set explicitly (e.g. to "
+        "leave headroom for other users during a specific run) if ever needed.",
     )
     p.add_argument(
         "--track-maxjobs",
         type=int,
-        default=8,
+        default=0,
         help="DAGMAN_MAX_JOBS_SUBMITTED throttle for each of the 3 per-track "
-        "campaign_<variant>.dag files. Default 8 (x3 tracks = 24, matching --maxjobs' "
-        "total) assumes tracks may run concurrently as independent DAGMan processes -- "
-        "unlike campaign.dag's single throttle, nothing coordinates the sum across "
-        "separately-submitted DAGs, so this must already leave headroom on its own if "
-        "more than one track is submitted at the same time.",
+        "campaign_<variant>.dag files. Default 0: no cap, same reasoning as --maxjobs -- "
+        "let the condor scheduler's own fair-share allocation decide how many of this "
+        "pool's nodes each track actually gets, rather than pre-guessing a split.",
     )
     args = p.parse_args()
 
