@@ -23,7 +23,9 @@ The file is a nested JSON object with these sections, all optional::
       "ns":        { nlive, num_repeats, precision_criterion, nprior,
                      max_ncalls, verbosity },
       "gpry":      { n_initial, max_total, max_initial, acquisition,
-                     ref_bounds_rel, ref_bounds_abs }
+                     ref_bounds_rel, ref_bounds_abs },
+      "esigma":    { modes, rad_pn_order, mode_pn_order, ode_eps, n_ode_grid,
+                     max_ode_steps, taper_on_seconds, taper_off_seconds }
     }
 
 Anything omitted falls back to :data:`DEFAULT_CONFIG`. Merging is per-key and
@@ -282,6 +284,18 @@ DEFAULT_CONFIG: dict = {
         # half-width max(ref_bounds_rel * |truth|, ref_bounds_abs).
         "ref_bounds_rel": 0.01,
         "ref_bounds_abs": 0.1,
+    },
+    "esigma": {
+        # Forwarded directly to jaxpe.gw.ESIGMAInspiral (f_lower comes from
+        # data.f_min instead, so the two cannot drift apart).
+        "modes": [[2, 2], [3, 3]],
+        "rad_pn_order": 8,
+        "mode_pn_order": 8,
+        "ode_eps": 1e-7,
+        "n_ode_grid": 2048,
+        "max_ode_steps": 32768,
+        "taper_on_seconds": 0.05,
+        "taper_off_seconds": 0.02,
     },
 }
 
@@ -679,6 +693,7 @@ def validate_config(cfg: dict) -> list:
     prior_specs = _validate_distributions(cfg, errors, warnings)
     _validate_seeds_and_kernels(cfg, errors)
     _validate_budgets(cfg, errors, warnings)
+    _validate_esigma(cfg["esigma"], errors)
 
     if errors:
         raise ConfigError(_format(errors))
@@ -925,6 +940,27 @@ def _validate_budgets(cfg: dict, errors: list, warnings: list) -> None:
         )
     _positive(gp["ref_bounds_rel"], "gpry.ref_bounds_rel", errors, allow_zero=True)
     _positive(gp["ref_bounds_abs"], "gpry.ref_bounds_abs", errors, allow_zero=True)
+
+
+def _validate_esigma(esigma: dict, errors: list) -> None:
+    for key in ("rad_pn_order", "mode_pn_order", "n_ode_grid", "max_ode_steps"):
+        val = esigma[key]
+        if not isinstance(val, int) or val < 1:
+            errors.append(f"esigma.{key} must be an integer >= 1, got {val!r}")
+    _positive(esigma["ode_eps"], "esigma.ode_eps", errors)
+    _positive(esigma["taper_on_seconds"], "esigma.taper_on_seconds", errors, allow_zero=True)
+    _positive(esigma["taper_off_seconds"], "esigma.taper_off_seconds", errors, allow_zero=True)
+    modes = esigma["modes"]
+    if not isinstance(modes, list) or not modes:
+        errors.append(f"esigma.modes must be a non-empty list of [l, m] pairs, got {modes!r}")
+    else:
+        for pair in modes:
+            if (
+                not isinstance(pair, (list, tuple))
+                or len(pair) != 2
+                or not all(isinstance(v, int) for v in pair)
+            ):
+                errors.append(f"esigma.modes entries must be [l, m] integer pairs, got {pair!r}")
 
 
 def _advise_on_physics(cfg: dict, prior_specs: dict, warnings: list) -> None:
