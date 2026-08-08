@@ -1,0 +1,101 @@
+{
+  "_about": "300-run PE method-comparison campaign: PhenomD+HMC, PhenomD+Gpry (marginalized_phase_distance), ESIGMA+Gpry (marginalized_intrinsic), each on the same 100 zero-noise BBH injections. Component masses ~[10,80] Msun (expressed as chirp_mass/mass_ratio, the only mass parameterization the CLI's distribution language supports -- see production_bbh.json, whose chirp_mass=[10,80]/mass_ratio=[0.125,1.0] is this repo's own idiom for 'stellar-mass BBH 10-80 Msun'), aligned spins in [-0.5,0.5], f_lower=10 Hz, aLIGO ZeroDetHighPower PSD.",
+  "_costs": "duration=64s (not production_bbh.json's 8s) because f_min=10 Hz roughly doubles-to-6x the inspiral time of the lightest binary in the box vs. their 20 Hz cutoff: Mc=10, q=1 (the global minimum total mass ~=23 Msun in this box) takes ~30s to inspiral from 10 Hz, so 64s covers it with margin. Set to 64 rather than the tighter-fitting 40s specifically because it's a power of 2: duration*sampling_rate=131072=2^17 gets a pure radix-2 FFT in every PE likelihood call, vs 40s's 81920=2^14*5, which is mixed-radix and slower. sampling_rate=2048 Hz (Nyquist 1024 Hz) comfortably covers PhenomD's ringdown at that same lightest-total-mass corner; ESIGMA is inspiral-only so has no ringdown content at all. HMC sampler.* and gpry.* budgets below are starting points to be tuned against observed wall-clock during the single-job smoke test, not benchmarked optima.",
+
+  "data": {
+    "duration": 64.0,
+    "sampling_rate": 2048.0,
+    "f_min": 10.0,
+    "f_max": null,
+    "f_ref": 10.0,
+    "post_trigger": 2.0,
+    "tukey_alpha": 0.1
+  },
+
+  "prior": {
+    "_note": "Injections are drawn directly from this prior (injection.parameters below is identical), so every recovered parameter's prior is exactly the population it was drawn from, and every entry is uniform -- which is why the GPry likelihood branches in cli.py can skip adding an explicit prior term.",
+    "chirp_mass": { "dist": "uniform", "low": 10.0, "high": 80.0 },
+    "mass_ratio": { "dist": "uniform", "low": 0.125, "high": 1.0 },
+    "spin1z": { "dist": "uniform", "low": -0.5, "high": 0.5 },
+    "spin2z": { "dist": "uniform", "low": -0.5, "high": 0.5 },
+    "luminosity_distance": { "dist": "powerlaw", "alpha": 2.0, "low": 200.0, "high": 3000.0 },
+    "inclination": { "dist": "sine", "low": 0.0, "high": 3.141592653589793 },
+    "phase": { "dist": "uniform", "low": 0.0, "high": 6.283185307179586 },
+    "ra": { "dist": "uniform", "low": 0.0, "high": 6.283185307179586 },
+    "dec": { "dist": "cosine", "low": -1.5707963267948966, "high": 1.5707963267948966 },
+    "psi": { "dist": "uniform", "low": 0.0, "high": 3.141592653589793 },
+    "geocent_time": { "dist": "uniform", "low": -0.1, "high": 0.1, "relative_to_trigger": true }
+  },
+
+  "injection": {
+    "geocent_time": 1126259462.4,
+    "parameters": "prior",
+    "fiducial": {
+      "chirp_mass": 30.0,
+      "mass_ratio": 0.8,
+      "spin1z": 0.0,
+      "spin2z": 0.0,
+      "luminosity_distance": 700.0,
+      "inclination": 0.0,
+      "phase": 0.0,
+      "ra": 0.0,
+      "dec": 0.0,
+      "psi": 0.0
+    }
+  },
+
+  "seeds": {
+    "_note": "injection is fixed so all three PE variants share the same 100 injections; noise is unused (--noise zero).",
+    "injection": 20260807,
+    "noise": 20260807,
+    "sampler": 20260807,
+    "ns": 20260807,
+    "gpry": 20260807
+  },
+
+  "kernel": {
+    "hmc": { "step_size": 0.01, "n_leapfrog": 10 },
+    "mala": { "step_size": 0.01 }
+  },
+
+  "sampler": {
+    "_note": "Starting point for HMC; retune against observed CPU wall-clock in the smoke test.",
+    "n_chains": 128,
+    "n_prelim_loops": 1,
+    "n_training_loops": 8,
+    "n_production_loops": 50,
+    "n_local_steps": 100,
+    "n_global_steps": 50,
+    "local_thin": 5
+  },
+
+  "ns": {
+    "nlive": 1000,
+    "num_repeats": 5,
+    "precision_criterion": 0.01,
+    "nprior": null,
+    "max_ncalls": null,
+    "verbosity": 1
+  },
+
+  "gpry": {
+    "_note": "n_initial null -> GPry's own 3*n_dim (12 for the 4-D marginalized likelihoods used here). max_total/max_initial as production_bbh.json; retune in the smoke test.",
+    "n_initial": null,
+    "max_total": 2000,
+    "max_initial": 500,
+    "acquisition": null,
+    "ref_bounds_rel": 0.01,
+    "ref_bounds_abs": 0.1
+  },
+
+  "esigma": {
+    "modes": [[2, 2], [3, 3]],
+    "rad_pn_order": 8,
+    "mode_pn_order": 8,
+    "ode_eps": 1e-7,
+    "n_ode_grid": 2048,
+    "max_ode_steps": 32768,
+    "taper_on_seconds": 0.05,
+    "taper_off_seconds": 0.02
+  }
+}
