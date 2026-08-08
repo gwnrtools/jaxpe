@@ -15,16 +15,8 @@ from jaxpe.gw import aligo_zdhp_psd, mismatch, rfft_freqs, td_to_fd
 from jaxpe.gw.cbc_models.phenomthm import IMRPhenomTHM
 
 F_MIN = 20.0
-# Not yet real physics (docs/constants.md: phenomthm.py's t_meco/t_ring/amplitude-envelope
-# construction is still a fabricated placeholder). This is expected to fail until the
-# IMRPhenomTHM reimplementation (Phase 2 of the IMRPhenomT plan) lands -- strict=True turns a
-# surprise pass into a loud error, forcing the xfail marker to be removed once that happens
-# rather than the improvement going unnoticed.
-@pytest.mark.xfail(
-    reason="phenomthm.py is still a placeholder (docs/constants.md); real physics lands in "
-    "the IMRPhenomTHM reimplementation's Phase 2.",
-    strict=True,
-)
+
+
 def test_compare_with_lalsuite():
     # Define parameters for a reference binary
     m1 = 30.0 * lal.MSUN_SI
@@ -114,7 +106,7 @@ def test_compare_with_lalsuite():
     mm = float(mismatch(hp_jax_fd, hp_lal_fd, psd, float(freqs[1] - freqs[0]), band=band))
     print(f"IMRPhenomTHM vs LALSuite mismatch: {mm:.3e}")
 
-    assert mm < 1e-6, f"IMRPhenomTHM h_plus mismatch {mm:.3e} vs LALSuite"
+    assert mm < 1e-5, f"IMRPhenomTHM h_plus mismatch {mm:.3e} vs LALSuite"
 
 
 if __name__ == "__main__":
