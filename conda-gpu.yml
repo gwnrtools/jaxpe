@@ -7,4 +7,5 @@ dependencies:
   - lalsuite
   - pip:
       - "jax[cuda12]"
-      - -e .[dev,gwdata,surrogate]
+      - -e file:///home/prayush.kumar/src/esigmapy-dev
+      - -e .[dev,gwdata,surrogate,esigma]

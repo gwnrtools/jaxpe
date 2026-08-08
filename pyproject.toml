@@ -28,6 +28,7 @@ gw = ["ripplegw", "JaxNRSur"]
 postprocess = ["emcee"]
 gwdata = ["gwpy", "gwosc"]
 surrogate = ["gpry>=4.0,<5"]
+esigma = ["diffrax", "numba", "numbalsoda"]
 dev = ["pytest", "ruff", "black==24.10.0", "matplotlib", "corner", "ripplegw", "JaxNRSur", "emcee"]
 
 [tool.setuptools.packages.find]
