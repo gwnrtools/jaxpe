@@ -333,7 +333,21 @@ def run_pe(args):
         f"f_min={data_cfg['f_min']} Hz, f_ref={data_cfg['f_ref']} Hz"
     )
 
-    if args.waveform == "esigma":
+    if args.waveform == "phenomthm":
+        # IMRPhenomTHM's merger/ringdown reconstruction is still the placeholder flagged in
+        # docs/constants.md -- verified against LALSuite at mismatch ~0.8 (uncorrelated), not
+        # the ~1e-6 IMRPhenomT (the (2,2)-only reimplementation) achieves. Listed in --waveform
+        # for discoverability rather than hidden, but refuses to run rather than silently
+        # producing PE results from wrong physics. Remove this guard once IMRPhenomTHM's own
+        # reimplementation (the IMRPhenomT plan's Phase 2) lands and is LAL-validated.
+        raise ValueError(
+            "--waveform phenomthm is not yet physically validated (its merger/ringdown "
+            "reconstruction is a known placeholder, see docs/constants.md) and refuses to "
+            "run rather than silently produce PE results from wrong physics. Use "
+            "--waveform phenomt for the validated (2,2)-only model, or --domain td (with "
+            "--waveform auto/phenomt) if you need a time-domain dominant-mode model."
+        )
+    elif args.waveform == "esigma":
         # f_lower comes from data.f_min (not a separate esigma.f_lower), so the
         # ODE start frequency and the analysed band can never drift apart.
         esigma_cfg = dict(cfg["esigma"])
@@ -1023,13 +1037,19 @@ def main():
     parser_run.add_argument(
         "--waveform",
         type=str,
-        choices=["auto", "phenomd", "phenomt", "esigma"],
+        choices=["auto", "phenomd", "phenomt", "phenomthm", "esigma"],
         default="auto",
         help=(
             "Waveform model. 'auto' selects PhenomD for --domain fd and PhenomT for "
             "--domain td (the historical behavior). 'esigma' selects ESIGMAInspiral "
             "(aligned-spin inspiral, esigma.* config section) regardless of --domain, "
-            "since its likelihood is evaluated in frequency domain either way."
+            "since its likelihood is evaluated in frequency domain either way. "
+            "'phenomthm' selects IMRPhenomTHM (aligned-spin, modes (2,2),(2,1),(3,3),"
+            "(4,4),(5,5)) -- listed for discoverability, but currently refuses to run: "
+            "its merger/ringdown reconstruction is still a placeholder (verified "
+            "mismatch ~0.8, i.e. uncorrelated, against LALSuite), unlike --waveform "
+            "phenomt (the (2,2)-only reimplementation, LAL-validated to ~1e-6). "
+            "See docs/constants.md."
         ),
     )
     parser_run.add_argument(
