@@ -69,8 +69,15 @@ class PhaseDistanceMarginalLikelihood(IntrinsicLikelihood):
         The parameters held fixed at their true values: the sky (``ra``, ``dec``,
         ``psi``), ``inclination``, and any intrinsic parameter pinned in a given run
         (e.g. the spins in a non-spinning analysis).
-    dist_bounds, dist_power, d_ref, n_dist
-        Distance-prior quadrature settings: bounds (Mpc), the ``distance^power`` prior
+    dist_bounds
+        ``(low, high)`` Mpc span of the distance-quadrature grid. Required, with no
+        default: this must be the run's actual configured distance prior, not a
+        generic placeholder. A grid that doesn't cover the true distance silently
+        produces a wrong (not merely noisier) marginal likelihood over the intrinsic
+        parameters -- see ``docs/constants.md`` for the incident that made this
+        required rather than defaulted.
+    dist_power, d_ref, n_dist
+        Remaining distance-prior quadrature settings: the ``distance^power`` prior
         exponent (2.0 for a Euclidean/volume prior), the reference distance at which
         ``h_ref`` is evaluated, and the number of quadrature nodes.
     check_params
@@ -97,7 +104,7 @@ class PhaseDistanceMarginalLikelihood(IntrinsicLikelihood):
         names,
         fixed_ext,
         *,
-        dist_bounds=(1000.0, 8000.0),
+        dist_bounds,
         dist_power=2.0,
         d_ref=1000.0,
         n_dist=400,

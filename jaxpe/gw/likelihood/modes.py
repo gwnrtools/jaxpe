@@ -288,8 +288,8 @@ class ModesNetworkLikelihood(NetworkLikelihood):
         n_phi: int = 512,
         n_dist: int = 128,
         tc_half_samples: int = 205,
-        dist_min: float = 100.0,
-        dist_max: float = 5000.0,
+        dist_min: float,
+        dist_max: float,
         dist_power: float = 2.0,
         phi_batch: int = 32,
         modes_ab=None,
@@ -299,7 +299,12 @@ class ModesNetworkLikelihood(NetworkLikelihood):
         Priors: phi_c uniform on [0, 2pi); t_c uniform over the ``2*tc_half_samples+1``
         sample-grid nodes centered on ``params['geocent_time']`` (at 2048 Hz the
         default 205 samples is a +-0.1 s window); D_L with pi(D) \propto
-        D^{dist_power} on [dist_min, dist_max] Mpc.
+        D^{dist_power} on [dist_min, dist_max] Mpc. ``dist_min``/``dist_max`` are
+        required, with no library-side default: this must be the run's actual
+        configured distance prior, not a generic placeholder -- a grid that doesn't
+        cover the true distance silently produces a wrong (not merely noisier)
+        marginal likelihood. See ``docs/constants.md``; callers that want a sane
+        CLI-level fallback should use ``jaxpe.cli``'s, not bake one in here.
 
         Structure (design note section 3): the phi_c dependence is decomposed exactly
         into azimuthal harmonics (one FFT per distinct |m|, see
@@ -416,8 +421,8 @@ class ModesNetworkLikelihood(NetworkLikelihood):
         n_phi: int = 512,
         n_dist: int = 128,
         tc_half_samples: int = 205,
-        dist_min: float = 100.0,
-        dist_max: float = 5000.0,
+        dist_min: float,
+        dist_max: float,
         dist_power: float = 2.0,
         phi_batch: int = 32,
         ext_batch: int = 8,

@@ -62,7 +62,10 @@ class MarginalizedIntrinsicLikelihood(IntrinsicLikelihood):
         (production). False: (phi_c, t_c, D_L) only, at the fixed extrinsic angles
         in ``fixed_extrinsic`` -- cheaper; used by validation tests.
     settings
-        Keyword options forwarded to the marginal-likelihood methods.
+        Keyword options forwarded to the marginal-likelihood methods. Must include
+        ``dist_min``/``dist_max`` (Mpc) -- the run's actual configured distance
+        prior, with no library-side default (checked eagerly at construction; see
+        docs/constants.md).
 
     Attributes
     ----------
@@ -105,6 +108,19 @@ class MarginalizedIntrinsicLikelihood(IntrinsicLikelihood):
             "max_extra_rounds",
         ):
             self.settings.pop(owned, None)
+        # dist_min/dist_max are required (no default) on the underlying
+        # log_marginal_likelihood[_full] precisely so a run's distance-quadrature
+        # grid can never silently diverge from its configured distance prior (see
+        # docs/constants.md). Checked eagerly here so a settings dict missing them
+        # fails at construction, not on the first (possibly expensive) __call__.
+        missing = [k for k in ("dist_min", "dist_max") if k not in self.settings]
+        if missing:
+            raise ValueError(
+                f"MarginalizedIntrinsicLikelihood: settings is missing required "
+                f"{missing} -- these must come from the run's actual configured "
+                f"distance prior (e.g. cfg['prior']['luminosity_distance']), not a "
+                f"library-side default. See docs/constants.md."
+            )
         # self-healing: if a call's inner-marginal effective sample size is below
         # the floor after the base rounds, up to max_extra_importance_sampling_rounds
         # escalating rounds are added, with every batch recycled into the estimate

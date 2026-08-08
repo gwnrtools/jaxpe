@@ -13,6 +13,7 @@ Write a starting-point file with ``jaxpe write-config my_run.json``.
 
 import argparse
 import json
+import warnings
 from pathlib import Path
 import numpy as np
 
@@ -56,6 +57,39 @@ from jaxpe.diagnostics.plots import corner_plot
 # that run-pe inherits the physics the set was generated under without the user
 # having to pass --config twice.
 CONFIG_FILENAME = "config.json"
+
+# jaxpe.gw.likelihood.PhaseDistanceMarginalLikelihood/ModesNetworkLikelihood's
+# dist_bounds/dist_min/dist_max are REQUIRED arguments precisely so no library-side
+# default can silently diverge from a run's actual distance prior (see
+# docs/constants.md -- a run whose injections sat at 200 Mpc once got its distance
+# marginalized over a class default of 1000-8000 Mpc, silently producing a wrong,
+# not merely noisier, marginal likelihood). The CLI is the one place physical
+# choices are made, so the fallback lives here, and only fires for a degenerate
+# resolved prior box (e.g. a "fixed" distance spec, which is a nonsensical config
+# for a distance-marginalized likelihood in the first place) -- never silently
+# substituted for a real, deliberately-narrow user prior.
+DISTANCE_MARGINAL_BOUNDS_FALLBACK_MPC = (100.0, 8000.0)
+
+
+def _dist_bounds_for_marginalization(prior_box, name="luminosity_distance"):
+    """(low, high) Mpc for a distance-marginalized likelihood's quadrature grid.
+
+    Uses the run's own resolved prior box; falls back to
+    ``DISTANCE_MARGINAL_BOUNDS_FALLBACK_MPC`` (loudly, via warning) only if that box
+    is degenerate (near-zero width -- e.g. a "fixed" distance prior), since a
+    zero-width quadrature grid is unusable regardless of what produced it.
+    """
+    lo, hi = prior_box[name]
+    if hi - lo <= max(abs(lo), abs(hi)) * 1e-6:
+        warnings.warn(
+            f"{name} prior box ({lo}, {hi}) is degenerate for distance "
+            f"marginalization; falling back to "
+            f"{DISTANCE_MARGINAL_BOUNDS_FALLBACK_MPC} Mpc. Configure a real "
+            f"luminosity_distance prior range if this run should marginalize over "
+            f"distance."
+        )
+        return DISTANCE_MARGINAL_BOUNDS_FALLBACK_MPC
+    return (lo, hi)
 
 
 def load_run_config(path, *, inherit_from=None, label="configuration"):
@@ -348,13 +382,15 @@ def run_pe(args):
             "psi": injection_params.get("psi", 0.0),
             "inclination": injection_params.get("inclination", 0.0),
         }
-        # dist_bounds must span the run's actual distance prior, not the class's
-        # generic default (1000-8000 Mpc) -- a closer injection (this campaign's
-        # prior reaches down to 200 Mpc) would otherwise get its distance
-        # marginalized over a quadrature grid that never covers its true distance,
-        # silently producing a wrong (and, empirically, not just noisier but
-        # actively misleading) marginal likelihood over the intrinsic parameters.
-        dist_lo, dist_hi = prior_box["luminosity_distance"]
+        # dist_bounds must span the run's actual distance prior, not a generic
+        # placeholder -- a closer injection (this campaign's prior reaches down to
+        # 200 Mpc) would otherwise get its distance marginalized over a quadrature
+        # grid that never covers its true distance, silently producing a wrong (and,
+        # empirically, not just noisier but actively misleading) marginal likelihood
+        # over the intrinsic parameters. PhaseDistanceMarginalLikelihood requires
+        # dist_bounds (no library-side default) precisely to force this call site to
+        # supply it; see docs/constants.md.
+        dist_lo, dist_hi = _dist_bounds_for_marginalization(prior_box)
         like_callable = PhaseDistanceMarginalLikelihood(
             like,
             names=names,
@@ -422,7 +458,7 @@ def run_pe(args):
         md_true = mode_model({n: injection_params[n] for n in names})
         like_modes = ModesNetworkLikelihood.from_likelihood(like, md_true)
 
-        dist_lo, dist_hi = prior_box["luminosity_distance"]
+        dist_lo, dist_hi = _dist_bounds_for_marginalization(prior_box)
         # +-0.1 s (the default prior's geocent_time half-width) expressed in
         # samples at this run's sampling_rate, not the marginal-likelihood
         # method's own default (which assumes 2048 Hz).
