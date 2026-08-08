@@ -35,7 +35,7 @@ in the library · 🟢 fixed at the source.
 
 ## Worse than the bug we fixed
 
-### `IMRPhenomT` / `IMRPhenomTHM` are not real waveform models 🟡 `IMRPhenomT` fixed, `IMRPhenomTHM` still 🔴
+### `IMRPhenomT` / `IMRPhenomTHM` are not real waveform models 🟢 both fixed
 
 - `jaxpe/gw/cbc_models/phenomt.py` — **fixed.** `IMRPhenomT` (the dominant
   (2,2) mode) has been faithfully reimplemented against LALSuite's
@@ -57,33 +57,40 @@ in the library · 🟢 fixed at the source.
   convention (`phi = π/2 - phiRef` fed to the spin-weighted `Ylm`, not a
   separate per-mode `exp(i·m·phiRef)` rotation — the two aren't
   interchangeable away from face-on/edge-on).
-- `jaxpe/gw/cbc_models/phenomthm.py:65-77` — **still a placeholder, not yet
-  fixed.** Only the HM peak frequency/amplitude (`f_peak`, `a_peak`) come from
-  real calibrated fits; the inspiral/merger/ringdown envelope shapes are
-  invented constants (`t_meco=-10.0`, `t_ring=10.0`,
-  `amp_insp ∝ (-t)^-0.25/10`, `amp_merg ∝ exp(-0.01 t²)`,
-  `amp_rd ∝ exp(-0.1 t)`, `omega = f_peak*(1+tanh(t/10))`) that do not match
-  the real IMRPhenomTHM ansatz. Because the peak values *are* real, the
-  output looks physically grounded while the bulk of it isn't. The
-  IMRPhenomT reimplementation above reuses ~90% of what `IMRPhenomTHM` needs
-  (the amplitude ansatz is already mode-generic, not (2,2)-specific); the
-  remaining work is the 4 higher modes' merger/ringdown frequency+phase
-  ansätze and per-mode QNM substitution — see the IMRPhenomT plan's Phase 2.
-- `jaxpe/gw/cbc_models/phenomthm.py:62-63` — `fits.get(f"IMRPhenomT_..._{l}{m}",
-  0.1)`: a missing/mistyped mode key silently substitutes an arbitrary
-  geometric-units constant instead of raising `KeyError`. Currently dormant
-  (all keys exist today) but the same shape of landmine as everything else
-  here. Still open, tracked for Phase 2.
+- `jaxpe/gw/cbc_models/phenomthm.py` — **fixed (Phase 2).** The 4 higher
+  modes ((2,1),(3,3),(4,4),(5,5)) are now built from the real ansatz,
+  reusing Phase 1's (2,2) coefficient-solving machinery generalized to
+  arbitrary `(l,m)`: mode-specific PN amplitude coefficients
+  (`_pn_amp_coefficients`, transcribed from
+  `IMRPhenomTSetHMAmplitudeCoefficients`'s per-mode blocks), the same
+  merger/ringdown frequency+phase ansätze as the (2,2) mode with per-mode QNM
+  frequency/damping substitution (`_QNM_FRING`/`_QNM_FDAMP`/`_QNM_FDAMP_N2`),
+  and the fixed per-mode phase offsets (π/2, −π/2, π, π/2 for
+  (2,1)/(3,3)/(4,4)/(5,5)). Verified with real `tests/test_phenomthm.py`
+  assertions against LALSuite's `IMRPhenomTHM`: polarization-level mismatch
+  1.4e-10–2.5e-6 across the same parameter grid as `IMRPhenomT`, plus a
+  direct per-mode comparison against `SimIMRPhenomTHM_Modes` and an explicit
+  check that odd-`m` modes vanish exactly at the equal-mass/equal-spin
+  symmetry point (a real physical symmetry LALSuite itself enforces, not a
+  numerical coincidence). One latent Phase 1 bug was caught and fixed while
+  building this: `_solve_22_amplitude_coefficients` was evaluating the
+  merger-amplitude boundary frequency at the wrong point (the eta-dependent
+  `tcut22` via the inspiral-only ansatz, instead of the fixed `t=-150M` via
+  the full piecewise `_omega22` dispatch LALSuite actually uses) — fixed with
+  zero regression on the existing (2,2)-only test suite. Also caught and
+  fixed during Phase 2 itself: the odd-`m`-vanishes mask was initially
+  applied to all higher modes including the even `(4,4)`, zeroing it out
+  incorrectly at the symmetry point.
 
-`tests/test_lalsuite_comparison.py`'s shape-only assertion was also
-strengthened into a real mismatch assertion (marked `xfail(strict=True)`
-against the still-placeholder `IMRPhenomTHM`, so it will loudly demand the
-`xfail` marker's removal once Phase 2 lands rather than silently starting to
-pass unnoticed). New `tests/test_phenomd.py` gives `IMRPhenomD` (previously
-untested against LAL at all, despite being a careful, correct transcription)
-the same real-comparison treatment, and a new standalone `jaxpe/gw/match.py`
-(PSD-weighted mismatch/match, `jax.jit`/`jax.vmap`-composable) backs all of
-these instead of each test reinventing the comparison.
+`tests/test_lalsuite_comparison.py`'s `xfail(strict=True)` marker has been
+removed now that `IMRPhenomTHM` passes for real. New `tests/test_phenomd.py`
+gives `IMRPhenomD` (previously untested against LAL at all, despite being a
+careful, correct transcription) the same real-comparison treatment, and a
+new standalone `jaxpe/gw/match.py` (PSD-weighted mismatch/match,
+`jax.jit`/`jax.vmap`-composable) backs all of these instead of each test
+reinventing the comparison. `jaxpe/cli.py`'s `--waveform phenomthm` no
+longer refuses to run — it dispatches to the now-validated `IMRPhenomTHM`
+under `--domain td`, same as `--waveform phenomt`.
 
 ### The `dist_bounds` bug, unfixed at the source 🟢 fixed
 
