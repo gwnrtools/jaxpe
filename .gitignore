@@ -147,3 +147,5 @@ AGENTS.md
 /test_runs/
 /scratch/
 examples/output/*_FAST.npz
+/campaign/
+screenlog.*
